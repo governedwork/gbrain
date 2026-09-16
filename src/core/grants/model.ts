@@ -12,6 +12,8 @@ export interface ClientGrant {
   sourceId: string | null;
   federatedRead: string[];
   boundSlugPrefixes: string[] | null;
+  /** Phase 2.5 — holders this credential may ASSERT. NULL = legacy default ['world']; [] = deny-all. */
+  allowedTakeHolders: string[] | null;
   allowedOperations: string[] | null;
   boundTools: string[] | null;
   boundSourceId: string | null;
@@ -68,6 +70,7 @@ export function grantFromRow(row: Record<string, unknown>): ClientGrant {
     scopes: parseScopeString(nullable(row.scope) ?? ''),
     sourceId: nullable(row.source_id), federatedRead: stringArray(row.federated_read) ?? [],
     boundSlugPrefixes: legacyPrefixes, allowedOperations: stringArray(row.allowed_operations),
+    allowedTakeHolders: stringArray(row.allowed_take_holders),
     boundTools: stringArray(row.bound_tools), boundSourceId: nullable(row.bound_source_id),
     boundBrainId: normalizeGrantBrain(nullable(row.bound_brain_id)),
     // Only a missing COLUMN denotes the pre-split schema. Explicit NULL never

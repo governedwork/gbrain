@@ -26,6 +26,9 @@ export function parseRescopeGrantArgs(args: string[]): RescopeGrantArgs {
       case '--scopes': result.patch.scopes = parseScopeString(value.replaceAll(',', ' ')); assertAllowedScopes(result.patch.scopes); break;
       case '--bound-slug-prefixes': result.patch.boundSlugPrefixes = value === 'none' ? null : csv(value); break;
       case '--allowed-operations': result.patch.allowedOperations = csv(value); break;
+      // Phase 2.5 — 'none' clears the grant back to the legacy ['world']
+      // default; an explicit list grants exactly those holders.
+      case '--takes-holders': result.patch.allowedTakeHolders = value === 'none' ? null : csv(value); break;
       case '--bound-tools': result.patch.boundTools = csv(value); break;
       case '--bound-source': result.patch.boundSourceId = value; break;
       case '--bound-brain': result.patch.boundBrainId = value === 'current' || value === 'host' ? null : value; break;

@@ -832,6 +832,15 @@ export class GBrainOAuthProvider implements OAuthServerProvider {
       // column is NULL, the projection degraded, or the brain predates
       // the column.
       const boundRaw = row.bound_slug_prefixes;
+      // Phase 2.5 — HOLDER authority, read from the credential and from
+      // nothing else. Never inferred from source, slug, transport or agent
+      // status: those answer WHERE and WHICH NAMESPACE, this answers WHOSE
+      // interpretation may be asserted. Absent column / NULL leaves it
+      // undefined, and the dispatch site applies its fail-closed ['world'].
+      const holdersRaw = (row as Record<string, unknown>).allowed_take_holders;
+      const allowedTakeHolders = Array.isArray(holdersRaw)
+        ? holdersRaw.filter((h): h is string => typeof h === 'string')
+        : undefined;
       const boundSlugPrefixes = Array.isArray(boundRaw)
         ? (boundRaw as string[])
         : undefined;
@@ -883,6 +892,7 @@ export class GBrainOAuthProvider implements OAuthServerProvider {
         // v0.42.72.0: write fence — consumed by enforceClientSlugFence in
         // operations.ts on every direct slug-mutating write op.
         boundSlugPrefixes,
+        ...(allowedTakeHolders !== undefined ? { takesHoldersAllowList: allowedTakeHolders } : {}),
         ...(fenceProjectionDegraded ? { fenceProjectionDegraded: true } : {}),
         // WP4: per-client surface + operator-lock marker (amendment 19).
         ...(rowSurface !== undefined ? { surface: rowSurface } : {}),

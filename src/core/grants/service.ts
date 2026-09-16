@@ -27,7 +27,7 @@ export interface GrantMutationOptions {
   servingBrainId?: string;
 }
 export interface GrantMutationResult { before: ClientGrant; after: ClientGrant; revision: number; dryRun: boolean }
-const PATCH_FIELDS = new Set<keyof GrantPatch>(['scopes', 'sourceId', 'federatedRead', 'boundSlugPrefixes', 'allowedOperations', 'boundTools', 'boundSourceId', 'boundBrainId', 'delegatedSlugPrefixes', 'delegatedNamespace', 'boundMaxConcurrent', 'budgetUsdPerDay', 'surface', 'surfaceSetBy', 'tokenTtlSeconds', 'profile', 'repairReasons']);
+const PATCH_FIELDS = new Set<keyof GrantPatch>(['scopes', 'sourceId', 'federatedRead', 'boundSlugPrefixes', 'allowedTakeHolders', 'allowedOperations', 'boundTools', 'boundSourceId', 'boundBrainId', 'delegatedSlugPrefixes', 'delegatedNamespace', 'boundMaxConcurrent', 'budgetUsdPerDay', 'surface', 'surfaceSetBy', 'tokenTtlSeconds', 'profile', 'repairReasons']);
 export function assertGrantPatch(patch: GrantPatch): void {
   for (const key of Object.keys(patch)) {
     if (!PATCH_FIELDS.has(key as keyof GrantPatch)) throw new GrantError('invalid_grant', `Unknown grant field: ${key}`);
@@ -48,7 +48,7 @@ export async function insertClientGrant(sql: SqlQuery, grant: ClientGrant, metad
     WITH created AS (
       INSERT INTO oauth_clients (client_id, client_name, client_secret_hash, redirect_uris, grant_types,
         token_endpoint_auth_method, client_id_issued_at, scope, source_id, federated_read,
-        bound_slug_prefixes, allowed_operations, bound_tools, bound_source_id, bound_brain_id,
+        bound_slug_prefixes, allowed_take_holders, allowed_operations, bound_tools, bound_source_id, bound_brain_id,
         delegated_slug_prefixes, delegated_namespace, bound_max_concurrent, budget_usd_per_day,
         surface, surface_set_by, token_ttl, grant_profile, grant_revision, grant_repair_reasons)
       VALUES (${grant.clientId}, ${grant.clientName}, ${metadata.secretHash},
@@ -57,6 +57,7 @@ export async function insertClientGrant(sql: SqlQuery, grant: ClientGrant, metad
         ${metadata.authMethod}, ${metadata.issuedAt}, ${grant.scopes.join(' ')}, ${grant.sourceId},
         ARRAY(SELECT jsonb_array_elements_text(${JSON.stringify(grant.federatedRead)}::text::jsonb)),
         CASE WHEN ${grant.boundSlugPrefixes === null} THEN NULL ELSE ARRAY(SELECT jsonb_array_elements_text(${JSON.stringify(grant.boundSlugPrefixes ?? [])}::text::jsonb)) END,
+        CASE WHEN ${grant.allowedTakeHolders === null} THEN NULL ELSE ARRAY(SELECT jsonb_array_elements_text(${JSON.stringify(grant.allowedTakeHolders ?? [])}::text::jsonb)) END,
         CASE WHEN ${grant.allowedOperations === null} THEN NULL ELSE ARRAY(SELECT jsonb_array_elements_text(${JSON.stringify(grant.allowedOperations ?? [])}::text::jsonb)) END,
         CASE WHEN ${grant.boundTools === null} THEN NULL ELSE ARRAY(SELECT jsonb_array_elements_text(${JSON.stringify(grant.boundTools ?? [])}::text::jsonb)) END,
         ${grant.boundSourceId}, ${grant.boundBrainId},
@@ -119,6 +120,7 @@ export async function persistGrant(sql: SqlQuery, before: ClientGrant, after: Cl
         scope = ${after.scopes.join(' ')}, source_id = ${after.sourceId},
         federated_read = ARRAY(SELECT jsonb_array_elements_text(${JSON.stringify(after.federatedRead)}::text::jsonb)),
         bound_slug_prefixes = CASE WHEN ${after.boundSlugPrefixes === null} THEN NULL ELSE ARRAY(SELECT jsonb_array_elements_text(${JSON.stringify(after.boundSlugPrefixes ?? [])}::text::jsonb)) END,
+        allowed_take_holders = CASE WHEN ${after.allowedTakeHolders === null} THEN NULL ELSE ARRAY(SELECT jsonb_array_elements_text(${JSON.stringify(after.allowedTakeHolders ?? [])}::text::jsonb)) END,
         allowed_operations = CASE WHEN ${after.allowedOperations === null} THEN NULL ELSE ARRAY(SELECT jsonb_array_elements_text(${JSON.stringify(after.allowedOperations ?? [])}::text::jsonb)) END,
         bound_tools = CASE WHEN ${after.boundTools === null} THEN NULL ELSE ARRAY(SELECT jsonb_array_elements_text(${JSON.stringify(after.boundTools ?? [])}::text::jsonb)) END,
         bound_source_id = ${after.boundSourceId}, bound_brain_id = ${after.boundBrainId},

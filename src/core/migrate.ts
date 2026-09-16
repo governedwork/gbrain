@@ -6601,6 +6601,27 @@ CREATE TRIGGER minion_queue_protocol BEFORE INSERT OR UPDATE ON minion_jobs
       CREATE INDEX IF NOT EXISTS idx_takes_origin ON takes (origin);
     `,
   },
+  {
+    version: 151,
+    name: 'oauth_client_take_holder_grant',
+    idempotent: true,
+    // Phase 2.5 — HOLDER authority, separated from SOURCE and SLUG authority.
+    //
+    // A credential already answers "where may I write?" (source_id,
+    // federated_read) and "which namespace?" (bound_slug_prefixes). It had no
+    // way to answer "whose interpretation may I assert?", so an OAuth client
+    // could only ever write holder='world' — the fail-closed dispatch default.
+    // That makes `holder=brain` unexpressible through the production path, and
+    // `holder=brain` is exactly what an agent-authored take IS.
+    //
+    // NULL preserves every existing client byte-for-byte: dispatch still
+    // applies its ['world'] default. An explicit array grants exactly those
+    // holders; an explicit '{}' is deny-all. A client must never acquire a
+    // holder by being remote, source-bound, or an agent.
+    sql: `
+      ALTER TABLE oauth_clients ADD COLUMN IF NOT EXISTS allowed_take_holders text[];
+    `,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.length > 0
