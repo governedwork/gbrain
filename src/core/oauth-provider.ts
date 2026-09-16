@@ -837,7 +837,17 @@ export class GBrainOAuthProvider implements OAuthServerProvider {
       // status: those answer WHERE and WHICH NAMESPACE, this answers WHOSE
       // interpretation may be asserted. Absent column / NULL leaves it
       // undefined, and the dispatch site applies its fail-closed ['world'].
-      const holdersRaw = (row as Record<string, unknown>).allowed_take_holders;
+      // Read from `current_grant` — the whole client row as JSONB — not from a
+      // named column. The token-validation SELECT lists its client columns
+      // explicitly (`c.source_id, c.federated_read, c.bound_slug_prefixes`), so
+      // a new column is invisible to it until someone remembers to add it
+      // there. Sourcing from current_grant means the grant cannot be stored,
+      // displayed and silently ignored — which is exactly what happened on the
+      // first run of this control: the DB held {brain}, the CLI printed it, and
+      // the caller was still denied.
+      const grantRow = (row as Record<string, unknown>).current_grant as Record<string, unknown> | undefined;
+      const holdersRaw = (row as Record<string, unknown>).allowed_take_holders
+        ?? (grantRow && typeof grantRow === 'object' ? grantRow.allowed_take_holders : undefined);
       const allowedTakeHolders = Array.isArray(holdersRaw)
         ? holdersRaw.filter((h): h is string => typeof h === 'string')
         : undefined;
