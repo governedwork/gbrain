@@ -634,7 +634,8 @@ export function renderPagesBlock(
 }
 
 export function takesHitToTakeForPrompt(h: TakeHit | Take): {
-  page_slug: string; row_num: number; claim: string; kind: string;
+  page_slug: string; row_num: number | null; origin?: string; external_id?: string | null;
+  claim: string; kind: string;
   holder: string; weight: number; source?: string | null; since_date?: string | null;
 } {
   // TakeHit + Take share the slug/claim/kind/holder/weight surface.
@@ -642,6 +643,8 @@ export function takesHitToTakeForPrompt(h: TakeHit | Take): {
   return {
     page_slug: t.page_slug,
     row_num: t.row_num,
+    origin: (t as { origin?: string }).origin,
+    external_id: (t as { external_id?: string | null }).external_id ?? null,
     claim: t.claim,
     kind: t.kind,
     holder: t.holder,

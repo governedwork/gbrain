@@ -8,7 +8,9 @@
 export interface StaleTakeRow {
   take_id: number;
   page_slug: string;
-  row_num: number;
+  row_num: number | null;        // NULL for origin='db' (Phase 2.5 D2)
+  origin?: string;
+  external_id?: string | null;
   claim: string;
 }
 

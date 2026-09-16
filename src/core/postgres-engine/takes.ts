@@ -22,6 +22,7 @@ import type { SqlValue } from '../sql-query.ts';
 import { deriveResolutionTuple, finalizeScorecard } from '../takes-resolution.ts';
 import { normalizeWeightForStorage } from '../takes-fence.ts';
 import { buildTakeRows } from '../batch-rows.ts';
+import type { DbNativeTakeInput } from '../engine.ts';
 import { staleTakeRowToRow, takeRowToTake, takeHitRowToHit, tryParseEmbedding } from '../utils.ts';
 import { privatePagesFilterFragment } from '../search/private-visibility.ts';
 
@@ -90,6 +91,58 @@ async function _addTakesBatchOnce(deps: PgTakesDeps, rowsIn: TakeBatchInput[]): 
     );
     return result.length;
   }
+
+/**
+ * Phase 2.5 D2 — db-origin take upsert, keyed on `external_id`.
+ *
+ * Deliberately NOT routed through `addTakesBatch`: that path's conflict target
+ * is `(page_id, row_num)`, which is the MARKDOWN namespace. Reusing it would
+ * re-introduce exactly the coupling this model removes. `row_num` is left NULL
+ * and the DB's `takes_origin_rownum_ck` / `takes_origin_external_id_ck` refuse
+ * any row that mixes the two shapes.
+ */
+export async function upsertDbNativeTakes(
+  deps: PgTakesDeps,
+  rowsIn: DbNativeTakeInput[],
+): Promise<number> {
+  if (rowsIn.length === 0) return 0;
+  const rows = rowsIn.map(r => ({
+    page_id: r.page_id,
+    external_id: r.external_id,
+    claim: (r.claim ?? '').replace(/\0/g, ''),
+    kind: r.kind,
+    holder: r.holder,
+    weight: Math.min(1, Math.max(0, r.weight ?? 0.5)),
+    since_date: r.since_date ?? null,
+    until_date: r.until_date ?? null,
+    source: r.source ?? null,
+    active: r.active ?? true,
+  }));
+  const result = await deps.executeRawJsonb(
+    `INSERT INTO takes (page_id, row_num, claim, kind, holder, weight,
+                        since_date, until_date, source, active, origin, external_id)
+     SELECT v.page_id, NULL, v.claim, v.kind, v.holder, v.weight,
+            v.since_date, v.until_date, v.source, v.active, 'db', v.external_id
+     FROM jsonb_to_recordset(($1::jsonb)->'rows') AS v(
+       page_id int, external_id text, claim text, kind text, holder text,
+       weight real, since_date text, until_date text, source text, active boolean
+     )
+     ON CONFLICT (external_id) WHERE origin = 'db' DO UPDATE SET
+       claim      = EXCLUDED.claim,
+       kind       = EXCLUDED.kind,
+       holder     = EXCLUDED.holder,
+       weight     = EXCLUDED.weight,
+       since_date = EXCLUDED.since_date,
+       until_date = EXCLUDED.until_date,
+       source     = EXCLUDED.source,
+       active     = EXCLUDED.active,
+       updated_at = now()
+     RETURNING 1`,
+    [],
+    [{ rows }],
+  );
+  return result.length;
+}
 
   /**
    * v0.32.6 — batched per-page active-takes fetch (P1). One round-trip
@@ -334,7 +387,7 @@ export async function searchTakes(deps: PgTakesDeps, query: string, opts: Search
         ? sql`AND p.source_id = ${opts.sourceId}`
         : sql``;
     const rows = await sql`
-      SELECT t.id AS take_id, t.page_id, p.slug AS page_slug, t.row_num,
+      SELECT t.id AS take_id, t.page_id, p.slug AS page_slug, t.row_num, t.origin, t.external_id,
              t.claim, t.kind, t.holder, t.weight,
              word_similarity(${query}, t.claim)::real AS score
       FROM takes t
@@ -370,7 +423,7 @@ export async function searchTakesVector(
         ? sql`AND p.source_id = ${opts.sourceId}`
         : sql``;
     const rows = await sql`
-      SELECT t.id AS take_id, t.page_id, p.slug AS page_slug, t.row_num,
+      SELECT t.id AS take_id, t.page_id, p.slug AS page_slug, t.row_num, t.origin, t.external_id,
              t.claim, t.kind, t.holder, t.weight,
              (1 - (t.embedding <=> ${vec}::vector))::real AS score
       FROM takes t
@@ -417,7 +470,7 @@ export async function countStaleTakes(deps: PgTakesDeps): Promise<number> {
 export async function listStaleTakes(deps: PgTakesDeps): Promise<StaleTakeRow[]> {
     const sql = deps.sql;
     const rows = await sql`
-      SELECT t.id AS take_id, p.slug AS page_slug, t.row_num, t.claim
+      SELECT t.id AS take_id, p.slug AS page_slug, t.row_num, t.origin, t.external_id, t.claim
       FROM takes t
       JOIN pages p ON p.id = t.page_id
       WHERE t.active AND t.embedding IS NULL

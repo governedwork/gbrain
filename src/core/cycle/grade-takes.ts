@@ -249,6 +249,8 @@ export interface GradeTakesResult {
   takes_scanned: number;
   cache_hits: number;
   verdicts_written: number;
+  /** Phase 2.5 D2 — db-origin takes are not fence-addressable, so not auto-resolvable here. */
+  skipped_db_origin?: number;
   auto_applied: number;
   too_recent: number;
   budget_exhausted: boolean;
@@ -779,9 +781,18 @@ class GradeTakesPhase extends BaseCyclePhase {
       result.verdicts_written += 1;
 
       // Apply to canonical takes if eligible.
-      if (shouldApply && resolution) {
+      //
+      // Phase 2.5 D2 — `resolveTake` addresses a take by (page_id, row_num),
+      // which is the MARKDOWN address. A db-origin take has no row_num, so it
+      // is not auto-resolvable through this path. Skipping is the honest
+      // behaviour: the alternative is passing a coerced 0, which before the
+      // mapper fix would silently have resolved whatever sat at row 0.
+      const fenceRow = take.row_num;
+      if (shouldApply && resolution && fenceRow === null) {
+        result.skipped_db_origin = (result.skipped_db_origin ?? 0) + 1;
+      } else if (shouldApply && resolution && fenceRow !== null) {
         try {
-          await engine.resolveTake(take.page_id, take.row_num, resolution);
+          await engine.resolveTake(take.page_id, fenceRow, resolution);
           result.auto_applied += 1;
 
           // T11 / E4 — gstack-learnings coupling on incorrect / partial
@@ -795,7 +806,7 @@ class GradeTakesPhase extends BaseCyclePhase {
               event: {
                 takeId: take.id,
                 pageSlug: take.page_slug,
-                rowNum: take.row_num,
+                rowNum: fenceRow,
                 holder: take.holder,
                 claim: take.claim,
                 quality: recordedVerdict.verdict,

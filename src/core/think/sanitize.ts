@@ -80,7 +80,9 @@ export function sanitizeTakeForPrompt(claim: string): { text: string; matched: s
  */
 export interface TakeForPrompt {
   page_slug: string;
-  row_num: number;
+  row_num: number | null;        // NULL for origin='db' (Phase 2.5 D2)
+  origin?: string;
+  external_id?: string | null;
   claim: string;
   kind: string;
   holder: string;
@@ -99,7 +101,10 @@ export function renderTakesBlock(takes: TakeForPrompt[]): { rendered: string; sa
     if (t.since_date) meta.push(`since=${t.since_date}`);
     if (t.source) meta.push(`source="${String(t.source).replace(/"/g, '\\"').slice(0, 80)}"`);
     lines.push(
-      `<take id="${t.page_slug}#${t.row_num}" ${meta.join(' ')}>\n${text}\n</take>`,
+      // Phase 2.5 D2 — the id the model is shown must be an address that
+      // resolves. A db-origin take has no fence row; `#${null}` rendered as
+      // `#0`, which points at a different take or at nothing.
+      `<take id="${t.page_slug}${t.row_num == null ? `#db:${(t as { external_id?: string | null }).external_id ?? '?'}` : `#${t.row_num}`}" ${meta.join(' ')}>\n${text}\n</take>`,
     );
   }
   return { rendered: lines.join('\n\n'), sanitizedCount };

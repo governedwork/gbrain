@@ -159,7 +159,11 @@ export async function extractTakesFromFs(
     }
 
     if (opts.rebuild && !dryRun) {
-      await engine.executeRaw(`DELETE FROM takes WHERE page_id = $1`, [pageId]);
+      // Phase 2.5 D2 — rebuild owns the MARKDOWN namespace only. Unscoped, this
+      // deletes db-origin takes too: measured on a clone, an unpatched
+      // rebuild:true removed both db rows while reinserting the three fence
+      // rows, and reported success.
+      await engine.executeRaw(`DELETE FROM takes WHERE page_id = $1 AND origin = 'markdown'`, [pageId]);
     }
 
     result.pagesWithTakes++;
@@ -219,7 +223,8 @@ export async function extractTakesFromDb(
     if (takes.length === 0) continue;
 
     if (opts.rebuild && !dryRun) {
-      await engine.executeRaw(`DELETE FROM takes WHERE page_id = $1`, [page.id]);
+      // Same fence as the fs path above — see the note there.
+      await engine.executeRaw(`DELETE FROM takes WHERE page_id = $1 AND origin = 'markdown'`, [page.id]);
     }
 
     result.pagesWithTakes++;

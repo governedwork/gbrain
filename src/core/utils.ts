@@ -526,7 +526,14 @@ export function takeRowToTake(row: Record<string, unknown>): Take {
     id: Number(row.id),
     page_id: Number(row.page_id),
     page_slug: String(row.page_slug ?? ''),
-    row_num: Number(row.row_num),
+    // Phase 2.5 D2 — `Number(null)` is 0, so a db-origin take (which has NO
+    // fence row) surfaced as row 0 to every consumer of this mapper: the CLI
+    // printed `#0`, two different takes collided on it, and `takes_update --row 0`
+    // addressed nothing. NULL is the signal that a take is not fence-addressed;
+    // it must survive the mapping.
+    row_num: row.row_num == null ? null : Number(row.row_num),
+    origin: (row.origin as string | undefined) ?? 'markdown',
+    external_id: (row.external_id as string | null | undefined) ?? null,
     claim: String(row.claim),
     kind: row.kind as string,
     holder: String(row.holder),
@@ -562,7 +569,9 @@ export function takeHitRowToHit(row: Record<string, unknown>): TakeHit {
     take_id: Number(row.take_id),
     page_id: Number(row.page_id),
     page_slug: String(row.page_slug ?? ''),
-    row_num: Number(row.row_num),
+    row_num: row.row_num == null ? null : Number(row.row_num),
+    origin: (row.origin as string | undefined) ?? 'markdown',
+    external_id: (row.external_id as string | null | undefined) ?? null,
     claim: String(row.claim),
     kind: row.kind as TakeKind,
     holder: String(row.holder),
@@ -580,7 +589,9 @@ export function staleTakeRowToRow(row: Record<string, unknown>): StaleTakeRow {
   return {
     take_id: Number(row.take_id),
     page_slug: String(row.page_slug ?? ''),
-    row_num: Number(row.row_num),
+    row_num: row.row_num == null ? null : Number(row.row_num),
+    origin: (row.origin as string | undefined) ?? 'markdown',
+    external_id: (row.external_id as string | null | undefined) ?? null,
     claim: String(row.claim),
   };
 }

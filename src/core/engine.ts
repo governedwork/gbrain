@@ -259,12 +259,37 @@ export interface TakeBatchInput {
   active?: boolean;         // default true
 }
 
+/**
+ * Phase 2.5 D2 — a take written to Postgres directly, owned by the database
+ * rather than by a markdown fence.
+ *
+ * It carries NO row_num: `takes_page_row_key UNIQUE (page_id, row_num)` still
+ * belongs to the fence (and `synthesis_evidence` still references it), and NULLs
+ * are distinct in a unique constraint, so a db-origin row cannot collide with a
+ * fence row however long the fence grows. Identity is `external_id` — stable,
+ * caller-supplied, and independent of insertion order.
+ */
+export interface DbNativeTakeInput {
+  page_id: number;
+  external_id: string;      // stable identity; unique among origin='db' rows
+  claim: string;
+  kind: TakeKind;
+  holder: string;
+  weight?: number;
+  since_date?: string;
+  until_date?: string;
+  source?: string;
+  active?: boolean;
+}
+
 /** Take row as returned by listTakes / searchTakes. */
 export interface Take {
   id: number;
   page_id: number;
   page_slug: string;        // joined from pages
-  row_num: number;
+  row_num: number | null;   // NULL for origin='db' — no fence position
+  origin?: string;          // 'markdown' | 'db' (Phase 2.5 D2)
+  external_id?: string | null;  // stable identity for origin='db'
   claim: string;
   kind: TakeKind;
   holder: string;
@@ -318,7 +343,9 @@ export interface TakeHit {
   take_id: number;
   page_id: number;
   page_slug: string;
-  row_num: number;
+  row_num: number | null;       // NULL for origin='db' (Phase 2.5 D2)
+  origin?: string;
+  external_id?: string | null;
   claim: string;
   kind: TakeKind;
   holder: string;
@@ -1802,6 +1829,13 @@ export interface BrainEngine {
    * for parser validation upstream.
    */
   addTakesBatch(rows: TakeBatchInput[], opts?: BatchOpts): Promise<number>;
+
+  /**
+   * Phase 2.5 D2 — upsert db-origin takes by `external_id`. Idempotent by
+   * identity, not by ordering: re-running the same input updates in place and
+   * never appends. Returns the number of rows written.
+   */
+  upsertDbNativeTakes?(rows: DbNativeTakeInput[]): Promise<number>;
 
   /** Persist embeddings for active take rows; inactive rows are ignored. */
   updateTakeEmbeddings(rows: TakeEmbeddingInput[], opts?: BatchOpts): Promise<number>;

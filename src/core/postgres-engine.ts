@@ -4502,6 +4502,10 @@ export class PostgresEngine implements BrainEngine {
     };
   }
 
+  async upsertDbNativeTakes(rowsIn: import('./engine.ts').DbNativeTakeInput[]): Promise<number> {
+    return takesImpl.upsertDbNativeTakes(this.takesDeps, rowsIn);
+  }
+
   async addTakesBatch(rowsIn: TakeBatchInput[], opts?: BatchOpts): Promise<number> {
     return takesImpl.addTakesBatch(this.takesDeps, rowsIn, opts);
   }

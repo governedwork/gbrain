@@ -5,6 +5,7 @@
  * in ../operations.ts. Never import from '../operations.ts' here (cycle).
  */
 
+import { createHash } from 'node:crypto';
 import { OperationError, type Operation, type OperationContext } from './contract.ts';
 import {
   readPolicyOpts,
@@ -333,6 +334,113 @@ async function opBrainDir(ctx: OperationContext): Promise<string> {
   return dir;
 }
 
+/**
+ * Phase 2.5 D2 — write a db-origin take.
+ *
+ * `external_id` is the identity. When the caller does not supply one it is
+ * derived from (slug, claim) so that re-running the same logical write is a
+ * no-op; the alternative — falling back to insertion order — is precisely the
+ * ordering-dependent identity this model removes.
+ */
+async function addDbNativeTake(
+  ctx: OperationContext,
+  slug: string,
+  p: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const holder = p.holder as string;
+  const allow = takesWriteAllowList(ctx);
+  if (allow && !allow.includes(holder)) {
+    const e = new OperationError('permission_denied',
+      `holder '${holder}' is not in this caller's takes-holder allow-list.`,
+      "Ask the brain owner to widen this caller's takes-holder allow-list.");
+    e.detail = 'holder_not_in_allowlist';
+    throw e;
+  }
+  // Scoped to the caller's write source on purpose. The repo-walk helper in
+  // extract-takes.ts looks a page up by slug alone; here the take must attach to
+  // the page in the source this client actually writes to, or a slug that exists
+  // in two sources would silently anchor to the wrong one.
+  const pageRows = await ctx.engine.executeRaw<{ id: number }>(
+    `SELECT id FROM pages WHERE slug = $1 AND source_id = $2 AND deleted_at IS NULL LIMIT 1`,
+    [slug, ctx.sourceId ?? 'default'],
+  );
+  const pageId = pageRows[0]?.id;
+  if (pageId === undefined) {
+    throw new OperationError('page_not_found', `Page not found: ${slug}`, 'Check the slug/source.');
+  }
+  const claim = p.claim as string;
+  const externalId = (p.external_id as string | undefined)
+    ?? `auto:${createHash('sha256').update(`${slug}\u0000${claim}`).digest('hex').slice(0, 32)}`;
+  if (typeof ctx.engine.upsertDbNativeTakes !== 'function') {
+    const e = new OperationError('unavailable',
+      'This engine has no DB-native take path.',
+      'Postgres only in Phase 2.5.');
+    e.detail = 'db_native_takes_unsupported';
+    throw e;
+  }
+  await ctx.engine.upsertDbNativeTakes([{
+    page_id: pageId,
+    external_id: externalId,
+    claim,
+    kind: p.kind as never,
+    holder,
+    weight: p.weight as number | undefined,
+    since_date: p.since as string | undefined,
+    source: p.source as string | undefined,
+  }]);
+  return {
+    slug, origin: 'db', external_id: externalId, holder,
+    row_num: null, mirror_written: false,
+    note: 'db-origin take: no markdown written, page not re-chunked',
+  };
+}
+
+/**
+ * Phase 2.5 D2 — mutate a db-origin take addressed by `external_id`.
+ *
+ * `active: false` is the retirement path. GBrain's take model revises rather
+ * than deletes (`active`, `superseded_by`, `resolved_*`), so a "delete" that
+ * removed the row would discard the calibration record the model is built on.
+ * A genuine hard delete still exists — it follows the page, via the existing
+ * ON DELETE CASCADE.
+ */
+async function updateDbNativeTake(
+  ctx: OperationContext,
+  slug: string,
+  p: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const externalId = p.external_id as string;
+  const rows = await ctx.engine.executeRaw<{ id: number; holder: string }>(
+    `SELECT t.id, t.holder FROM takes t
+      JOIN pages pg ON pg.id = t.page_id
+     WHERE t.origin = 'db' AND t.external_id = $1 AND pg.slug = $2 AND pg.source_id = $3`,
+    [externalId, slug, ctx.sourceId ?? 'default'],
+  );
+  const row = rows[0];
+  // A fenced row presents as not_found, matching the markdown path's
+  // no-existence-leak contract.
+  const allow = takesWriteAllowList(ctx);
+  if (!row || (allow && !allow.includes(row.holder))) {
+    throw new OperationError('not_found', `No db-origin take '${externalId}' on ${slug}.`);
+  }
+  const sets: string[] = [];
+  const args: unknown[] = [];
+  const push = (frag: string, val: unknown) => { args.push(val); sets.push(`${frag} = $${args.length}`); };
+  if (p.weight !== undefined) push('weight', Math.min(1, Math.max(0, p.weight as number)));
+  if (p.source !== undefined) push('source', p.source);
+  if (p.since !== undefined) push('since_date', p.since);
+  if (p.active !== undefined) push('active', p.active);
+  if (sets.length === 0) {
+    throw new OperationError('invalid_params', 'Nothing to update.', 'Pass weight, source, since or active.');
+  }
+  args.push(row.id);
+  await ctx.engine.executeRaw(
+    `UPDATE takes SET ${sets.join(', ')}, updated_at = now() WHERE id = $${args.length}`,
+    args,
+  );
+  return { slug, origin: 'db', external_id: externalId, updated: sets.length, mirror_written: false };
+}
+
 function mapTakesWriteError(err: unknown): never {
   if (err instanceof TakesWriteError) {
     switch (err.code) {
@@ -398,6 +506,7 @@ const takes_add: Operation = {
     weight: { type: 'number', required: false, description: 'Confidence 0..1 (default 0.5; clamped server-side).' },
     source: { type: 'string', required: false, description: 'Where the claim came from (free text).' },
     since: { type: 'string', required: false, description: "When the belief started ('YYYY-MM' or 'YYYY-MM-DD')." },
+    external_id: { type: 'string', required: false, description: 'Phase 2.5 D2 — stable identity for a DB-origin take. Supplying it makes the write idempotent by identity rather than by ordering. Required shape on a Postgres-canonical brain with no markdown repo; derived from (slug, claim) when omitted.' },
   },
   scope: 'write',
   mutating: true,
@@ -407,6 +516,16 @@ const takes_add: Operation = {
     enforceClientSlugFence(ctx, slug, 'takes_add');
     validatePageSlug(slug); // defense-in-depth, matching put_page
     if (ctx.dryRun) return { dry_run: true, action: 'takes_add', slug };
+
+    // Phase 2.5 D2 — a Postgres-canonical brain has no markdown to be canonical.
+    // Before this branch the op threw `takes_mirror_unavailable`, which made the
+    // canonical model's take destination unexecutable on the very storage class
+    // 03 §1 chose for `personal`. The DB-origin path writes no markdown, so it
+    // cannot rewrite or re-chunk the page.
+    const repoDir = await resolveTakesRepoDir(ctx.engine);
+    if (!repoDir) {
+      return await addDbNativeTake(ctx, slug, p);
+    }
     const brainDir = await opBrainDir(ctx);
     try {
       const { rowNum, mirror } = await addTakeToPage(
@@ -436,10 +555,12 @@ const takes_update: Operation = {
     'allow-list; other rows present as not_found.',
   params: {
     slug: { type: 'string', required: true, description: 'Page slug.' },
-    row_num: { type: 'number', required: true, description: 'Take row number on the page (from takes_list).' },
+    row_num: { type: 'number', required: false, description: 'Take row number on the page (from takes_list). Markdown-origin takes only.' },
+    external_id: { type: 'string', required: false, description: 'Phase 2.5 D2 — address a DB-origin take by its stable identity instead of a fence row number.' },
     weight: { type: 'number', required: false, description: 'New confidence 0..1.' },
     source: { type: 'string', required: false, description: 'New source text.' },
     since: { type: 'string', required: false, description: "New since date ('YYYY-MM' or 'YYYY-MM-DD')." },
+    active: { type: 'boolean', required: false, description: 'Phase 2.5 D2 — DB-origin only. false retires the take (GBrain revises rather than deletes; a hard delete follows its page).' },
   },
   scope: 'write',
   mutating: true,
@@ -449,6 +570,19 @@ const takes_update: Operation = {
     enforceClientSlugFence(ctx, slug, 'takes_update');
     validatePageSlug(slug); // defense-in-depth, matching put_page
     if (ctx.dryRun) return { dry_run: true, action: 'takes_update', slug, row_num: p.row_num };
+
+    // Phase 2.5 D2 — a DB-origin take has no fence row to address, so it is
+    // addressed by identity. Deliberately a separate branch rather than a
+    // widened row_num: the two namespaces stay disjoint at the API as well as
+    // in the schema.
+    if (p.external_id !== undefined) {
+      return await updateDbNativeTake(ctx, slug, p);
+    }
+    if (p.row_num === undefined) {
+      throw new OperationError('invalid_params',
+        'takes_update needs row_num (markdown-origin) or external_id (db-origin).',
+        'Use takes_list to find the row number, or pass the external_id you wrote with.');
+    }
     const brainDir = await opBrainDir(ctx);
     try {
       const { rowNum, mirror } = await updateTakeOnPage(

@@ -32,11 +32,29 @@ import { assertEmbeddingEnabled } from '../core/embedding-dim-check.ts';
 import { loadConfig } from '../core/config.ts';
 import { embedQuery } from '../core/embedding.ts';
 import {
+
   listPendingProposals,
   acceptProposal,
   rejectProposal,
   TakeProposalError,
 } from '../core/take-proposals.ts';
+
+/**
+ * Phase 2.5 D2 — how a take is ADDRESSED, printed.
+ *
+ * A markdown-origin take is `#<row_num>`: its position in the page's fence.
+ * A db-origin take has no fence position, and printing its NULL row_num
+ * rendered every one of them as `#0` — which reads as a row number, collides
+ * between takes, and is not an address anything accepts. It is addressed by
+ * `external_id`, so that is what is shown.
+ */
+function takeHandle(t: { row_num?: number | null; origin?: string | null; external_id?: string | null }): string {
+  if (t.origin === 'db' || t.row_num === null || t.row_num === undefined) {
+    return `#db:${t.external_id ?? '?'}`;
+  }
+  return `#${t.row_num}`;
+}
+
 
 // --- Helpers ---
 
@@ -188,7 +206,7 @@ async function cmdList(engine: BrainEngine, args: string[]): Promise<void> {
     const since = t.since_date ?? '';
     const src = t.source ? ` — ${t.source}` : '';
     const where = slug ? '' : `${t.page_slug} `;
-    console.log(`${where}#${t.row_num} [${t.kind} • ${t.holder} • w=${w}${since ? ` • ${since}` : ''}]${tag}\n  ${t.claim}${src}\n`);
+    console.log(`${where}${takeHandle(t as never)} [${t.kind} • ${t.holder} • w=${w}${since ? ` • ${since}` : ''}]${tag}\n  ${t.claim}${src}\n`);
   }
 }
 
@@ -221,7 +239,7 @@ async function cmdSearch(engine: BrainEngine, args: string[]): Promise<void> {
   }
   for (const h of hits) {
     const score = Number(h.score).toFixed(2);
-    console.log(`${h.page_slug}#${h.row_num} [${h.kind} • ${h.holder} • w=${Number(h.weight).toFixed(2)} • s=${score}]\n  ${h.claim}\n`);
+    console.log(`${h.page_slug}${takeHandle(h as never)} [${h.kind} • ${h.holder} • w=${Number(h.weight).toFixed(2)} • s=${score}]\n  ${h.claim}\n`);
   }
 }
 

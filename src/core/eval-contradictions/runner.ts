@@ -194,8 +194,13 @@ async function generateIntraPagePairs(
     if (takes.length === 0) continue;
     const chunkMember = searchResultToMember(r);
     for (const t of takes) {
+      // Phase 2.5 D2 — the contradiction member identity is (page_slug, row_num).
+      // A db-origin take has no row_num; giving it one would fabricate an
+      // address. Excluded from this eval until the member identity carries
+      // origin, recorded as a Phase 2.5 limitation rather than papered over.
+      if (t.row_num === null) continue;
       const takeMember = takeToMember(
-        t,
+        t as typeof t & { row_num: number },
         chunkMember.source_tier,
         chunkMember.effective_date,
         chunkMember.effective_date_source,

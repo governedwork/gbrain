@@ -6551,6 +6551,56 @@ CREATE TRIGGER minion_queue_protocol BEFORE INSERT OR UPDATE ON minion_jobs
   FOR EACH ROW EXECUTE FUNCTION enforce_minion_queue_protocol();
     `,
   },
+  {
+    version: 150,
+    name: 'db_native_take_origin',
+    idempotent: true,
+    // Phase 2.5 D2 — a take states WHO OWNS IT, and the two owners occupy
+    // disjoint namespaces.
+    //
+    // `takes_page_row_key UNIQUE (page_id, row_num)` is deliberately NOT
+    // touched. It is a CONSTRAINT (not a bare index) and `synthesis_evidence`
+    // holds a composite FOREIGN KEY onto that exact pair, so replacing it with
+    // a wider key would need CASCADE and would destroy the link between a
+    // synthesis and the takes it cited. Postgres also cannot point a foreign
+    // key at a PARTIAL unique index, so "keep a partial unique for markdown"
+    // does not rescue it either. Both facts were found by running the earlier
+    // design against a clone, not by reading the source.
+    //
+    // So db-origin rows carry NO row_num at all. NULLs are distinct in a unique
+    // constraint, which means an unlimited number of db-origin takes coexist
+    // with any markdown fence and a fence can never grow into one. Collision
+    // stops being something to avoid by allocation — there is no number to
+    // pick. It also leaves the unpatched v0.50.0.0 `ON CONFLICT (page_id,
+    // row_num)` target resolvable, which is what makes mixed-version operation
+    // viable while production is still on the old binary.
+    sql: `
+      ALTER TABLE takes ALTER COLUMN row_num DROP NOT NULL;
+      ALTER TABLE takes ADD COLUMN IF NOT EXISTS origin text NOT NULL DEFAULT 'markdown';
+      ALTER TABLE takes ADD COLUMN IF NOT EXISTS external_id text;
+
+      ALTER TABLE takes DROP CONSTRAINT IF EXISTS takes_origin_values;
+      ALTER TABLE takes ADD CONSTRAINT takes_origin_values
+        CHECK (origin IN ('markdown','db'));
+
+      -- markdown <=> has a fence row number. Both directions, so neither
+      -- owner can drift into the other's shape.
+      ALTER TABLE takes DROP CONSTRAINT IF EXISTS takes_origin_rownum_ck;
+      ALTER TABLE takes ADD CONSTRAINT takes_origin_rownum_ck
+        CHECK ((origin = 'markdown') = (row_num IS NOT NULL));
+
+      -- db <=> carries a stable external identity. A db-origin row without one
+      -- would be addressable only by its surrogate id, which is exactly the
+      -- ordering-dependent identity this model exists to remove.
+      ALTER TABLE takes DROP CONSTRAINT IF EXISTS takes_origin_external_id_ck;
+      ALTER TABLE takes ADD CONSTRAINT takes_origin_external_id_ck
+        CHECK ((origin = 'db') = (external_id IS NOT NULL));
+
+      CREATE UNIQUE INDEX IF NOT EXISTS takes_external_id_key
+        ON takes (external_id) WHERE origin = 'db';
+      CREATE INDEX IF NOT EXISTS idx_takes_origin ON takes (origin);
+    `,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.length > 0
