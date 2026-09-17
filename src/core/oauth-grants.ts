@@ -6,6 +6,7 @@ import type { OAuthTokens } from '@modelcontextprotocol/sdk/shared/auth.js';
 import { InvalidClientError, InvalidGrantError, InvalidRequestError, ServerError, TooManyRequestsError } from '@modelcontextprotocol/sdk/server/auth/errors.js';
 import type { SqlQuery } from './sql-query.ts';
 import { generateToken, hashToken } from './utils.ts';
+import { credentialBelongsTo, identityResolver, mintCredential } from './brain-identity.ts';
 import { hasScope, parseScopeString } from './scope.ts';
 import { intersectGrantedScopes } from './grants/model.ts';
 import { safeHexEqual } from './timing-safe.ts';
@@ -65,17 +66,27 @@ export class OAuthConsentError extends Error {
 
 export class OAuthGrants {
   private readonly pending = new Map<string, PendingAuthorization>();
+  private readonly brainId: () => Promise<string | null>;
   constructor(private readonly options: {
     sql: SqlQuery;
     transaction?: OAuthTransaction;
     tokenTtl: number;
     refreshTtl: number;
     now?: () => number;
-  }) {}
+    /** Shared with the provider so one database has one memoised identity. */
+    brainId?: () => Promise<string | null>;
+  }) {
+    this.brainId = options.brainId ?? identityResolver(options.sql);
+  }
 
   private now(): number { return (this.options.now ?? Date.now)(); }
   private async locked<T>(clientId: string, fn: (sql: SqlQuery, row: ClientRow) => Promise<T>): Promise<T> {
     if (!this.options.transaction) throw new ServerError('OAuth grant transactions are unavailable');
+    // Every grant passes through here, so this is the one place a client minted
+    // in another brain's name is refused. Resolved BEFORE the transaction opens:
+    // the mints inside it then read the memoised identity instead of querying
+    // through a second handle while the transaction holds the connection.
+    if (!credentialBelongsTo(clientId, await this.brainId())) throw new InvalidClientError('Invalid client');
     return this.options.transaction(async sql => {
       const [row] = await sql`SELECT * FROM oauth_clients WHERE client_id = ${clientId} FOR UPDATE`;
       assertActive(row);
@@ -154,7 +165,7 @@ export class OAuthGrants {
       const code = await this.locked(pending.details.clientId, async (sql, row) => {
         if (pending.details.expiresAt <= this.now()) throw new OAuthConsentError(410, 'authorization_expired', 'This request expired. Restart the connection from your client.');
         if (policyDigest(row) !== pending.policy) throw new OAuthConsentError(409, 'client_policy_changed', 'Client permissions changed. Restart the connection and review the new request.');
-        const code = generateToken('gbrain_code_');
+        const code = mintCredential('gbrain_code_', await this.brainId());
         await sql`
           INSERT INTO oauth_codes (code_hash, client_id, scopes, code_challenge,
             code_challenge_method, redirect_uri, state, resource, expires_at)
@@ -260,12 +271,12 @@ export class OAuthGrants {
     const override = Number(client.token_ttl);
     const ttl = Number.isFinite(override) && override > 0 ? override : this.options.tokenTtl;
     const now = Math.floor(this.now() / 1000);
-    const access = generateToken('gbrain_at_');
+    const access = mintCredential('gbrain_at_', await this.brainId());
     await sql`INSERT INTO oauth_tokens (token_hash, token_type, client_id, scopes, expires_at, resource)
       VALUES (${hashToken(access)}, ${'access'}, ${clientId}, ${oauthPgArray(scopes)}, ${now + ttl}, ${resource?.toString() ?? null})`;
     const result: OAuthTokens = { access_token: access, token_type: 'bearer', expires_in: ttl, scope: scopes.join(' ') };
     if (refresh) {
-      const token = generateToken('gbrain_rt_');
+      const token = mintCredential('gbrain_rt_', await this.brainId());
       await sql`INSERT INTO oauth_tokens (token_hash, token_type, client_id, scopes, expires_at, resource)
         VALUES (${hashToken(token)}, ${'refresh'}, ${clientId}, ${oauthPgArray(scopes)}, ${now + this.options.refreshTtl}, ${resource?.toString() ?? null})`;
       result.refresh_token = token;
