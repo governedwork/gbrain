@@ -131,7 +131,7 @@ describe('a brain refuses credentials minted in another brain\'s name', () => {
 });
 
 describe('serving identity', () => {
-  const env = (v?: string) => ({ GBRAIN_BRAIN_ID: v });
+  const env = (v?: string) => ({ GBRAIN_SERVE_IDENTITY: v });
 
   test('the database and the process must agree, in both directions', async () => {
     const h = sqlQueryForEngine(host.engine);
@@ -145,6 +145,13 @@ describe('serving identity', () => {
     // a tenant process pointed at a DIFFERENT tenant's database
     await expect(resolveServingIdentity(a, env('bob'))).rejects.toThrow(/refusing to serve/);
     await expect(resolveServingIdentity(h, env('host'))).rejects.toThrow(/not a valid brain id/);
+  });
+
+  test('the cross-check does not read GBRAIN_BRAIN_ID, which selects a mounted brain', async () => {
+    const a = sqlQueryForEngine(alice.engine);
+    // Setting the mount selector must neither satisfy nor break the identity check.
+    await expect(resolveServingIdentity(a, { GBRAIN_BRAIN_ID: 'alice' })).rejects.toThrow(/refusing to serve/);
+    expect(await resolveServingIdentity(a, { GBRAIN_BRAIN_ID: 'host', GBRAIN_SERVE_IDENTITY: 'alice' })).toBe('alice');
   });
 
   test('a malformed stored identity is refused, never read as "host"', async () => {

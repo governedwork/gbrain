@@ -20,7 +20,7 @@
  * WHERE THE IDENTITY LIVES: in the database (`config.brain_id`), not in the
  * process. A process-level setting would let a backend pointed at the wrong
  * database mint credentials in the wrong name; the database cannot be wrong
- * about itself. `GBRAIN_BRAIN_ID` in the serving process is a CROSS-CHECK —
+ * about itself. `GBRAIN_SERVE_IDENTITY` in the serving process is a CROSS-CHECK —
  * `resolveServingIdentity` refuses to serve when the two disagree in either
  * direction, which is what catches "the host process was pointed at a
  * tenant's database" and "a tenant process was pointed at the host's".
@@ -109,14 +109,17 @@ export async function resolveServingIdentity(
   env: Record<string, string | undefined> = process.env,
 ): Promise<string | null> {
   const stored = await readBrainIdentity(sql);
-  const declared = env.GBRAIN_BRAIN_ID === undefined || env.GBRAIN_BRAIN_ID === '' ? null : env.GBRAIN_BRAIN_ID;
+  // NOT `GBRAIN_BRAIN_ID`: that name already selects a MOUNTED brain for every CLI
+  // command (core/brain-resolver.ts), so reusing it made `gbrain jobs smoke` inside
+  // a tenant container go looking for a mount called <brain-id> and fail.
+  const declared = env.GBRAIN_SERVE_IDENTITY === undefined || env.GBRAIN_SERVE_IDENTITY === '' ? null : env.GBRAIN_SERVE_IDENTITY;
   if (declared !== null && !isValidBrainId(declared)) {
-    throw new BrainIdentityError(`GBRAIN_BRAIN_ID=${JSON.stringify(declared)} is not a valid brain id`);
+    throw new BrainIdentityError(`GBRAIN_SERVE_IDENTITY=${JSON.stringify(declared)} is not a valid brain id`);
   }
   if (stored !== declared) {
     throw new BrainIdentityError(
       `refusing to serve: this database is brain ${stored === null ? '(host — no identity)' : JSON.stringify(stored)} ` +
-        `but the process declares ${declared === null ? '(host — GBRAIN_BRAIN_ID unset)' : JSON.stringify(declared)}. ` +
+        `but the process declares ${declared === null ? '(host — GBRAIN_SERVE_IDENTITY unset)' : JSON.stringify(declared)}. ` +
         `Serving a database under the wrong identity would mint credentials in the wrong brain's name.`,
     );
   }
