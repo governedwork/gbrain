@@ -27,6 +27,7 @@ import type { OAuthRegisteredClientsStore } from '@modelcontextprotocol/sdk/serv
 import type { AuthInfo as SdkAuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 import { InvalidTokenError, InvalidClientMetadataError, InvalidClientError, InvalidGrantError } from '@modelcontextprotocol/sdk/server/auth/errors.js';
 import { hashToken, generateToken, isUndefinedColumnError } from './utils.ts';
+import { credentialBelongsTo, identityResolver, mintCredential } from './brain-identity.ts';
 import {
   hasScope,
   assertAllowedScopes,
@@ -316,9 +317,15 @@ class GBrainClientsStore implements OAuthRegisteredClientsStore {
     private allowClientCredentialsDcr: boolean,
     private dcrTtlMin: number,
     private dcrTtlMax: number,
+    private brainId: () => Promise<string | null>,
   ) {}
 
   async getClient(clientId: string): Promise<OAuthClientInformationFull | undefined> {
+    // A client minted in another brain's name does not exist HERE, even if its
+    // row does (a database seeded from another brain's dump). Answering
+    // "no such client" routes every caller — the SDK's token and authorize
+    // handlers, verifyConfidentialClientSecret — to its own refusal path.
+    if (!credentialBelongsTo(clientId, await this.brainId())) return undefined;
     const rows = await this.sql`
       SELECT client_id, client_secret_hash, client_name, redirect_uris,
              grant_types, scope, token_endpoint_auth_method,
@@ -418,7 +425,7 @@ class GBrainClientsStore implements OAuthRegisteredClientsStore {
       asClientMetadataError(err);
     }
 
-    const clientId = generateToken('gbrain_cl_');
+    const clientId = mintCredential('gbrain_cl_', await this.brainId());
     // v0.34.1 (#909): RFC 7591 §2 — clients that authenticate at the token
     // endpoint via PKCE alone declare `token_endpoint_auth_method: "none"`.
     // For those clients the authorization server MUST NOT issue a client
@@ -553,6 +560,8 @@ export class GBrainOAuthProvider implements OAuthServerProvider {
   private readonly dcrDisabled: boolean;
   private tokenTtl: number;
   private refreshTtl: number;
+  /** Which brain this database is — see core/brain-identity.ts. */
+  private readonly brainId: () => Promise<string | null>;
   readonly grants: OAuthGrants;
 
   constructor(options: GBrainOAuthProviderOptions) {
@@ -560,7 +569,8 @@ export class GBrainOAuthProvider implements OAuthServerProvider {
     this.dcrDisabled = options.dcrDisabled === true;
     this.tokenTtl = options.tokenTtl || 3600;
     this.refreshTtl = options.refreshTtl || 30 * 24 * 3600;
-    this.grants = new OAuthGrants({ sql: this.sql, transaction: options.transaction, tokenTtl: this.tokenTtl, refreshTtl: this.refreshTtl });
+    this.brainId = identityResolver(this.sql);
+    this.grants = new OAuthGrants({ sql: this.sql, transaction: options.transaction, tokenTtl: this.tokenTtl, refreshTtl: this.refreshTtl, brainId: this.brainId });
     // #2179 fail-closed: an unset DCR max is bounded by the operator's own
     // token TTL — never a fixed permissive ceiling — so a self-registering
     // client cannot elect a longer-lived token than the server default
@@ -572,6 +582,7 @@ export class GBrainOAuthProvider implements OAuthServerProvider {
       options.allowClientCredentialsDcr === true,
       dcrTtlMin,
       dcrTtlMax,
+      this.brainId,
     );
   }
 
@@ -650,6 +661,9 @@ export class GBrainOAuthProvider implements OAuthServerProvider {
   // -------------------------------------------------------------------------
 
   async verifyAccessToken(token: string): Promise<SdkAuthInfo> {
+    // Refuse a token minted in another brain's name before looking it up: a
+    // database restored from another brain's dump holds that brain's hashes.
+    if (!credentialBelongsTo(token, await this.brainId())) throw new InvalidTokenError('Invalid token');
     const tokenHash = hashToken(token);
     const now = Math.floor(Date.now() / 1000);
 
@@ -1090,7 +1104,7 @@ export class GBrainOAuthProvider implements OAuthServerProvider {
     // Default is `client_secret_post` (RFC 7591 §2).
     const authMethod = validateTokenEndpointAuthMethod(tokenEndpointAuthMethod);
 
-    const clientId = generateToken('gbrain_cl_');
+    const clientId = mintCredential('gbrain_cl_', await this.brainId());
     // v0.41.3 (T2): atomic public-client INSERT. When the caller declares
     // `tokenEndpointAuthMethod: 'none'` we mint NO secret and INSERT with
     // client_secret_hash = NULL in a single statement. Pre-fix, the admin
