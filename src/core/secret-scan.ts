@@ -151,8 +151,10 @@ const CORE_PATTERNS: ReadonlyArray<CorePattern> = [
   // redacts every vendor's keys but ships its own live tokens — MCP client
   // tooling prints the Authorization header verbatim into session logs, and
   // transcript ingest carries it into pages. gbrain_cl_ client ids are public
-  // identifiers, deliberately not listed here.
-  { name: 'gbrain_token', source: 'gbrain_(?:at_|rt_|cs_|code_)?[0-9a-f]{64}' },
+  // identifiers, deliberately not listed here. A brain with an identity
+  // (core/brain-identity.ts) infixes its id — `gbrain_at_<brain-id>_<hex>` —
+  // and those tokens are exactly as live, so the id segment is optional here.
+  { name: 'gbrain_token', source: 'gbrain_(?:(?:at|rt|code)_(?:[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?_)?|cs_)?[0-9a-f]{64}' },
   // JWT: three base64url segments (header.payload.signature). No vendor
   // prefix — this is the wire format of many service-role / session
   // credentials, so it is matched on shape. Same source as the PII family in
