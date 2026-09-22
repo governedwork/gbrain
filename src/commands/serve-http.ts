@@ -34,6 +34,7 @@ import { mountConfidentialOAuth, mountOAuthConsent, withBearerScopeHint } from '
 import type { BrainEngine } from '../core/engine.ts';
 import { operations, OperationError, opAllowedForBoundClient } from '../core/operations.ts';
 import type { OperationContext, AuthInfo } from '../core/operations.ts';
+import { resolveServingIdentity } from '../core/brain-identity.ts';
 import { disabledOpsForPublishGates } from '../mcp/publish-gates.ts';
 import { resolveMcpInstructions } from '../mcp/instructions.ts';
 import { installCapabilitiesResource, mcpAdministrationGuidance } from '../mcp/capabilities.ts';
@@ -999,6 +1000,13 @@ export async function runServeHttp(engine: BrainEngine, options: ServeHttpOption
   // derived from the same value so the two can never drift apart.
   const mcpResourceUrl = new URL('/mcp', issuerUrl);
   const resourceMetadataUrl = getOAuthProtectedResourceMetadataUrl(mcpResourceUrl);
+
+  // Brain identity (core/brain-identity.ts): refuse to serve a database under an
+  // identity it does not carry. Checked before the provider exists, so a
+  // mis-pointed process never mints a single credential.
+  const servingBrainId = await resolveServingIdentity(sql);
+  console.error(`[serve-http] serving brain: ${servingBrainId ?? 'host (no identity)'}`);
+
   const oauthProvider = new GBrainOAuthProvider({
     sql,
     transaction: fn => engine.transaction(tx => fn(sqlQueryForEngine(tx))),
