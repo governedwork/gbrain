@@ -21,7 +21,7 @@ import { createSkillResources } from '../mcp/skill-resources.ts';
 import { resolveAuthCapabilities } from '../core/harness/capabilities.ts';
 import { resolveWritebackConfig, ambientOptsFrom } from '../core/facts/writeback-config.ts';
 import { hasScope, operationScopesAllowed } from '../core/scope.ts';
-import { summarizeMcpParams, dispatchToolCall, requestLogStatusForResult, acceptedPendingReceipt, unknownToolEnvelope, errorResult, dispatchRenderContext, type ToolResult } from '../mcp/dispatch.ts';
+import { summarizeMcpParams, dispatchToolCall, requestLogStatusForResult, requestMetaSessionId, acceptedPendingReceipt, unknownToolEnvelope, errorResult, dispatchRenderContext, type ToolResult } from '../mcp/dispatch.ts';
 import { toAgentError } from '../core/agent-output.ts';
 import { isCallable, publishGatesFromDisabled } from '../core/ops/callable.ts';
 import { scopeDeniedError } from '../core/ops/op-fix.ts';
@@ -373,6 +373,9 @@ async function callMcpTool(ctx: ServeHttpContext, state: McpRequestState, reques
       // WP1/D7: network transport — the dispatch-layer localOnly
       // backstop keys off this marker.
       transport: 'http',
+      // CX2-11 parity with stdio: the request-level `_meta.session_id` reaches the op, so a
+      // remote `remember` records its session (identity only, never a trust surface).
+      sessionId: requestMetaSessionId(request.params),
       takesHoldersAllowList: tokenAllowList,
       sourceId: tokenSourceId,
       ...(localFederated ? { localFederatedSourceIds: localFederated } : {}),
