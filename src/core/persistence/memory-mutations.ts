@@ -85,7 +85,10 @@ export async function submitRememberMutation(ctx: OperationContext, params: Reco
   }
   const row = await admitWrite(ctx.engine, { principal, operation: 'remember', sourceId, sourceIncarnation: source.incarnation,
     slug, pageId: snapshot?.page.id ?? null, requestId, callerIntent,
-    intent: { ...callerIntent, entity_slug: entitySlug, fence, valid_from: new Date().toISOString(), valid_until: validUntil?.toISOString() ?? null },
+    // The transport's session (MCP `_meta.session_id`) is recorded on the fact, as extract_facts records
+    // it, so recall's session_id filter finds single facts too. Identity only — never a trust surface.
+    intent: { ...callerIntent, entity_slug: entitySlug, fence, valid_from: new Date().toISOString(), valid_until: validUntil?.toISOString() ?? null,
+      session_id: ctx.sessionId ?? null },
     authority, worktreeId: writeThrough ? binding?.worktree_id : null, topologyGeneration: writeThrough ? binding?.topology_generation : null });
   return writeResponse(await waitForWrite(ctx.engine, row, ctx.config, waitMs));
 }
