@@ -55,7 +55,7 @@ export async function prepareMemoryMutation(engine: BrainEngine, row: WriteReque
   const validUntil = p.valid_until ? new Date(String(p.valid_until)) : null;
   const validFrom = new Date(String(p.valid_from));
   const fact: NewFact = { ...input, source: String(p.provenance).trim(), valid_from: validFrom, valid_until: validUntil,
-    confidence: 1, embedding, embedding_model };
+    confidence: 1, embedding, embedding_model, source_session: typeof p.session_id === 'string' ? p.session_id : null };
   let page: PreparedMutation | undefined;
   let rowNum: number | undefined;
   if (p.fence === true && snapshot) {
