@@ -11,7 +11,8 @@ import { scannerSlugRootMode, scannerSourcePath } from '../write-through.ts';
 import { sha256 } from './digest.ts';
 import { assertPersistenceAccepting, waitForWrite, writeResponse } from './service.ts';
 import { admitWrite, assertPageRequestIdentity, assertReplayIntent, getWriteRequest, intentDigest } from './journal.ts';
-import { submissionAuthority, authorizeStoredRequest } from './authority.ts';
+import { submissionAuthority, authorizeStoredRequest, authorizeWrite } from './authority.ts';
+import { renameWorkingTreeRefusal } from './rename-prepare.ts';
 import { currentVerifiedLocalWriter, localHostId, readLocalWriter, registerLocalWriter } from './identity.ts';
 import { claimWorktree, getWorktreeBinding } from './ownership.ts';
 import { parseMutationPrecondition } from './preconditions.ts';
@@ -86,6 +87,17 @@ async function resolveCaptureFile(ctx: OperationContext, sourceId: string, p: Re
 /** Owner-internal `put_page` kinds the trusted local file writers (import, frontmatter repair) submit; every other caller is refused them. */
 const OWNER_FILE_INTENTS: ReadonlySet<string> = new Set(['managed_file_import', 'managed_file_repair']);
 
+/** rename_page's target passes the same slug validation and both fences as its source slug. */
+function renameTargetParam(ctx: OperationContext, slug: string, value: unknown): string {
+  if (typeof value !== 'string' || value.length === 0) throw new OperationError('invalid_params', 'new_slug must be a non-empty string.');
+  const target = value.toLowerCase();
+  validatePageSlug(target);
+  enforceClientSlugFence(ctx, target, 'rename_page');
+  enforceSubagentSlugFence(ctx, target, 'rename_page');
+  if (target === slug) throw new OperationError('invalid_params', 'new_slug must differ from slug.');
+  return target;
+}
+
 export async function submitPageMutation(ctx: OperationContext,
   input: { operation: string; params: Record<string, unknown>; waitMs?: number; managedFileImport?: true }): Promise<Record<string, unknown>> {
   if (input.operation === 'put_page' && ['kind', 'preview', 'backup_reference'].some(key => Object.hasOwn(input.params, key))) {
@@ -155,6 +167,8 @@ export async function submitPageMutation(ctx: OperationContext,
   validatePageSlug(slug);
   enforceClientSlugFence(ctx, slug, input.operation);
   enforceSubagentSlugFence(ctx, slug, input.operation);
+  const renameTarget = input.operation === 'rename_page' ? renameTargetParam(ctx, slug, p.new_slug) : null;
+  if (renameTarget !== null) intent.new_slug = renameTarget;
   // Preserve same-source diagnostics for new timeline writes without making
   // terminal replay depend on a page that may have since been purged.
   if (input.operation === 'add_timeline_entry') await requireWritablePage({ ...ctx, sourceId }, slug, input.operation, 'page');
@@ -178,6 +192,13 @@ export async function submitPageMutation(ctx: OperationContext,
   if (sandbox) authority.databaseOnlyReason = 'subagent_sandbox';
   else if (!configuredWriteThrough) authority.databaseOnlyReason = 'disabled_by_config';
   else if (!root && !binding) authority.databaseOnlyReason = 'no_repo_configured';
+  if (renameTarget !== null) {
+    // Refused for every source with a working tree, whatever write_through
+    // says: a database-only rename would leave the old file to be re-imported.
+    if (root || binding) throw renameWorkingTreeRefusal(sourceId);
+    await authorizeWrite(ctx.engine, authority, input.operation, renameTarget);
+    await assertKnowledgePublicationAllowed(ctx.engine, { source_id: sourceId, source_incarnation: source.incarnation, slug: renameTarget });
+  }
   if (p.local_dir !== undefined) {
     // Checkout paths belong to a host binding; sources.local_path may name
     // another host's original checkout after a verified ownership transfer.
