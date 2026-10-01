@@ -55,7 +55,7 @@ import {
 import { canonicalOAuthResource } from '../core/oauth-grants.ts';
 import { hasScope, operationScopesAllowed, scopesSupportedForDiscovery } from '../core/scope.ts';
 import { normalizeTokenScopes } from '../core/legacy-token-scope.ts';
-import { summarizeMcpParams, dispatchToolCall, requestLogStatusForResult } from '../mcp/dispatch.ts';
+import { summarizeMcpParams, dispatchToolCall, requestLogStatusForResult, requestMetaSessionId } from '../mcp/dispatch.ts';
 import { resolveStrictParamsMode } from '../mcp/validate-params.ts';
 import { buildToolDefs } from '../mcp/tool-defs.ts';
 import {
@@ -2314,6 +2314,9 @@ export async function runServeHttp(engine: BrainEngine, options: ServeHttpOption
           // WP1/D7: network transport — the dispatch-layer localOnly
           // backstop keys off this marker.
           transport: 'http',
+          // CX2-11 parity with stdio: the request-level `_meta.session_id` reaches the op, so a
+          // remote `remember` records its session (identity only, never a trust surface).
+          sessionId: requestMetaSessionId(request.params),
           takesHoldersAllowList: tokenAllowList,
           sourceId: tokenSourceId,
           ...(localFederated ? { localFederatedSourceIds: localFederated } : {}),
