@@ -40,13 +40,18 @@ const get_active_schema_pack: Operation = {
     const sourceOpts: Record<string, unknown> = {};
     if (ctx.sourceId) sourceOpts.sourceId = ctx.sourceId;
     // #3792: thread the DB-plane schema_pack (tier 4) so this identity
-    // packet reports the SAME pack the engine actually queries with.
+    // packet reports the SAME pack the engine actually queries with. Writes
+    // resolve per source (page-prepare: loadActivePackForEngine with the
+    // page's source), so the per-source key (tier 3) is threaded too.
     let dbConfig: string | undefined;
+    const perSourceDb = new Map<string, string>();
     try {
       dbConfig = (await ctx.engine.getConfig('schema_pack')) ?? undefined;
+      const perSource = ctx.sourceId ? (await ctx.engine.getConfig(`schema_pack.source.${ctx.sourceId}`))?.trim() : undefined;
+      if (ctx.sourceId && perSource) perSourceDb.set(ctx.sourceId, perSource);
     } catch { /* engine.config may not exist on very old brains */ }
-    const resolution = resolveActivePackNameOnly({ cfg, remote: ctx.remote ?? true, dbConfig, ...sourceOpts });
-    const pack = await loadActivePack({ cfg, remote: ctx.remote ?? true, dbConfig, ...sourceOpts });
+    const resolution = resolveActivePackNameOnly({ cfg, remote: ctx.remote ?? true, dbConfig, perSourceDb, ...sourceOpts });
+    const pack = await loadActivePack({ cfg, remote: ctx.remote ?? true, dbConfig, perSourceDb, ...sourceOpts });
     const primitiveSummary: Record<string, number> = {};
     for (const t of pack.manifest.page_types) {
       primitiveSummary[t.primitive] = (primitiveSummary[t.primitive] ?? 0) + 1;

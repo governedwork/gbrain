@@ -76,3 +76,30 @@ describe('#3792 get_active_schema_pack op threads the same DB-plane config', () 
     });
   });
 });
+
+describe('get_active_schema_pack threads the per-source DB-plane key (tier 3)', () => {
+  // A source-bound caller's writes are typed with schema_pack.source.<id>
+  // (page-prepare resolves per source); the identity packet must agree.
+  function engineWithSourcePack(sourceId: string, pack: string): BrainEngine {
+    return {
+      getConfig: async (key: string) => (key === `schema_pack.source.${sourceId}` ? pack : key === 'schema_pack' ? 'gbrain-base-v2' : null),
+    } as unknown as BrainEngine;
+  }
+
+  test('a source with its own pack reports that pack and tier', async () => {
+    const { handleToolCall } = await import('../src/mcp/server.ts');
+    await withEnv({ GBRAIN_HOME: tmpHome, GBRAIN_SCHEMA_PACK: undefined }, async () => {
+      const result = (await handleToolCall(engineWithSourcePack('acme', 'company-brain'), 'get_active_schema_pack', {}, { sourceId: 'acme' })) as { pack_name: string; source_tier: string };
+      expect(result.pack_name).toBe('company-brain');
+      expect(result.source_tier).toBe('per-source-db');
+    });
+  });
+
+  test('another source falls through to the brain-wide key', async () => {
+    const { handleToolCall } = await import('../src/mcp/server.ts');
+    await withEnv({ GBRAIN_HOME: tmpHome, GBRAIN_SCHEMA_PACK: undefined }, async () => {
+      const result = (await handleToolCall(engineWithSourcePack('acme', 'company-brain'), 'get_active_schema_pack', {}, { sourceId: 'globex' })) as { pack_name: string };
+      expect(result.pack_name).toBe('gbrain-base-v2');
+    });
+  });
+});
