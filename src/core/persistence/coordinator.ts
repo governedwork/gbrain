@@ -212,7 +212,7 @@ export async function publishMutation(engine: BrainEngine, row: WriteRequest, pr
   const files = skill ? prepared.files ?? [] : prepared.file ? [prepared.file] : [];
   try {
     assertMutationProtocol(row);
-    if ((row.target_kind ?? 'page') !== (prepared.target ?? 'page') || (skill ? !!prepared.file || !files.length : prepared.files !== undefined)) {
+    if ((row.target_kind ?? 'page') !== (prepared.target ?? 'page') || (skill ? !!prepared.file || !files.length && prepared.databaseOnlyReason !== 'db_only' : prepared.files !== undefined)) {
       throw opError('unsupported_mutation_protocol', 'Prepared mutation does not match its accepted target.',
         `Request ${row.request_id} in source ${row.source_id} was prepared for a different target than it was accepted for, so nothing was published. This is an internal mismatch, not a caller error: inspect the request and report it to the user; do not resubmit it unchanged.`,
         { fix: requestFix(row) });
@@ -246,7 +246,7 @@ export async function publishMutation(engine: BrainEngine, row: WriteRequest, pr
       return (await getWriteRequestById(engine, row.id))!;
     }
     if (!skill) await assertKnowledgePublicationAllowed(engine, row, prepared.file);
-    if (skill && !prepared.noop) {
+    if (skill && !prepared.noop && prepared.databaseOnlyReason !== 'db_only') {
       if (!binding || !lock) throw opError('storage_error', 'Skill publication requires a canonical owner.',
         `Shared-skill request ${row.request_id} reached publication without this host holding source ${row.source_id}'s canonical worktree, so no skill file was written. Inspect the owner; the skill publishes only on the host that owns the source.`,
         { fix: ownerStatusFix(row.source_id) });
