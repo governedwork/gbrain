@@ -47,6 +47,7 @@ import { CORE_EDIT_NOTICES_SCHEMA_SQL } from '../src/core/core-memory-schema.ts'
 import { FACT_PURGE_LOOKUP_INDEX_SQL, MEMORY_PURGE_SCHEMA_SQL } from '../src/core/facts/purge-schema.ts';
 import { WRITE_GATE_SCHEMA_SQL } from '../src/core/write-gate-schema.ts';
 import { BELIEF_LEDGER_SCHEMA_SQL } from '../src/core/belief/schema.ts';
+import { BRAIN_PACK_SCHEMA_SQL } from '../src/core/schema-pack/brain-pack-schema.ts';
 
 const REPO = resolve(import.meta.dir, '..');
 export const SCHEMA_SQL_PATH = 'src/schema.sql';
@@ -115,6 +116,8 @@ export const FRAGMENTS: readonly Fragment[] = [
   { source: 'src/core/write-gate-schema.ts', expr: 'WRITE_GATE_SCHEMA_SQL', postgres: WRITE_GATE_SCHEMA_SQL, pglite: WRITE_GATE_SCHEMA_SQL },
   { source: 'src/core/questions/schema.ts', expr: 'PINNED_QUESTIONS_SCHEMA_SQL', postgres: PINNED_QUESTIONS_SCHEMA_SQL, pglite: PINNED_QUESTIONS_SCHEMA_SQL },
   { source: 'src/core/belief/schema.ts', expr: 'BELIEF_LEDGER_SCHEMA_SQL', postgres: BELIEF_LEDGER_SCHEMA_SQL, pglite: BELIEF_LEDGER_SCHEMA_SQL },
+  // Ours (governedwork fork): brain-resident schema packs.
+  { source: 'src/core/schema-pack/brain-pack-schema.ts', expr: 'BRAIN_PACK_SCHEMA_SQL', postgres: BRAIN_PACK_SCHEMA_SQL, pglite: BRAIN_PACK_SCHEMA_SQL },
 ];
 
 const fragmentLabel = (f: Fragment) => `${f.source} (${f.expr})`;
