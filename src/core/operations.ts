@@ -324,6 +324,7 @@ const OP_AREAS: Record<string, string> = {
   schema_stats: 'schema', schema_lint: 'schema', schema_graph: 'schema',
   schema_explain_type: 'schema', schema_review_orphans: 'schema',
   schema_apply_mutations: 'schema', reload_schema_pack: 'schema',
+  put_schema_pack: 'schema', get_schema_pack: 'schema', // ours (governedwork fork)
   // discovery
   request_tools: 'discovery',
 };

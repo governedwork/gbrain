@@ -170,6 +170,8 @@ const LEDGER: Record<string, string> = {
   schema_explain_type: 'test/operations-schema-pack.test.ts',
   schema_review_orphans: 'test/operations-schema-pack.test.ts',
   schema_apply_mutations: 'test/operations-schema-pack.test.ts',
+  put_schema_pack: 'test/fork-brain-resident-schema-packs.test.ts', // ours (governedwork fork)
+  get_schema_pack: 'test/fork-brain-resident-schema-packs.test.ts', // ours (governedwork fork)
   reload_schema_pack: 'test/operations-schema-pack.test.ts',
   run_onboard: 'test/ops-run-onboard-scope-gate.serial.test.ts',
   run_skillopt: 'test/skillopt/run-skillopt-op.serial.test.ts',

@@ -2899,6 +2899,8 @@ async function completeEngineStartup(engine: BrainEngine): Promise<void> {
       if (notice) writeCliNotice(notice);
     } catch { /* a disclosure never breaks a command */ }
   }
+  // Ours: load brain-resident schema packs so every pack resolution in this process sees them (empty disk).
+  try { await (await import('./core/schema-pack/db-store.ts')).refreshBrainResidentPacks(engine); } catch { /* pack resolution reports it */ }
 }
 
 /** CLI-only usage examples appended to `gbrain <command> --help`. */

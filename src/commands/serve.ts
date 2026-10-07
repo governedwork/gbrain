@@ -227,6 +227,9 @@ export async function runServe(
   // verifyAccessToken with legacy access_tokens fallback (so v0.22.7 callers
   // that used `gbrain auth create` keep working unchanged).
   const isHttp = args.includes('--http');
+  // Ours (governedwork fork): brain-resident schema packs published by another
+  // process show here within the pack stat-TTL, as file-backed packs do.
+  (await import('../core/schema-pack/db-store.ts')).keepBrainResidentPacksFresh(engine);
 
   // MEMORY_VERBS v1: tool-surface mode. stdio: GBRAIN_SURFACE > --surface >
   // config `mcp_surface` > 'full'; --http ignores GBRAIN_SURFACE (an HTTP

@@ -26,6 +26,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { GBrainConfig } from '../config.ts';
 import { gbrainPath } from '../config.ts';
+import { brainResidentPack } from './db-store.ts';
 import type { SchemaPackManifest } from './manifest-v1.ts';
 import { loadPackFromFile } from './loader.ts';
 import {
@@ -117,6 +118,8 @@ function defaultPackLocator(name: string): string | null {
   // gate it (same slug grammar as locateMutablePackFile) BEFORE the join so
   // a path-shaped value can't reach anything outside schema-packs/.
   if (!isValidPackName(name)) return null;
+  // Ours: a brain-resident pack shadows the disk and has no file to snapshot.
+  if (brainResidentPack(name)) return null;
   const baseDir = gbrainPath('schema-packs', name);
   const candidates = ['pack.yaml', 'pack.yml', 'pack.json'];
   for (const c of candidates) {
@@ -131,6 +134,8 @@ function defaultPackLocator(name: string): string | null {
  * the extends chain. Throws UnknownPackError when the pack isn't on disk.
  */
 async function loadPackManifestByName(name: string): Promise<SchemaPackManifest> {
+  const resident = isBundledPackName(name) ? null : brainResidentPack(name);
+  if (resident) return resident;
   const path = _packLocator(name);
   if (!path) {
     throw new UnknownPackError(name);
