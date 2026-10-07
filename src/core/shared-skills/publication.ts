@@ -13,6 +13,7 @@ import { admitWrite, assertReplayIntent, getWriteRequest, intentDigest } from '.
 import { initializeLocalPersistence, pageMutationSource, requestPrincipalForContext } from '../persistence/page-mutations.ts';
 import { getWorktreeBinding } from '../persistence/ownership.ts';
 import { assertSharedSkillPersistence } from '../persistence/protocol.ts';
+import { isDatabaseCanonicalSource } from '../persistence/database-canonical.ts';
 import { assertPersistenceAccepting, waitForWrite, writeResponse } from '../persistence/service.ts';
 import { digest, requireUuid, sha256, stableJson } from '../persistence/digest.ts';
 import type { PreparedMutation } from '../persistence/coordinator.ts';
@@ -63,7 +64,8 @@ function precondition(value: unknown, read: Action): string | null {
   }
   return value;
 }
-function canonicalRead(root: string, relative: string): Buffer | null {
+function canonicalRead(root: string | null, relative: string): Buffer | null {
+  if (root === null) return null;
   let cursor = root;
   for (const part of relative.split('/')) {
     cursor = join(cursor, part);
@@ -81,7 +83,8 @@ function canonicalRead(root: string, relative: string): Buffer | null {
   }
   return readFileSync(cursor);
 }
-async function sourceRoot(engine: BrainEngine, sourceId: string, incarnation: string, ctx?: OperationContext) {
+async function sourceRoot(engine: BrainEngine, sourceId: string, incarnation: string, ctx?: OperationContext): Promise<{ binding: Awaited<ReturnType<typeof getWorktreeBinding>>; root: string | null }> {
+  if (await isDatabaseCanonicalSource(engine, sourceId)) return { binding: null, root: null };
   const binding = await getWorktreeBinding(engine, sourceId);
   if (!binding || binding.source_incarnation !== incarnation || binding.state !== 'active' || !binding.owner_host_id) {
     throw opError('owner_unavailable', 'Shared skills require an active designated canonical source owner.',
@@ -349,7 +352,7 @@ export async function submitSharedSkillMutation(ctx: OperationContext, operation
     }
   }
   const manifestHash = manifestBytes ? sha256(manifestBytes) : null;
-  if (pack && manifestHash !== pack.manifest_hash && adoption?.expected_hashes?.['skillpack.json'] !== manifestHash) {
+  if (pack && root !== null && manifestHash !== pack.manifest_hash && adoption?.expected_hashes?.['skillpack.json'] !== manifestHash) {
     throw opError('local_conflict', 'The canonical manifest has unpublished edits.',
       `skillpack.json in source ${sourceId}'s checkout was edited outside gbrain. Restore the published manifest, or publish the reviewed edit through import_skill_proposal from the CLI on the brain host with its current SHA-256 in expected_hashes, then publish again.`);
   }
@@ -397,7 +400,7 @@ export async function submitSharedSkillMutation(ctx: OperationContext, operation
     beforeHashes[path] = disk === null ? null : sha256(disk);
     const sealed = sealedFiles.get(path);
     const reviewed = adoption?.expected_hashes !== undefined && Object.hasOwn(adoption.expected_hashes, path) && adoption.expected_hashes[path] === beforeHashes[path];
-    if (sealed && beforeHashes[path] !== sealed.sha256 && !reviewed) {
+    if (sealed && root !== null && beforeHashes[path] !== sealed.sha256 && !reviewed) {
       throw opError('local_conflict', 'A canonical file has unpublished edits; use import_skill_proposal with the reviewed current file hashes.',
         `${path} in source ${sourceId}'s checkout has edits that were never published. Restore the published bytes, or publish the reviewed edit through import_skill_proposal from the CLI on the brain host with the file's current SHA-256 in expected_hashes, then resubmit.`);
     }
@@ -413,7 +416,7 @@ export async function submitSharedSkillMutation(ctx: OperationContext, operation
     manifest_before_hash: manifestBytes ? sha256(manifestBytes) : null, original_manifest: manifestMetadata, before_hashes: beforeHashes, proposals, extra_files: extraFiles };
   const row = await admitWrite(ctx.engine, { principal, operation, sourceId, sourceIncarnation: source.incarnation, slug, requestId,
     targetKind: 'skill_bundle', protocolVersion: 2, callerIntent, intent: intent as unknown as Record<string, unknown>, authority,
-    worktreeId: binding.worktree_id, topologyGeneration: binding.topology_generation });
+    worktreeId: binding?.worktree_id ?? null, topologyGeneration: binding?.topology_generation ?? null });
   return writeResponse(await waitForWrite(ctx.engine, row, ctx.config, ctx.writeWaitMs));
 }
 
@@ -472,7 +475,8 @@ export async function prepareSharedSkillMutation(engine: BrainEngine, row: Write
   }
   return {
     target: 'skill_bundle', sourceExclusive: true, observedRevision: intent.expected_revision,
-    files: [...changedFiles].map(([path, file]) => ({ path: join(root, path), root, content: file ? Buffer.from(file.content, 'base64') : null,
+    ...(root === null ? { databaseOnlyReason: 'db_only' as const } : {}),
+    files: root === null ? [] : [...changedFiles].map(([path, file]) => ({ path: join(root, path), root, content: file ? Buffer.from(file.content, 'base64') : null,
       expectedBeforeHash: intent.before_hashes[path] ?? null })).concat([{ path: join(root, 'skillpack.json'), root,
         content: Buffer.from(manifestContent), expectedBeforeHash: intent.manifest_before_hash },
         ...Object.entries(intent.extra_files).map(([path, content]) => ({ path: join(root, path), root, content: Buffer.from(content), expectedBeforeHash: intent.before_hashes[path] ?? null }))]),

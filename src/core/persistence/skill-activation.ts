@@ -9,6 +9,7 @@ import { managedFilesystemDatastorePath, refreshManagedFilesystemRoots } from '.
 import { assertWriterAdminState, WRITER_INSPECTION_HINT } from './admin-intent.ts';
 import { assertWriterAdminUnlocked } from './admin-lock.ts';
 import { notQuiescedError } from './blocking-effects.ts';
+import { isDatabaseCanonicalSource } from './database-canonical.ts';
 
 export async function activateSharedSkillPersistence(engine: BrainEngine,
   options: { confirmQuiesced?: boolean; dryRun?: boolean; expectedState?: string } = {}): Promise<{ activated: boolean; protocol_version: 2; filesystem_sources: number; drift_audit?: ActivationReport['drift_audit'] }> {
@@ -26,10 +27,16 @@ export async function activateSharedSkillPersistence(engine: BrainEngine,
       if (!binding || binding.owner_host_id !== hostId || binding.state !== 'active' || !binding.local_path) throw quiescence();
       bindings.push(binding);
     }
-    if (!bindings.length) {
+    if (!bindings.length && !(await tx.executeRaw<{ id: string }>('SELECT id FROM sources WHERE NOT archived')).length) {
       throw opError('writer_registration_required', 'Shared publication requires a registered canonical source root.',
         'No active source has a registered canonical owner, so shared skill publication was not enabled. Check writer status; claiming a source root is a deliberate topology change the operator reviews.',
         { fix: { argv: ['gbrain', 'sources', 'writer', 'status', '--json'], consent: [], actor: 'agent', why: 'Shows each source\'s canonical owner and claim, read-only.', requires_exclusive: false } });
+    }
+    if (!bindings.length) {
+      for (const source of await tx.executeRaw<{ id: string }>('SELECT id FROM sources WHERE NOT archived ORDER BY id')) {
+        if (!await isDatabaseCanonicalSource(tx, source.id)) throw opError('writer_registration_required', 'Shared publication requires a registered canonical source root.',
+          `Source ${source.id} has neither a registered canonical owner nor a database-canonical receipt, so shared skill publication was not enabled.`);
+      }
     }
     return bindings;
   };
