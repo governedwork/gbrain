@@ -50,6 +50,9 @@ const get_active_schema_pack: Operation = {
       const perSource = ctx.sourceId ? (await ctx.engine.getConfig(`schema_pack.source.${ctx.sourceId}`))?.trim() : undefined;
       if (ctx.sourceId && perSource) perSourceDb.set(ctx.sourceId, perSource);
     } catch { /* engine.config may not exist on very old brains */ }
+    // Brain-resident packs answer the by-name lookup before the disk.
+    const { refreshBrainResidentPacks } = await import('../schema-pack/db-store.ts');
+    await refreshBrainResidentPacks(ctx.engine);
     const resolution = resolveActivePackNameOnly({ cfg, remote: ctx.remote ?? true, dbConfig, perSourceDb, ...sourceOpts });
     const pack = await loadActivePack({ cfg, remote: ctx.remote ?? true, dbConfig, perSourceDb, ...sourceOpts });
     const primitiveSummary: Record<string, number> = {};
@@ -340,9 +343,63 @@ const reload_schema_pack: Operation = {
   },
 };
 
+// --- Ours (governedwork fork): brain-resident schema packs (schema-pack/db-store.ts) ---
+// Publishing a pack changes how the whole brain is shaped, so it takes the
+// same separate authority as approving skill publication policy: admin scope
+// plus the explicit skill_publisher capability. Editors cannot do it.
+const put_schema_pack: Operation = {
+  name: 'put_schema_pack',
+  idempotent: false,
+  outputRedaction: 'no_stored_text',
+  description: 'Publish a new revision of a brain-resident schema pack (stored in the database, not on disk). Compare-and-swap on expected_revision (null to create). The manifest must parse and resolve its extends/borrow_from chain. Rollback: publish an older revision\'s manifest from get_schema_pack.',
+  params: {
+    name: { type: 'string', required: true, description: 'Pack name (not a bundled pack).' },
+    manifest: { type: 'object', required: true, description: 'Complete gbrain-schema-pack-v1 manifest.' },
+    expected_revision: { type: 'string', description: 'Current head revision; JSON null to create.' },
+    note: { type: 'string', description: 'Why this revision exists.' },
+    source_id: { type: 'string', description: 'Owning source (default: the connection\'s write source).' },
+  },
+  scope: 'admin', requiredScopes: ['skill_publisher'],
+  mutating: true,
+  handler: async (ctx, p) => {
+    (await import('../shared-skills/policy.ts')).assertSkillCapability(ctx, 'skill_publisher', 'put_schema_pack');
+    const { putBrainPack } = await import('../schema-pack/db-store.ts');
+    const { resolveLoadedPack } = await import('../schema-pack/load-active.ts');
+    const { pageMutationSource, requestPrincipalForContext } = await import('../persistence/page-mutations.ts');
+    const principal = await requestPrincipalForContext(ctx);
+    return putBrainPack(ctx.engine, {
+      name: String(p.name), source_id: pageMutationSource(ctx, p, 'put_schema_pack'), manifest: p.manifest as Record<string, unknown>,
+      expected_revision: (p.expected_revision ?? null) as string | null, note: p.note as string | undefined,
+      published_by: `${principal.kind}:${principal.id}`,
+    }, resolveLoadedPack);
+  },
+  cliHints: { name: 'put-schema-pack', positional: [] },
+};
+
+const get_schema_pack: Operation = {
+  name: 'get_schema_pack',
+  mutating: false,
+  idempotent: true,
+  outputRedaction: 'no_stored_text',
+  description: 'Read a brain-resident schema pack: head revision, the manifest at head or at a given revision, and its full revision history.',
+  params: {
+    name: { type: 'string', required: true, description: 'Pack name.' },
+    revision: { type: 'string', description: 'A revision from history (default: head).' },
+  },
+  scope: 'read',
+  handler: async (ctx, p) => {
+    const { sourceScopeOpts } = await import('./context.ts');
+    const scope = sourceScopeOpts(ctx);
+    const readable = ctx.remote === false ? null : scope.sourceIds ?? (scope.sourceId ? [scope.sourceId] : []);
+    return (await import('../schema-pack/db-store.ts')).getBrainPack(ctx.engine, String(p.name), p.revision as string | undefined, readable);
+  },
+  cliHints: { name: 'get-schema-pack', positional: [] },
+};
+
 export const schemaPacksOperations: Operation[] = [
   get_active_schema_pack, list_schema_packs,
   schema_stats, schema_lint, schema_graph, schema_explain_type,
   schema_review_orphans,
   schema_apply_mutations, reload_schema_pack,
+  put_schema_pack, get_schema_pack,
 ];

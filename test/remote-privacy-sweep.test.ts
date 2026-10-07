@@ -369,6 +369,8 @@ const EXPECTED_OUTCOME: Record<string, Outcome> = {
   extract_facts: 'error',
   forget_fact: 'error',
   schema_apply_mutations: 'error',
+  put_schema_pack: 'error', // ours (governedwork fork)
+  get_schema_pack: 'error', // ours (governedwork fork)
   reload_schema_pack: 'ok',
   run_onboard: 'ok',
   run_skillopt: 'error',

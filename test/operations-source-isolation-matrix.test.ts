@@ -130,6 +130,8 @@ const MATRIX: Row[] = [
   { name: 'list_link_sources', mode: 'brainwide', args: {}, rationale: 'distinct link-origin kinds; enumerates kinds not content' },
   { name: 'get_active_schema_pack', mode: 'brainwide', args: {}, rationale: 'brain-level schema config' },
   { name: 'list_schema_packs', mode: 'brainwide', args: {}, rationale: 'brain-level schema config' },
+  // Ours (governedwork fork): a brain-resident pack belongs to one source.
+  { name: 'get_schema_pack', mode: 'skip', reason: 'fork op; test/fork-brain-resident-schema-packs.test.ts proves a reader bound to another source is refused' },
   { name: 'schema_graph', mode: 'brainwide', args: {}, rationale: 'schema-pack type graph, not page data' },
   { name: 'schema_explain_type', mode: 'brainwide', args: { type: 'note' }, rationale: 'schema-pack type doc, not page data' },
   { name: 'schema_lint', mode: 'brainwide', args: {}, rationale: 'lints the schema pack, not page data' },

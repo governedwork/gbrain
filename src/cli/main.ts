@@ -2860,6 +2860,9 @@ async function completeEngineStartup(engine: BrainEngine): Promise<void> {
   // #5628: drop this host's markers of a retired managed epoch before any filesystem guard check.
   try { await (await import('../core/persistence/deactivation.ts')).cleanupRetiredManagedMarkers(engine); } catch { /* status reports pending markers */ }
 
+  // Ours: load brain-resident schema packs so every pack resolution in this process sees them (empty disk).
+  try { await (await import('../core/schema-pack/db-store.ts')).refreshBrainResidentPacks(engine); } catch { /* pack resolution reports it */ }
+
   // v0.27.1 (F3 fix): re-merge DB-plane config now that the engine is up.
   // Flags like `embedding_multimodal` are user-mutable via `gbrain config set`
   // (DB plane) and need to flow into the gateway after connect. Schema-sizing
