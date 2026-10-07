@@ -212,7 +212,9 @@ Every non-localOnly operation on the MCP surface: 158 tools across 25 areas. **S
 | Tool | Description | Scope | Starter | Gate |
 |---|---|---|---|---|
 | `get_active_schema_pack` | Cheap identity packet for the active schema pack. | read |  |  |
+| `get_schema_pack` | Read a brain-resident schema pack: head revision, the manifest at head or at a given revision, and its full revision history. | read |  |  |
 | `list_schema_packs` | List installed schema packs (bundled + user-installed). | read |  |  |
+| `put_schema_pack` | Publish a new revision of a brain-resident schema pack (stored in the database, not on disk). | admin + skill_publisher |  |  |
 | `reload_schema_pack` | Flush the in-process schema pack cache so the next loadActivePack re-reads from disk. | admin |  |  |
 | `schema_apply_mutations` | Batched schema pack mutation. | admin |  |  |
 | `schema_explain_type` | Resolved settings for a single page_type in the active pack. | read |  |  |
