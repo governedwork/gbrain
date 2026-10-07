@@ -486,6 +486,8 @@ async function withConnectedEngine<T>(fn: (engine: import('../core/engine.ts').B
   const engine = await createEngine(connectConfig);
   await engine.connect(connectConfig);
   try {
+    // Ours (governedwork fork): brain-resident packs resolve like disk packs in every schema subcommand.
+    await (await import('../core/schema-pack/db-store.ts')).refreshBrainResidentPacks(engine);
     return await fn(engine);
   } finally {
     await engine.disconnect();
