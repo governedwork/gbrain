@@ -56,10 +56,9 @@ function manifest(name: string, types: string[], over: Record<string, unknown> =
   };
 }
 
-/** Trusted local caller writing as `sourceId`. */
+/** Trusted local caller writing as `sourceId`, with no writer registered yet (as a fresh host CLI). */
 function local(sourceId = 'acme'): OperationContext {
-  return { engine, config: {}, logger: { info() {}, warn() {}, error() {} }, dryRun: false, remote: false, sourceId,
-    auth: { principal: { kind: 'local_cli', id: 'test-writer' } } } as unknown as OperationContext;
+  return { engine, config: {}, logger: { info() {}, warn() {}, error() {} }, dryRun: false, remote: false, sourceId } as unknown as OperationContext;
 }
 
 /** Remote caller bound to one source with read scope. */

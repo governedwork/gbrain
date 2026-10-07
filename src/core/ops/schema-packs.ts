@@ -365,7 +365,9 @@ const put_schema_pack: Operation = {
     (await import('../shared-skills/policy.ts')).assertSkillCapability(ctx, 'skill_publisher', 'put_schema_pack');
     const { putBrainPack } = await import('../schema-pack/db-store.ts');
     const { resolveLoadedPack } = await import('../schema-pack/load-active.ts');
-    const { pageMutationSource, requestPrincipalForContext } = await import('../persistence/page-mutations.ts');
+    const { initializeLocalPersistence, pageMutationSource, requestPrincipalForContext } = await import('../persistence/page-mutations.ts');
+    // A trusted local caller registers its writer once, as every native page and memory write does.
+    await initializeLocalPersistence(ctx);
     const principal = await requestPrincipalForContext(ctx);
     return putBrainPack(ctx.engine, {
       name: String(p.name), source_id: pageMutationSource(ctx, p, 'put_schema_pack'), manifest: p.manifest as Record<string, unknown>,
