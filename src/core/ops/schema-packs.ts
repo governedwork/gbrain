@@ -130,12 +130,14 @@ const schema_lint: Operation = {
   scope: 'read',
   handler: async (ctx, p) => {
     const { runAllLintRules } = await import('../schema-pack/lint-rules.ts');
-    const { loadActivePack, resolveLoadedPack } = await import('../schema-pack/load-active.ts');
+    const { loadActivePackDeclared, declaredPack } = await import('../schema-pack/load-active.ts');
     const { loadConfig, gbrainPath } = await import('../config.ts');
     const { existsSync } = await import('node:fs');
     const { join } = await import('node:path');
     const cfg = loadConfig();
     let manifest;
+    // Ours (governedwork fork): the pack as declared, so the borrow_from rules run over MCP too.
+    let declared;
     if (p.pack) {
       // Locate by name without trust-gating per-call schema_pack opt
       // (that's a separate axis — this is just file lookup).
@@ -159,17 +161,19 @@ const schema_lint: Operation = {
       const { loadPackFromFile: loader } = await import('../schema-pack/loader.ts');
       // #4373: lint the MERGED manifest so extends-inherited page types
       // count as declared — parity with the active-pack branch below.
-      manifest = (await resolveLoadedPack(loader(path))).manifest;
+      declared = declaredPack(loader(path));
+      manifest = (await declared.resolve(declared.manifest)).manifest;
     } else {
       // #4653: tier-4 DB-plane schema_pack, same read get_active_schema_pack does.
       const { readDbSchemaPack } = await import('../schema-pack/best-effort.ts');
       const dbConfig = await readDbSchemaPack(ctx.engine);
-      const resolved = await loadActivePack({ cfg, remote: ctx.remote ?? true, sourceId: ctx.sourceId, dbConfig });
-      manifest = resolved.manifest;
+      const loaded = await loadActivePackDeclared({ cfg, remote: ctx.remote ?? true, sourceId: ctx.sourceId, dbConfig });
+      manifest = loaded.resolved.manifest;
+      declared = loaded.declared;
     }
     // File-plane only over MCP; the engine-aware --with-db opt-in is
     // CLI-only (Phase 5 wiring). MCP callers get the 9 file-plane rules.
-    return await runAllLintRules(manifest);
+    return await runAllLintRules(manifest, { declared });
   },
 };
 
