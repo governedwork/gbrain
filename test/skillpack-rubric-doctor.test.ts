@@ -216,6 +216,14 @@ describe('walkRubric — individual dimensions fail in isolation', () => {
     expect(await changelogPasses('# Changelog\n\n## [0.1.0] - 2026-10-09\n')).toBe(true);
     expect(await changelogPasses('# Changelog\n\n## 0.1.0 - 2026-10-09\n')).toBe(true);
     expect(await changelogPasses('# Changelog\n\n## 0.1.0')).toBe(true);
+    // The gap after `##` is on the heading line: a bare `##` line does not head the next line's version.
+    expect(await changelogPasses('# Changelog\n\n##\n0.1.0 - 2026-10-09\n')).toBe(false);
+    expect(await changelogPasses('# Changelog\n\n##\n[0.1.0] - 2026-10-09\n')).toBe(false);
+    expect(await changelogPasses('# Changelog\n\n##\t[0.1.0] - 2026-10-09\n')).toBe(true);
+    // The version ending its line (LF or CRLF) is a heading for exactly that version.
+    expect(await changelogPasses('# Changelog\n\n## 0.1.0\n- notes\n')).toBe(true);
+    expect(await changelogPasses('# Changelog\r\n\r\n## 0.1.0\r\n- notes\r\n')).toBe(true);
+    expect(await changelogPasses('# Changelog\n\n## 0.1.0\n1 more line\n')).toBe(true);
   });
 
   test('badge 8 (llm_eval_present) fails when cases array < 3', async () => {
