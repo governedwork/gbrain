@@ -15,6 +15,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
 import { join, relative } from 'path';
 
 import { parseMarkdown } from '../markdown.ts';
+import { parseRoutingFixtures } from '../routing-eval.ts';
 import { loadSkillpackManifest, SkillpackManifestError, type SkillpackManifest } from './manifest-v1.ts';
 
 /** Dimension category. */
@@ -152,9 +153,11 @@ const DIMENSIONS: Array<
           failures.push(`${skillPath}/routing-eval.jsonl missing`);
           continue;
         }
-        const lines = readFileSync(evalFile, 'utf-8').split('\n').filter((l) => l.trim().length > 0);
-        if (lines.length < 5) {
-          failures.push(`${skillPath}/routing-eval.jsonl has ${lines.length} intents (need >= 5)`);
+        // Ours (governedwork fork): count intents as routing-eval.ts loads them — comment
+        // lines and lines without a string `intent` are not intents.
+        const intents = parseRoutingFixtures(readFileSync(evalFile, 'utf-8'), evalFile).fixtures.length;
+        if (intents < 5) {
+          failures.push(`${skillPath}/routing-eval.jsonl has ${intents} intents (need >= 5)`);
         }
       }
       return failures.length === 0
@@ -220,7 +223,9 @@ const DIMENSIONS: Array<
         };
       }
       const content = readFileSync(path, 'utf-8');
-      const versionEntryRe = new RegExp(`##\\s+\\[?${input.manifest.version.replace(/\./g, '\\.')}\\]?`);
+      // Ours (governedwork fork): a heading line for exactly this version — `## [x.y.z]` or
+      // `## x.y.z` followed by `]`, whitespace or the end — never a longer version or prose.
+      const versionEntryRe = new RegExp(`^##\\s+\\[?${input.manifest.version.replace(/\./g, '\\.')}(?:\\]|\\s|$)`, 'm');
       if (!versionEntryRe.test(content)) {
         return {
           passed: false,
