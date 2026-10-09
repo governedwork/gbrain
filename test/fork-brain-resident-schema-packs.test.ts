@@ -137,6 +137,29 @@ describe('brain-resident schema packs', () => {
     });
   });
 
+  test('schema_lint by name lints a brain-resident pack as declared, for callers that can read it', async () => {
+    await withEnv({ GBRAIN_HOME: home, GBRAIN_SCHEMA_PACK: undefined }, async () => {
+      await put(local(), { name: 'acme-area', expected_revision: null, manifest: manifest('acme-area', ['bet'], {
+        link_types: [{ name: 'amends' }],
+        frontmatter_links: [{ page_type: 'bet', fields: ['amends'], link_type: 'amends' }],
+      }) });
+      await put(local(), { name: 'acme-pack', expected_revision: null, manifest: manifest('acme-pack', [], {
+        link_types: [{ name: 'amends' }], borrow_from: [{ pack: 'acme-area', types: ['bet'] }],
+      }) });
+      // A fresh process: the overlay is loaded from the database by the op itself.
+      _resetBrainResidentPacksForTests();
+      _resetPackCacheForTests();
+      type Report = { error?: string; errors?: Array<{ rule: string }> };
+      const lint = (ctx: OperationContext) => operationsByName.schema_lint!.handler(ctx, { pack: 'acme-pack' }) as Promise<Report>;
+      const own = await lint(reader('acme'));
+      expect(own.error).toBeUndefined();
+      expect(own.errors!.map(e => e.rule)).toEqual(['borrow_drops_frontmatter_links']);
+      // Another source's pack answers exactly like a missing one.
+      expect(await lint(reader('globex'))).toEqual({ error: 'pack_not_found', pack: 'acme-pack' });
+      expect(await operationsByName.schema_lint!.handler(reader('acme'), { pack: 'no-such-pack' })).toEqual({ error: 'pack_not_found', pack: 'no-such-pack' });
+    });
+  });
+
   test('another process sees a new revision within the stat-TTL', async () => {
     const r1 = await put(local(), { name: 'acme-pack', manifest: manifest('acme-pack', ['client']), expected_revision: null });
     // Simulate a second process: its overlay was loaded at r1, then another
