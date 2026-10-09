@@ -6,7 +6,7 @@
 // the pack stat-TTL.
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
@@ -17,7 +17,7 @@ import { OperationError } from '../src/core/ops/contract.ts';
 import { _resetPackCacheForTests } from '../src/core/schema-pack/registry.ts';
 import { SCHEMA_PACK_API_VERSION } from '../src/core/schema-pack/manifest-v1.ts';
 import {
-  _resetBrainResidentPacksForTests, brainResidentPack, keepBrainResidentPacksFresh,
+  _resetBrainResidentPacksForTests, brainResidentPack, keepBrainResidentPacksFresh, refreshBrainResidentPacks,
 } from '../src/core/schema-pack/db-store.ts';
 
 let engine: PGLiteEngine;
@@ -157,6 +157,62 @@ describe('brain-resident schema packs', () => {
       // Another source's pack answers exactly like a missing one.
       expect(await lint(reader('globex'))).toEqual({ error: 'pack_not_found', pack: 'acme-pack' });
       expect(await operationsByName.schema_lint!.handler(reader('acme'), { pack: 'no-such-pack' })).toEqual({ error: 'pack_not_found', pack: 'no-such-pack' });
+    });
+  });
+
+  // acme's pack carries content only acme may read. Packs a globex caller CAN read reach it
+  // through borrow_from or extends; resolving them for the lint must not hand acme's types,
+  // fields or links to that caller.
+  async function seedCrossSourceChain(): Promise<void> {
+    const secretLink = { link_types: [{ name: 'amends' }], frontmatter_links: [{ page_type: 'secretdeal', fields: ['secret_field'], link_type: 'amends' }] };
+    await put(local('acme'), { name: 'acme-secret', expected_revision: null, manifest: manifest('acme-secret', ['secretdeal'], secretLink) });
+    await put(local('globex'), { name: 'globex-borrows', expected_revision: null, manifest: manifest('globex-borrows', [], {
+      link_types: [{ name: 'amends' }], borrow_from: [{ pack: 'acme-secret', types: ['secretdeal'] }],
+    }) });
+    await put(local('globex'), { name: 'globex-extends', expected_revision: null, manifest: manifest('globex-extends', [], { extends: 'acme-secret' }) });
+    const dir = join(home, '.gbrain', 'schema-packs', 'disk-borrows');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'pack.json'), JSON.stringify(manifest('disk-borrows', [], {
+      link_types: [{ name: 'amends' }], borrow_from: [{ pack: 'acme-secret', types: ['secretdeal'] }],
+    })));
+    _resetBrainResidentPacksForTests();
+    _resetPackCacheForTests();
+  }
+
+  type LintAnswer = { error?: string; pack?: string; errors?: Array<{ rule: string; message: string }>; warnings?: Array<{ rule: string }> };
+  const lintAs = (ctx: OperationContext, p: Record<string, unknown>) => operationsByName.schema_lint!.handler(ctx, p) as Promise<LintAnswer>;
+  const federated = { ...reader('globex'), auth: { ...(reader('globex').auth as object), allowedSources: ['acme', 'globex'] } } as unknown as OperationContext;
+
+  test('schema_lint by name refuses a pack whose extends or borrow_from reaches a source the caller cannot read', async () => {
+    await withEnv({ GBRAIN_HOME: home, GBRAIN_SCHEMA_PACK: undefined }, async () => {
+      await seedCrossSourceChain();
+      // Baseline: get_schema_pack shows globex its own manifest, never what acme-secret declares.
+      expect(JSON.stringify(await get(reader('globex'), { name: 'globex-borrows' }))).not.toContain('secret_field');
+      for (const name of ['globex-borrows', 'globex-extends', 'disk-borrows']) {
+        expect(await lintAs(reader('globex'), { pack: name })).toEqual({ error: 'pack_not_found', pack: name });
+      }
+      // Control: a caller granted both sources lints the same pack and sees the dropped link.
+      const both = await lintAs(federated, { pack: 'globex-borrows' });
+      expect(both.errors!.map(e => e.rule)).toEqual(['borrow_drops_frontmatter_links']);
+      expect(both.errors![0]!.message).toContain('secret_field');
+    });
+  });
+
+  test('schema_lint of the active pack skips the borrow rules rather than read a source the caller cannot', async () => {
+    await withEnv({ GBRAIN_HOME: home, GBRAIN_SCHEMA_PACK: 'disk-borrows' }, async () => {
+      await seedCrossSourceChain();
+      // The active pack's RESOLVED form is already every reader's: schema_graph hands it out
+      // (it reads the overlay a serving process keeps loaded, so load it as serve does).
+      await refreshBrainResidentPacks(engine);
+      const graph = await operationsByName.schema_graph!.handler(reader('globex'), {}) as { nodes: Array<{ name: string }> };
+      expect(graph.nodes.map(n => n.name)).toContain('secretdeal');
+      // What acme-secret declares beyond that (the link borrow_from drops) stays acme's.
+      const active = await lintAs(reader('globex'), {});
+      expect(JSON.stringify(active)).not.toContain('secret_field');
+      expect(active.warnings!.map(w => w.rule)).toContain('borrow_checks_skipped');
+      // Control: a caller granted acme gets the borrow rules on the same active pack.
+      const both = await lintAs(federated, {});
+      expect(both.errors!.map(e => e.rule)).toEqual(['borrow_drops_frontmatter_links']);
     });
   });
 

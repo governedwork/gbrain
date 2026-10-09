@@ -32,6 +32,22 @@ function readableSources(ctx: Parameters<Operation['handler']>[0]): string[] | n
   return scope.sourceIds ?? (scope.sourceId ? [scope.sourceId] : []);
 }
 
+/**
+ * Ours (governedwork fork): whether the caller may read every brain-resident pack that
+ * resolving `name` and linting its borrows reads (root, extends chain, borrow_from sources).
+ * Disk and bundled packs belong to no source.
+ */
+async function packChainReadable(ctx: Parameters<Operation['handler']>[0], name: string): Promise<boolean> {
+  const readable = readableSources(ctx);
+  if (readable === null) return true;
+  const { packResolutionNames } = await import('../schema-pack/load-active.ts');
+  const { brainResidentPackSource } = await import('../schema-pack/db-store.ts');
+  return (await packResolutionNames(name)).every((n) => {
+    const owner = brainResidentPackSource(n);
+    return owner === null || readable.includes(owner);
+  });
+}
+
 const get_active_schema_pack: Operation = {
   name: 'get_active_schema_pack',
   mutating: false,
@@ -137,8 +153,8 @@ const schema_lint: Operation = {
   scope: 'read',
   handler: async (ctx, p) => {
     const { runAllLintRules } = await import('../schema-pack/lint-rules.ts');
-    const { loadActivePackDeclared, loadDeclaredPackByName } = await import('../schema-pack/load-active.ts');
-    const { brainResidentPackSource, refreshBrainResidentPacks } = await import('../schema-pack/db-store.ts');
+    const { loadDeclaredPackByName, loadResolvedPackByName, resolveActivePackNameOnly } = await import('../schema-pack/load-active.ts');
+    const { refreshBrainResidentPacks } = await import('../schema-pack/db-store.ts');
     const { loadConfig } = await import('../config.ts');
     const cfg = loadConfig();
     // Ours (governedwork fork): brain-resident packs resolve from the overlay; load it first.
@@ -157,11 +173,10 @@ const schema_lint: Operation = {
       // (pack_not_found, no path echo), never a distinct "bad name" shape.
       const { isValidPackName } = await import('../schema-pack/mutate.ts');
       if (!isValidPackName(packName)) return notFound;
-      // Ours (governedwork fork): a brain-resident pack owned by a source the caller cannot
-      // read answers like a missing one, as get_schema_pack does.
-      const owner = brainResidentPackSource(packName);
-      const readable = readableSources(ctx);
-      if (owner !== null && readable !== null && !readable.includes(owner)) return notFound;
+      // Ours (governedwork fork): a pack that is, or extends or borrows from, a brain-resident
+      // pack owned by a source the caller cannot read answers like a missing one, as
+      // get_schema_pack does for the pack itself — checked before anything is resolved.
+      if (!(await packChainReadable(ctx, packName))) return notFound;
       // Ours (governedwork fork): by name from the brain's database, disk or the bundled
       // packs — the loader the registry uses. #4373: lint the MERGED manifest so
       // extends-inherited page types count as declared — parity with the active branch.
@@ -176,7 +191,14 @@ const schema_lint: Operation = {
       // #4653: tier-4 DB-plane schema_pack, same read get_active_schema_pack does.
       const { readDbSchemaPack } = await import('../schema-pack/best-effort.ts');
       const dbConfig = await readDbSchemaPack(ctx.engine);
-      loaded = await loadActivePackDeclared({ cfg, remote: ctx.remote ?? true, sourceId: ctx.sourceId, dbConfig });
+      const activeName = resolveActivePackNameOnly({ cfg, remote: ctx.remote ?? true, sourceId: ctx.sourceId, dbConfig }).pack_name;
+      // Ours (governedwork fork): the active pack's resolved form is every reader's already
+      // (schema_graph, schema_explain_type hand it out). The borrow rules read further, into
+      // each source as declared, so when the chain reaches a source the caller cannot read
+      // they are skipped (borrow_checks_skipped) and only the resolved form is linted.
+      loaded = await packChainReadable(ctx, activeName)
+        ? await loadDeclaredPackByName(activeName)
+        : { resolved: await loadResolvedPackByName(activeName), declared: undefined };
     }
     const { resolved, declared } = loaded;
     // File-plane only over MCP; the engine-aware --with-db opt-in is
