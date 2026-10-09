@@ -149,7 +149,7 @@ describe('brain-resident schema packs', () => {
       // A fresh process: the overlay is loaded from the database by the op itself.
       _resetBrainResidentPacksForTests();
       _resetPackCacheForTests();
-      type Report = { error?: string; errors?: Array<{ rule: string }> };
+      type Report = { error?: string; pack?: string; errors?: Array<{ rule: string }> };
       const lint = (ctx: OperationContext) => operationsByName.schema_lint!.handler(ctx, { pack: 'acme-pack' }) as Promise<Report>;
       const own = await lint(reader('acme'));
       expect(own.error).toBeUndefined();
