@@ -26,7 +26,7 @@ export interface DeclaredPack {
   resolve: (manifest: SchemaPackManifest) => Promise<ResolvedPack>;
 }
 
-export const BORROW_RULE_NAMES = [
+const BORROW_RULE_NAMES = [
   'borrow_name_undeclared',
   'borrow_name_clash',
   'borrow_replaces_inherited_type',
@@ -93,7 +93,8 @@ export const borrowNameClash: LintRule = (manifest, opts) => {
     for (const entry of declared.manifest.borrow_from) {
       for (const name of k.names(entry)) {
         const earlier = from.get(name);
-        if (earlier !== undefined) {
+        // The same pack named twice borrows the name once (resolvePack keeps a Set): no clash.
+        if (earlier !== undefined && earlier !== entry.pack) {
           issues.push({
             rule: 'borrow_name_clash',
             severity: 'error',
@@ -101,10 +102,10 @@ export const borrowNameClash: LintRule = (manifest, opts) => {
             pack: manifest.name,
             [k.field]: name,
           });
-        } else {
+        } else if (earlier === undefined) {
           from.set(name, entry.pack);
         }
-        if (own.has(name)) {
+        if (own.has(name) && earlier !== entry.pack) {
           issues.push({
             rule: 'borrow_name_clash',
             severity: 'error',
@@ -120,6 +121,38 @@ export const borrowNameClash: LintRule = (manifest, opts) => {
 };
 
 /**
+ * The page types and link types a pack inherits through `extends`, by name,
+ * as resolvePack merges them: each ancestor AS DECLARED, nearest wins. An
+ * ancestor's own borrow_from is child-only in the merge (merge.ts), so what
+ * an ancestor borrowed is never inherited and is not counted here.
+ */
+async function inheritedDefinitions(
+  declared: DeclaredPack,
+): Promise<{ type: Map<string, unknown>; 'link type': Map<string, unknown> }> {
+  const inherited = { type: new Map<string, unknown>(), 'link type': new Map<string, unknown>() };
+  const seen = new Set([declared.manifest.name]);
+  for (let name = declared.manifest.extends; name && !seen.has(name);) {
+    seen.add(name);
+    const ancestor = await declared.loadByName(name);
+    for (const k of KINDS) {
+      for (const t of k.declared(ancestor)) if (!inherited[k.kind].has(t.name)) inherited[k.kind].set(t.name, t);
+    }
+    name = ancestor.extends;
+  }
+  return inherited;
+}
+
+/** Array fields whose order means nothing: aliases (a symmetric closure) and path_prefixes (any match yields the same type). */
+const SET_VALUED_FIELDS = ['aliases', 'path_prefixes'] as const;
+
+/** A definition's canonical form, with set-valued arrays sorted so their order never reads as a difference. */
+function comparable(definition: unknown): string {
+  const d = { ...(definition as Record<string, unknown>) };
+  for (const f of SET_VALUED_FIELDS) if (Array.isArray(d[f])) d[f] = [...(d[f] as string[])].sort();
+  return canonicalJSONStringify(d);
+}
+
+/**
  * A borrowed type or link type that differs from the one the pack inherits
  * through `extends`: the merge puts the borrowed one above every ancestor, so
  * it replaces the inherited one without a word. Borrowing a definition
@@ -130,16 +163,15 @@ export const borrowReplacesInheritedType: LintRule = async (manifest, opts) => {
   const declared = declaredFor(manifest, opts);
   if (!declared || !declared.manifest.extends) return [];
   const parentName = declared.manifest.extends;
-  const parent = (await declared.resolve(await declared.loadByName(parentName))).manifest;
+  const inherited = await inheritedDefinitions(declared);
   const issues: LintIssue[] = [];
   for (const entry of declared.manifest.borrow_from) {
     const source = await declared.loadByName(entry.pack);
     for (const k of KINDS) {
-      const inherited = new Map(k.declared(parent).map((t) => [t.name, canonicalJSONStringify(t)]));
-      for (const name of k.names(entry)) {
-        const was = inherited.get(name);
+      for (const name of new Set(k.names(entry))) {
+        const was = inherited[k.kind].get(name);
         const borrowed = k.declared(source).find((t) => t.name === name);
-        if (was === undefined || borrowed === undefined || was === canonicalJSONStringify(borrowed)) continue;
+        if (was === undefined || borrowed === undefined || comparable(was) === comparable(borrowed)) continue;
         issues.push({
           rule: 'borrow_replaces_inherited_type',
           severity: 'error',
@@ -155,32 +187,38 @@ export const borrowReplacesInheritedType: LintRule = async (manifest, opts) => {
 
 type FrontmatterLink = SchemaPackManifest['frontmatter_links'][number];
 
-const linkKey = (l: FrontmatterLink): string =>
-  // NUL delimiter, as merge.ts keys frontmatter_links: the parts are unconstrained strings.
-  `${l.page_type}\x00${[...l.fields].sort().join('\x00')}\x00${l.link_type}`;
+// merge.ts keys frontmatter_links on (page_type, link_type), child wins: the
+// pack's own entry for that key IS the link, whatever fields it lists.
+const linkKey = (l: FrontmatterLink): string => `${l.page_type}\x00${l.link_type}`;
 
 /**
  * Every frontmatter link a borrowed type carries in its source pack AS
  * RESOLVED (links the source inherits through its own `extends` included)
- * must be in the borrowing pack's resolved manifest: `borrow_from` copies
- * types, never the links that use them. `manifest` is the resolved pack, as
- * every lint caller passes it.
+ * must be in the borrowing pack's resolved manifest with at least the
+ * source's fields: `borrow_from` copies types, never the links that use
+ * them. `manifest` is the resolved pack, as every lint caller passes it.
  */
 export const borrowDropsFrontmatterLinks: LintRule = async (manifest, opts) => {
   const declared = declaredFor(manifest, opts);
   if (!declared) return [];
-  const present = new Set(manifest.frontmatter_links.map(linkKey));
+  const present = new Map(manifest.frontmatter_links.map((l) => [linkKey(l), l]));
   const issues: LintIssue[] = [];
   for (const entry of declared.manifest.borrow_from) {
     const types = new Set(entry.types ?? []);
     if (types.size === 0) continue;
     const source = (await declared.resolve(await declared.loadByName(entry.pack))).manifest;
     for (const link of source.frontmatter_links) {
-      if (!types.has(link.page_type) || present.has(linkKey(link))) continue;
+      if (!types.has(link.page_type)) continue;
+      const restated = present.get(linkKey(link));
+      const missing = restated ? link.fields.filter((f) => !restated.fields.includes(f)) : link.fields;
+      if (missing.length === 0) continue;
+      const want = `{page_type: ${link.page_type}, fields: [${[...new Set([...(restated?.fields ?? []), ...link.fields])].join(', ')}], link_type: ${link.link_type}}`;
       issues.push({
         rule: 'borrow_drops_frontmatter_links',
         severity: 'error',
-        message: `type '${link.page_type}' borrowed from '${entry.pack}' carries the frontmatter link ${link.page_type}.${link.fields.join('/')} -> ${link.link_type} there, and borrow_from does not bring it along. Restate {page_type: ${link.page_type}, fields: [${link.fields.join(', ')}], link_type: ${link.link_type}} in this pack's frontmatter_links`,
+        message: restated
+          ? `type '${link.page_type}' borrowed from '${entry.pack}' carries the frontmatter link ${link.page_type}.${link.fields.join('/')} -> ${link.link_type} there; this pack restates that link without ${missing.join(', ')}, and borrow_from does not bring the rest along. Make this pack's entry ${want}`
+          : `type '${link.page_type}' borrowed from '${entry.pack}' carries the frontmatter link ${link.page_type}.${link.fields.join('/')} -> ${link.link_type} there, and borrow_from does not bring it along. Restate ${want} in this pack's frontmatter_links`,
         pack: manifest.name,
         type: link.page_type,
         link: link.link_type,
@@ -196,7 +234,7 @@ export const borrowChecksSkipped: LintRule = (manifest, opts) => {
   return [{
     rule: 'borrow_checks_skipped',
     severity: 'warning',
-    message: `pack '${manifest.name}' borrows from ${manifest.borrow_from.map((e) => `'${e.pack}'`).join(', ')}, but this lint had only the resolved manifest, so ${BORROW_RULE_NAMES.join(', ')} did not run. Make the pack and every pack it extends or borrows from loadable, then lint it again`,
+    message: `pack '${manifest.name}' borrows from ${manifest.borrow_from.map((e) => `'${e.pack}'`).join(', ')}, but this lint ran without the pack as declared, so ${BORROW_RULE_NAMES.join(', ')} did not run. Make the pack and every pack it extends or borrows from loadable, then lint it again`,
     pack: manifest.name,
   }];
 };
