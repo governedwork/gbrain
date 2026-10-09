@@ -94,7 +94,9 @@ export const borrowNameClash: LintRule = (manifest, opts) => {
       for (const name of k.names(entry)) {
         const earlier = from.get(name);
         // The same pack named twice borrows the name once (resolvePack keeps a Set): no clash.
-        if (earlier !== undefined && earlier !== entry.pack) {
+        if (earlier === undefined) {
+          from.set(name, entry.pack);
+        } else if (earlier !== entry.pack) {
           issues.push({
             rule: 'borrow_name_clash',
             severity: 'error',
@@ -102,8 +104,6 @@ export const borrowNameClash: LintRule = (manifest, opts) => {
             pack: manifest.name,
             [k.field]: name,
           });
-        } else if (earlier === undefined) {
-          from.set(name, entry.pack);
         }
         if (own.has(name) && earlier !== entry.pack) {
           issues.push({
