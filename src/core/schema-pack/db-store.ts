@@ -19,12 +19,17 @@ import { AliasCycleError, AliasDepthExceededError } from './closure.ts';
 import { isBundledPackName } from './bundled.ts';
 import { ExtendsChainTooDeepError, invalidatePackCache, resolveStatTtlMs, UnknownPackError } from './registry.ts';
 
-const overlay = new Map<string, { revision: string; manifest: SchemaPackManifest }>();
+const overlay = new Map<string, { revision: string; source_id: string; manifest: SchemaPackManifest }>();
 let overlayGeneration: string | null = null;
 
 /** The brain-resident manifest for `name`, if the overlay holds one. */
 export function brainResidentPack(name: string): SchemaPackManifest | null {
   return overlay.get(name)?.manifest ?? null;
+}
+
+/** The source that owns the brain-resident pack `name`, if the overlay holds one. */
+export function brainResidentPackSource(name: string): string | null {
+  return overlay.get(name)?.source_id ?? null;
 }
 
 /** Reload the overlay from the database when the heads changed since the last load. */
@@ -36,14 +41,14 @@ export async function refreshBrainResidentPacks(engine: Pick<SqlEngine, 'execute
     generation = row?.generation ?? ':0';
   } catch { return; } // tables not migrated yet
   if (generation === overlayGeneration) return;
-  const rows = await engine.executeRaw<{ name: string; revision: string; manifest: unknown }>(
-    `SELECT h.name, h.revision::text AS revision, r.manifest
+  const rows = await engine.executeRaw<{ name: string; revision: string; source_id: string; manifest: unknown }>(
+    `SELECT h.name, h.revision::text AS revision, h.source_id, r.manifest
       FROM schema_pack_heads h JOIN schema_pack_revisions r ON r.revision = h.revision`);
   const changed = new Set<string>([...overlay.keys(), ...rows.map(r => r.name)]);
   overlay.clear();
   for (const row of rows) {
     const manifest = typeof row.manifest === 'string' ? JSON.parse(row.manifest) : row.manifest;
-    overlay.set(row.name, { revision: row.revision, manifest: parseSchemaPackManifest(manifest, { path: `brain:${row.name}` }) });
+    overlay.set(row.name, { revision: row.revision, source_id: row.source_id, manifest: parseSchemaPackManifest(manifest, { path: `brain:${row.name}` }) });
   }
   overlayGeneration = generation;
   for (const name of changed) invalidatePackCache(name);

@@ -25,6 +25,13 @@ import { sourceScopeOpts } from './context.ts';
 // the localOnly posture (R2 regression preserved).
 // ──────────────────────────────────────────────────────────────────────
 
+/** The sources a caller may read brain-resident packs from; null = a trusted local caller (every source). */
+function readableSources(ctx: Parameters<Operation['handler']>[0]): string[] | null {
+  if (ctx.remote === false) return null;
+  const scope = sourceScopeOpts(ctx);
+  return scope.sourceIds ?? (scope.sourceId ? [scope.sourceId] : []);
+}
+
 const get_active_schema_pack: Operation = {
   name: 'get_active_schema_pack',
   mutating: false,
@@ -130,50 +137,51 @@ const schema_lint: Operation = {
   scope: 'read',
   handler: async (ctx, p) => {
     const { runAllLintRules } = await import('../schema-pack/lint-rules.ts');
-    const { loadActivePackDeclared, declaredPack } = await import('../schema-pack/load-active.ts');
-    const { loadConfig, gbrainPath } = await import('../config.ts');
-    const { existsSync } = await import('node:fs');
-    const { join } = await import('node:path');
+    const { loadActivePackDeclared, loadDeclaredPackByName } = await import('../schema-pack/load-active.ts');
+    const { brainResidentPackSource, refreshBrainResidentPacks } = await import('../schema-pack/db-store.ts');
+    const { loadConfig } = await import('../config.ts');
     const cfg = loadConfig();
-    let manifest;
+    // Ours (governedwork fork): brain-resident packs resolve from the overlay; load it first.
+    await refreshBrainResidentPacks(ctx.engine);
     // Ours (governedwork fork): the pack as declared, so the borrow_from rules run over MCP too.
-    let declared;
+    let loaded;
     if (p.pack) {
-      // Locate by name without trust-gating per-call schema_pack opt
-      // (that's a separate axis — this is just file lookup).
       const packName = p.pack as string;
+      const notFound = { error: 'pack_not_found', pack: packName };
       // SECURITY: `pack` is caller-supplied on a remote-reachable read op and
-      // is joined into a filesystem path below — an unguarded '../'-shaped
+      // reaches the pack locator's filesystem join — an unguarded '../'-shaped
       // name escapes $GBRAIN_HOME/schema-packs/ (existence oracle + arbitrary
       // pack.yaml parse). Reuse the SAME name guard the mutate path uses
-      // (isValidPackName in schema-pack/mutate.ts) BEFORE any join.
+      // (isValidPackName in schema-pack/mutate.ts) BEFORE any lookup.
       // Anti-enumeration: invalid names answer EXACTLY like missing packs
       // (pack_not_found, no path echo), never a distinct "bad name" shape.
       const { isValidPackName } = await import('../schema-pack/mutate.ts');
-      if (!isValidPackName(packName)) return { error: 'pack_not_found', pack: packName };
-      const candidates = ['pack.yaml', 'pack.yml', 'pack.json'];
-      let path: string | null = null;
-      for (const c of candidates) {
-        const candidate = join(gbrainPath('schema-packs', packName), c);
-        if (existsSync(candidate)) { path = candidate; break; }
+      if (!isValidPackName(packName)) return notFound;
+      // Ours (governedwork fork): a brain-resident pack owned by a source the caller cannot
+      // read answers like a missing one, as get_schema_pack does.
+      const owner = brainResidentPackSource(packName);
+      const readable = readableSources(ctx);
+      if (owner !== null && readable !== null && !readable.includes(owner)) return notFound;
+      // Ours (governedwork fork): by name from the brain's database, disk or the bundled
+      // packs — the loader the registry uses. #4373: lint the MERGED manifest so
+      // extends-inherited page types count as declared — parity with the active branch.
+      const { UnknownPackError } = await import('../schema-pack/registry.ts');
+      try {
+        loaded = await loadDeclaredPackByName(packName);
+      } catch (err) {
+        if (err instanceof UnknownPackError && err.name_ === packName) return notFound;
+        throw err;
       }
-      if (!path) return { error: 'pack_not_found', pack: packName };
-      const { loadPackFromFile: loader } = await import('../schema-pack/loader.ts');
-      // #4373: lint the MERGED manifest so extends-inherited page types
-      // count as declared — parity with the active-pack branch below.
-      declared = declaredPack(loader(path));
-      manifest = (await declared.resolve(declared.manifest)).manifest;
     } else {
       // #4653: tier-4 DB-plane schema_pack, same read get_active_schema_pack does.
       const { readDbSchemaPack } = await import('../schema-pack/best-effort.ts');
       const dbConfig = await readDbSchemaPack(ctx.engine);
-      const loaded = await loadActivePackDeclared({ cfg, remote: ctx.remote ?? true, sourceId: ctx.sourceId, dbConfig });
-      manifest = loaded.resolved.manifest;
-      declared = loaded.declared;
+      loaded = await loadActivePackDeclared({ cfg, remote: ctx.remote ?? true, sourceId: ctx.sourceId, dbConfig });
     }
+    const { resolved, declared } = loaded;
     // File-plane only over MCP; the engine-aware --with-db opt-in is
     // CLI-only (Phase 5 wiring). MCP callers get the 9 file-plane rules.
-    return await runAllLintRules(manifest, { declared });
+    return await runAllLintRules(resolved.manifest, { declared });
   },
 };
 
@@ -394,10 +402,7 @@ const get_schema_pack: Operation = {
   },
   scope: 'read',
   handler: async (ctx, p) => {
-    const { sourceScopeOpts } = await import('./context.ts');
-    const scope = sourceScopeOpts(ctx);
-    const readable = ctx.remote === false ? null : scope.sourceIds ?? (scope.sourceId ? [scope.sourceId] : []);
-    return (await import('../schema-pack/db-store.ts')).getBrainPack(ctx.engine, String(p.name), p.revision as string | undefined, readable);
+    return (await import('../schema-pack/db-store.ts')).getBrainPack(ctx.engine, String(p.name), p.revision as string | undefined, readableSources(ctx));
   },
   cliHints: { name: 'get-schema-pack', positional: [] },
 };
