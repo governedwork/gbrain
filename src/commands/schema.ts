@@ -29,7 +29,8 @@ import {
   addTypeToPack,
   invalidatePackCache,
   loadActivePack,
-  loadResolvedPackByName,
+  loadActivePackDeclared,
+  loadDeclaredPackByName,
   removeAliasFromType,
   removeLinkTypeFromPack,
   removePrefixFromType,
@@ -49,6 +50,7 @@ import {
   updateTypeOnPack,
   __setPackLocatorForTests,
   _resetPackLocatorForTests,
+  type DeclaredPack,
 } from '../core/schema-pack/index.ts';
 import type { SchemaPackManifest, PackPrimitive } from '../core/schema-pack/manifest-v1.ts';
 import { PACK_PRIMITIVES } from '../core/schema-pack/manifest-v1.ts';
@@ -790,6 +792,9 @@ async function runLintCmd(args: string[]): Promise<void> {
   // schema_pack (#4653) on the SAME connection the DB-backed rules use.
   const lint = async (engine?: import('../core/engine.ts').BrainEngine) => {
     let pack: SchemaPackManifest | null;
+    // Ours (governedwork fork): the pack as declared, for the borrow_from rules. Left unset on the
+    // raw-fallback branch, where they report borrow_checks_skipped instead.
+    let declared: DeclaredPack | undefined;
     if (name) {
       const p = packPathByName(name);
       let raw: SchemaPackManifest | null;
@@ -801,7 +806,9 @@ async function runLintCmd(args: string[]): Promise<void> {
         // raw-manifest lint. Fall back to the raw child (with a stderr
         // warning) when the chain can't be resolved, e.g. missing parent.
         try {
-          pack = (await loadResolvedPackByName(name)).manifest;
+          const loaded = await loadDeclaredPackByName(name);
+          pack = loaded.resolved.manifest;
+          declared = loaded.declared;
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
           console.error(`warn: could not resolve extends chain for pack \`${name}\` (${msg}); linting raw manifest only`);
@@ -812,13 +819,15 @@ async function runLintCmd(args: string[]): Promise<void> {
       }
     } else {
       const dbConfig = engine ? await readDbSchemaPack(engine) : await readDbSchemaPackConfig(cfg);
-      pack = (await loadActivePack({ cfg, remote: false, dbConfig })).manifest;
+      const loaded = await loadActivePackDeclared({ cfg, remote: false, dbConfig });
+      pack = loaded.resolved.manifest;
+      declared = loaded.declared;
     }
     if (!pack) {
       console.error(`Pack not found: ${name}`);
       process.exit(1);
     }
-    return { pack, report: await runAllLintRules(pack, engine ? { engine } : undefined) };
+    return { pack, report: await runAllLintRules(pack, { ...(engine ? { engine } : {}), declared }) };
   };
   const { pack, report } = withDb ? await withConnectedEngine(lint) : await lint();
   if (json) {

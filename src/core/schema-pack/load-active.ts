@@ -28,6 +28,7 @@ import type { GBrainConfig } from '../config.ts';
 import { gbrainPath } from '../config.ts';
 import { brainResidentPack } from './db-store.ts';
 import type { SchemaPackManifest } from './manifest-v1.ts';
+import type { DeclaredPack } from './borrow-lint-rules.ts';
 import { loadPackFromFile } from './loader.ts';
 import {
   resolveActivePackName,
@@ -197,6 +198,34 @@ export async function loadResolvedPackByName(name: string): Promise<ResolvedPack
   return await resolvePack(manifest, loadPackManifestByName, {
     loadByPath: (n) => _packLocator(n),
   });
+}
+
+/**
+ * Ours (governedwork fork): a loaded manifest as declared, with the loader + resolver this module
+ * resolves it through — what the borrow_from lint rules need
+ * (LintOpts.declared): the resolved manifest hides every borrow outcome.
+ */
+export function declaredPack(manifest: SchemaPackManifest): DeclaredPack {
+  return { manifest, loadByName: loadPackManifestByName, resolve: resolveLoadedPack };
+}
+
+/** Ours (governedwork fork): `loadResolvedPackByName`, plus the pack as declared. */
+export async function loadDeclaredPackByName(
+  name: string,
+): Promise<{ resolved: ResolvedPack; declared: DeclaredPack }> {
+  const manifest = await loadPackManifestByName(name);
+  return { resolved: await resolveLoadedPack(manifest), declared: declaredPack(manifest) };
+}
+
+/**
+ * Ours (governedwork fork): `loadActivePack`, plus the active pack as declared. Skips the TTL
+ * fast path (it holds only the resolved form); resolvePack's identity cache
+ * still returns the same resolved object.
+ */
+export async function loadActivePackDeclared(
+  input: LoadActivePackInput,
+): Promise<{ resolved: ResolvedPack; declared: DeclaredPack }> {
+  return await loadDeclaredPackByName(resolveActivePackName(buildResolutionInput(input)).pack_name);
 }
 
 /**
