@@ -58,7 +58,8 @@ const list_skills: Operation = {
     const compatibility = await import('../shared-skills/compatibility.ts');
     if (await compatibility.sharedCatalogActive(ctx)) {
       if (query) throw refuseQueryOnSharedCatalog("this brain's shared catalog");
-      return compatibility.listLegacySharedSkills(ctx, typeof p.section === 'string' ? p.section : undefined);
+      // fork (governedwork): serve the host skills beside the shared catalog — see shared-skills/beside-host.ts.
+      return (await import('../shared-skills/beside-host.ts')).listSkillsBesideHost(ctx, typeof p.section === 'string' ? p.section : undefined);
     }
     const sc = await import('../skill-catalog.ts');
     const publish = await sc.readMcpPublishSkills(ctx);
@@ -101,7 +102,11 @@ const get_skill: Operation = {
     if (p.expected_brain_id !== undefined) throw opError('invalid_params', 'expected_brain_id requires schema_version 2; it asserts identity and never selects a brain connection.', 'Pass schema_version: 2 with expected_brain_id, or drop expected_brain_id.');
     if (p.schema_version !== undefined && p.schema_version !== 1) throw invalidParam(ctx, 'get_skill', 'schema_version', 'Supported skill catalog schema versions are 1 and 2.', { choices: ['1', '2'], example: 2 });
     const compatibility = await import('../shared-skills/compatibility.ts');
-    if (await compatibility.sharedCatalogActive(ctx)) return compatibility.getLegacySharedSkill(ctx, p.name, typeof p.source_id === 'string' ? p.source_id : undefined);
+    if (await compatibility.sharedCatalogActive(ctx)) {
+      if (typeof p.source_id === 'string' && p.source_id.length > 0) return compatibility.getLegacySharedSkill(ctx, p.name, p.source_id);
+      // fork (governedwork): a name no shared skill uses falls back to the host skills — see shared-skills/beside-host.ts.
+      return (await import('../shared-skills/beside-host.ts')).getSkillBesideHost(ctx, p.name);
+    }
     const sc = await import('../skill-catalog.ts');
     const publish = await sc.readMcpPublishSkills(ctx);
     sc.assertPublishEnabled(ctx, publish);
