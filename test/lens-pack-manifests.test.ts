@@ -192,20 +192,17 @@ describe('v0.41 T4: gbrain-everything meta-pack shape', () => {
     expect(pack.extends).toBe('gbrain-investor');
   });
 
-  test('borrows from gbrain-creator + gbrain-engineer', () => {
-    const borrowedPacks = pack.borrow_from.map((b) => b.pack).sort();
-    expect(borrowedPacks).toEqual(['gbrain-creator', 'gbrain-engineer']);
+  // Ours (governedwork fork): `atom` is declared by the pack itself (gbrain-creator's
+  // definition, verbatim) instead of borrowed — gbrain-base's own `atom` made
+  // the borrow a silent replacement (borrow_replaces_inherited_type).
+  test('borrows learning from gbrain-engineer', () => {
+    expect(pack.borrow_from.map((b) => b.pack)).toEqual(['gbrain-engineer']);
+    expect(pack.borrow_from[0]!.types).toEqual(['learning']);
   });
 
-  test('borrows atom from creator and learning from engineer', () => {
-    const creatorBorrow = pack.borrow_from.find((b) => b.pack === 'gbrain-creator');
-    expect(creatorBorrow?.types).toContain('atom');
-    const engineerBorrow = pack.borrow_from.find((b) => b.pack === 'gbrain-engineer');
-    expect(engineerBorrow?.types).toContain('learning');
-  });
-
-  test('declares NO own page_types (everything via extends + borrow)', () => {
-    expect(pack.page_types).toEqual([]);
+  test("declares only atom, as gbrain-creator declares it", () => {
+    const creatorAtom = loadPack('gbrain-creator').page_types.find((t) => t.name === 'atom');
+    expect(pack.page_types).toEqual([creatorAtom!]);
   });
 
   test('explicitly re-declares phases from creator (borrow_from does NOT borrow phases)', () => {
