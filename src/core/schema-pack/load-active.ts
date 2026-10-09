@@ -176,6 +176,11 @@ export async function loadActivePack(input: LoadActivePackInput): Promise<Resolv
  * <name>` resolves by name via loadResolvedPackByName, #4501).
  */
 export async function resolveLoadedPack(manifest: SchemaPackManifest): Promise<ResolvedPack> {
+  // Ours (governedwork fork): resolvePack's identity fast path compares only this pack's
+  // own bytes, so a cached entry whose parent or borrow source changed on disk would come
+  // back stale. tryCachedPack runs the stat-TTL dependency check loadActivePack relies on
+  // and evicts such an entry (the cascade included); its return value is not needed here.
+  tryCachedPack(manifest.name);
   // Thread the locator so resolvePack can snapshot file paths + mtimes
   // for the stat-TTL gate on subsequent calls (codex C6 + D11 + D13).
   return await resolvePack(manifest, loadPackManifestByName, {
@@ -194,10 +199,7 @@ export async function resolveLoadedPack(manifest: SchemaPackManifest): Promise<R
  * SchemaPackManifestError).
  */
 export async function loadResolvedPackByName(name: string): Promise<ResolvedPack> {
-  const manifest = await loadPackManifestByName(name);
-  return await resolvePack(manifest, loadPackManifestByName, {
-    loadByPath: (n) => _packLocator(n),
-  });
+  return await resolveLoadedPack(await loadPackManifestByName(name));
 }
 
 /**
@@ -219,8 +221,8 @@ export async function loadDeclaredPackByName(
 
 /**
  * Ours (governedwork fork): `loadActivePack`, plus the active pack as declared. Skips the TTL
- * fast path (it holds only the resolved form); resolvePack's identity cache
- * still returns the same resolved object.
+ * fast path (it holds only the resolved form); resolveLoadedPack still applies the
+ * stat-TTL dependency check before resolvePack's identity cache answers.
  */
 export async function loadActivePackDeclared(
   input: LoadActivePackInput,
