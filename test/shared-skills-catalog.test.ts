@@ -356,9 +356,10 @@ test('initial pack artifacts and all revisions commit together and replay after 
   expect(replay.receipts[0].revision).toBe(result.receipts[0].revision);
   expect(replay.receipts[0].compacted).toBe(true);
   expect((await f.engine.executeRaw('SELECT * FROM shared_skill_revisions')).length).toBe(3);
-  const list = await skillsCatalogOperations.find(op => op.name === 'list_skills')!.handler(f.reader, {}) as { schema_version: number; skills: Array<{ name: string }> };
+  const list = await skillsCatalogOperations.find(op => op.name === 'list_skills')!.handler(f.reader, {}) as { schema_version: number; skills: Array<{ name: string; section: string }> };
   expect(list.schema_version).toBe(1);
-  expect(list.skills).toHaveLength(3);
+  // fork (governedwork): host skills are listed beside the shared ones (shared-skills/beside-host.ts).
+  expect(list.skills.filter(skill => skill.section === 'Published skills')).toHaveLength(3);
   const detail = await skillsCatalogOperations.find(op => op.name === 'get_skill')!.handler(f.reader, { name: 'memory-recall' }) as { schema_version: number; body: string };
   expect(detail.schema_version).toBe(1);
   expect(detail.body).toBe(initial_files['skills/memory-recall/SKILL.md']);
