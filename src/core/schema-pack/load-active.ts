@@ -231,6 +231,32 @@ export async function loadActivePackDeclared(
 }
 
 /**
+ * Ours (governedwork fork): every pack name resolving `root` and linting its borrows reads —
+ * root, its extends chain and every borrow_from source, each followed transitively —
+ * so a caller can be authorized for all of them before any is resolved. A pack
+ * that does not load ends its branch (resolution fails on it, reading nothing).
+ */
+export async function packResolutionNames(root: string): Promise<string[]> {
+  const seen = new Set<string>();
+  const pending = [root];
+  while (pending.length > 0) {
+    const name = pending.pop()!;
+    if (seen.has(name)) continue;
+    seen.add(name);
+    let manifest: SchemaPackManifest;
+    try {
+      manifest = await loadPackManifestByName(name);
+    } catch (err) {
+      if (err instanceof UnknownPackError) continue;
+      throw err;
+    }
+    if (manifest.extends) pending.push(manifest.extends);
+    for (const entry of manifest.borrow_from) pending.push(entry.pack);
+  }
+  return [...seen];
+}
+
+/**
  * Return the resolved pack NAME and source tier WITHOUT loading the
  * manifest from disk. Used by `gbrain schema active` to surface
  * provenance ("active pack: garry — source: gbrain.yml") without
