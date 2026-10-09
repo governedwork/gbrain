@@ -7,7 +7,7 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { operationsByName } from '../src/core/operations.ts';
@@ -52,10 +52,12 @@ const COMPANY_ORPHAN = pack({ name: 'company-orphan', borrow_from: [{ pack: 'are
 
 let tmpHome: string;
 
-function seedPack(m: { name: string }): void {
+function seedPack(m: { name: string }): string {
   const dir = join(tmpHome, '.gbrain', 'schema-packs', m.name);
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'pack.json'), JSON.stringify(m), 'utf-8');
+  const file = join(dir, 'pack.json');
+  writeFileSync(file, JSON.stringify(m), 'utf-8');
+  return file;
 }
 
 beforeEach(() => {
@@ -118,6 +120,43 @@ describe('schema_lint op — active pack borrow_from', () => {
     const report = await withEnv({ GBRAIN_HOME: tmpHome, GBRAIN_SCHEMA_PACK: 'company-drops' }, async () =>
       await operationsByName.schema_lint!.handler(ctxOf(), {}) as LintReport);
     expect(rules(report.errors)).toEqual(['borrow_drops_frontmatter_links']);
+  });
+});
+
+// The parent carries bet's `amends` link; the child borrows `bet` and inherits the
+// link through extends, so it is clean. Removing the link from the PARENT (the child
+// file untouched) must show up on the next lint once the pack stat-TTL has passed.
+describe('schema_lint op — a dependency edited after the pack was cached', () => {
+  const PARENT_WITH_LINK = pack({
+    name: 'parent-links',
+    link_types: [{ name: 'amends' }],
+    frontmatter_links: [{ page_type: 'bet', fields: ['amends'], link_type: 'amends' }],
+  });
+  const CHILD = pack({ name: 'child-borrows', extends: 'parent-links', borrow_from: [{ pack: 'area-a', types: ['bet'] }] });
+
+  async function lintTwiceAcrossParentEdit(params: Record<string, unknown>, env: Record<string, string>): Promise<[LintReport, LintReport]> {
+    const parentFile = seedPack(PARENT_WITH_LINK);
+    seedPack(CHILD);
+    return await withEnv({ GBRAIN_HOME: tmpHome, GBRAIN_PACK_STAT_TTL_MS: '0', ...env }, async () => {
+      const first = await operationsByName.schema_lint!.handler(ctxOf(), params) as LintReport;
+      writeFileSync(parentFile, JSON.stringify({ ...PARENT_WITH_LINK, frontmatter_links: [] }), 'utf-8');
+      const later = new Date(Date.now() + 60_000);
+      utimesSync(parentFile, later, later);
+      const second = await operationsByName.schema_lint!.handler(ctxOf(), params) as LintReport;
+      return [first, second];
+    });
+  }
+
+  it('the active pack is relinted against the edited parent', async () => {
+    const [first, second] = await lintTwiceAcrossParentEdit({}, { GBRAIN_SCHEMA_PACK: 'child-borrows' });
+    expect(first.errors).toEqual([]);
+    expect(rules(second.errors)).toEqual(['borrow_drops_frontmatter_links']);
+  });
+
+  it('a pack named in the call is relinted against the edited parent', async () => {
+    const [first, second] = await lintTwiceAcrossParentEdit({ pack: 'child-borrows' }, {});
+    expect(first.errors).toEqual([]);
+    expect(rules(second.errors)).toEqual(['borrow_drops_frontmatter_links']);
   });
 });
 
