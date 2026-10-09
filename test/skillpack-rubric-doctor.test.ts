@@ -150,6 +150,31 @@ describe('walkRubric — individual dimensions fail in isolation', () => {
     expect(d3?.passed).toBe(false);
   });
 
+  // Ours (governedwork fork): intents are counted the way routing-eval.ts loads fixtures.
+  test('dimension 3 (routing_evals_present) does not count comment or malformed lines as intents', async () => {
+    const dir = mkdtempSync(join(tmp, 'd3c-'));
+    buildTenOutOfTenPack(dir);
+    writeFileSync(
+      join(dir, 'skills/judge-foo/routing-eval.jsonl'),
+      ['// one', '// two', '# three', '{"expected_skill":"judge-foo"}', 'not json', '{"intent":"real","expected_skill":"judge-foo"}'].join('\n') + '\n',
+    );
+    const manifest = loadSkillpackManifest(dir);
+    const score = await walkRubric({ packRoot: dir, manifest });
+    const d3 = score.dimensions.find((d) => d.name === 'routing_evals_present');
+    expect(d3?.passed).toBe(false);
+    expect(d3?.detail).toContain('has 1 intents');
+  });
+
+  test('control: dimension 3 passes with 5 intents among comment lines', async () => {
+    const dir = mkdtempSync(join(tmp, 'd3k-'));
+    buildTenOutOfTenPack(dir);
+    const intents = Array.from({ length: 5 }, (_, i) => JSON.stringify({ intent: `judge as foo ${i}`, expected_skill: 'judge-foo' }));
+    writeFileSync(join(dir, 'skills/judge-foo/routing-eval.jsonl'), ['// fixtures', ...intents, '# end'].join('\n') + '\n');
+    const manifest = loadSkillpackManifest(dir);
+    const score = await walkRubric({ packRoot: dir, manifest });
+    expect(score.dimensions.find((d) => d.name === 'routing_evals_present')?.passed).toBe(true);
+  });
+
   test('dimension 4 (skills_have_unique_triggers) fails when two skills share a trigger', async () => {
     const dir = mkdtempSync(join(tmp, 'd4-'));
     buildTenOutOfTenPack(dir);
@@ -173,6 +198,24 @@ describe('walkRubric — individual dimensions fail in isolation', () => {
     const score = await walkRubric({ packRoot: dir, manifest });
     const d5 = score.dimensions.find((d) => d.name === 'changelog_present_and_current');
     expect(d5?.passed).toBe(false);
+  });
+
+  // Ours (governedwork fork): the version must be a heading of its own, not a prefix or prose.
+  test('dimension 5 (changelog) needs a heading for exactly the current version', async () => {
+    const changelogPasses = async (changelog: string): Promise<boolean | undefined> => {
+      const dir = mkdtempSync(join(tmp, 'd5v-'));
+      buildTenOutOfTenPack(dir, '0.1.0');
+      writeFileSync(join(dir, 'CHANGELOG.md'), changelog);
+      const score = await walkRubric({ packRoot: dir, manifest: loadSkillpackManifest(dir) });
+      return score.dimensions.find((d) => d.name === 'changelog_present_and_current')?.passed;
+    };
+    expect(await changelogPasses('# Changelog\n\n## [0.1.01] - 2026-10-09\n')).toBe(false);
+    expect(await changelogPasses('# Changelog\n\n## [0.1.0-rc.1] - 2026-10-09\n')).toBe(false);
+    expect(await changelogPasses('# Changelog\n\nSee ## 0.1.0-rc.1 notes elsewhere.\n')).toBe(false);
+    expect(await changelogPasses('# Changelog\n\nSee ## 0.1.0 notes elsewhere.\n')).toBe(false);
+    expect(await changelogPasses('# Changelog\n\n## [0.1.0] - 2026-10-09\n')).toBe(true);
+    expect(await changelogPasses('# Changelog\n\n## 0.1.0 - 2026-10-09\n')).toBe(true);
+    expect(await changelogPasses('# Changelog\n\n## 0.1.0')).toBe(true);
   });
 
   test('badge 8 (llm_eval_present) fails when cases array < 3', async () => {
