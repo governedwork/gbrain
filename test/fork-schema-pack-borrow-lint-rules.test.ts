@@ -127,6 +127,16 @@ describe('borrowNameClash', () => {
     expect(issues[0]!.message).toContain("declared by 'c'");
   });
 
+  it('a name borrowed twice from the SAME pack is not a clash (the resolver borrows it once)', async () => {
+    for (const borrow_from of [
+      [{ pack: 'area-a', types: ['bet', 'bet'] }],
+      [{ pack: 'area-a', types: ['bet'] }, { pack: 'area-a', types: ['bet'] }],
+    ]) {
+      const { resolved, opts } = await lintInput(pack({ name: 'c', borrow_from }));
+      expect(await borrowNameClash(resolved, opts)).toEqual([]);
+    }
+  });
+
   it('control: distinct names from distinct packs are fine', async () => {
     const { resolved, opts } = await lintInput(pack({
       name: 'c', borrow_from: [{ pack: 'area-a', types: ['customer'] }, { pack: 'area-b', types: ['bet'] }],
@@ -152,6 +162,53 @@ describe('borrowReplacesInheritedType', () => {
     const issues = await borrowReplacesInheritedType(resolved, opts);
     expect(rules(issues)).toEqual(['borrow_replaces_inherited_type']);
     expect(issues[0]!.link).toBe('part_of');
+  });
+
+  it("an ancestor's own borrow is not inherited, so borrowing a different one is not a replacement", async () => {
+    // resolvePack merges ancestors as declared: mid's borrowed `bet` never reaches c.
+    packs.set('area-d', pack({ name: 'area-d', page_types: [type('bet', { path_prefixes: ['d/'] })] }));
+    packs.set('mid', pack({ name: 'mid', borrow_from: [{ pack: 'area-d', types: ['bet'] }] }));
+    const { resolved, opts } = await lintInput(pack({
+      name: 'c', extends: 'mid', borrow_from: [{ pack: 'area-a', types: ['bet'] }],
+    }));
+    expect(await borrowReplacesInheritedType(resolved, opts)).toEqual([]);
+  });
+
+  it("the inherited definition is the ancestors' own, whatever an ancestor borrowed over it", async () => {
+    // mid borrows area-a's bet over root's; c inherits root's bet (mid's borrow does not
+    // propagate), so c borrowing area-a's bet replaces root's and must be reported.
+    packs.set('root', pack({ name: 'root', page_types: [type('bet', { path_prefixes: ['bets/'] })] }));
+    packs.set('mid', pack({ name: 'mid', extends: 'root', borrow_from: [{ pack: 'area-a', types: ['bet'] }] }));
+    const { resolved, opts } = await lintInput(pack({
+      name: 'c', extends: 'mid', borrow_from: [{ pack: 'area-a', types: ['bet'] }],
+    }));
+    const issues = await borrowReplacesInheritedType(resolved, opts);
+    expect(rules(issues)).toEqual(['borrow_replaces_inherited_type']);
+    expect(issues[0]!.message).toContain("inherits from 'mid'");
+  });
+
+  it('set-valued fields compare as sets: aliases or path_prefixes in another order are the same type', async () => {
+    packs.set('company-brain', pack({
+      name: 'company-brain',
+      page_types: [type('customer', { aliases: ['client', 'account'], path_prefixes: ['b/', 'a/'] })],
+    }));
+    packs.set('area-b', pack({
+      name: 'area-b',
+      page_types: [type('customer', { aliases: ['account', 'client'], path_prefixes: ['a/', 'b/'] })],
+    }));
+    const { resolved, opts } = await lintInput(pack({
+      name: 'c', extends: 'company-brain', borrow_from: [{ pack: 'area-b', types: ['customer'] }],
+    }));
+    expect(await borrowReplacesInheritedType(resolved, opts)).toEqual([]);
+  });
+
+  it('control: a different alias set is still a replacement', async () => {
+    packs.set('company-brain', pack({ name: 'company-brain', page_types: [type('customer', { aliases: ['client'] })] }));
+    packs.set('area-b', pack({ name: 'area-b', page_types: [type('customer', { aliases: ['client', 'account'] })] }));
+    const { resolved, opts } = await lintInput(pack({
+      name: 'c', extends: 'company-brain', borrow_from: [{ pack: 'area-b', types: ['customer'] }],
+    }));
+    expect(rules(await borrowReplacesInheritedType(resolved, opts))).toEqual(['borrow_replaces_inherited_type']);
   });
 
   it('control: a borrowed definition identical to the inherited one, or one the parent lacks, is fine', async () => {
@@ -196,6 +253,37 @@ describe('borrowDropsFrontmatterLinks', () => {
     expect(await borrowDropsFrontmatterLinks(resolved, opts)).toEqual([]);
   });
 
+  it('a link restated with MORE fields keeps every source field, so it is fine', async () => {
+    // merge.ts keys frontmatter_links on (page_type, link_type): this IS the bet->amends link.
+    const { resolved, opts } = await lintInput(pack({
+      name: 'c',
+      link_types: [{ name: 'part_of' }, { name: 'amends' }],
+      borrow_from: [{ pack: 'area-a', types: ['bet'] }],
+      frontmatter_links: [
+        { page_type: 'bet', fields: ['product', 'project', 'portfolio'], link_type: 'part_of' },
+        { page_type: 'bet', fields: ['amended_by', 'amends'], link_type: 'amends' },
+      ],
+    }));
+    expect(await borrowDropsFrontmatterLinks(resolved, opts)).toEqual([]);
+  });
+
+  it('a link restated with FEWER fields is reported once, naming the missing fields', async () => {
+    const { resolved, opts } = await lintInput(pack({
+      name: 'c',
+      link_types: [{ name: 'part_of' }, { name: 'amends' }],
+      borrow_from: [{ pack: 'area-a', types: ['bet'] }],
+      frontmatter_links: [
+        { page_type: 'bet', fields: ['project'], link_type: 'part_of' },
+        { page_type: 'bet', fields: ['amends'], link_type: 'amends' },
+      ],
+    }));
+    const issues = await borrowDropsFrontmatterLinks(resolved, opts);
+    expect(rules(issues)).toEqual(['borrow_drops_frontmatter_links']);
+    expect(issues[0]!.link).toBe('part_of');
+    expect(issues[0]!.message).toContain('restates');
+    expect(issues[0]!.message).toContain('without product');
+  });
+
   it('control: links of types the pack did not borrow are not required', async () => {
     const { resolved, opts } = await lintInput(pack({
       name: 'c', borrow_from: [{ pack: 'area-a', types: ['customer'] }],
@@ -211,6 +299,10 @@ describe('borrow rules without the declared pack', () => {
     }));
     const report = await runAllLintRules(resolved);
     expect(rules(report.warnings)).toContain('borrow_checks_skipped');
+    // True whether the caller held the resolved manifest or (CLI fallback) the raw one.
+    const skipped = report.warnings.find((w) => w.rule === 'borrow_checks_skipped')!;
+    expect(skipped.message).toContain('without the pack as declared');
+    expect(skipped.message).not.toContain('only the resolved manifest');
     expect(rules(report.errors)).not.toContain('borrow_name_undeclared');
   });
 
