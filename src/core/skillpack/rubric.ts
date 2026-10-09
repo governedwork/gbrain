@@ -225,7 +225,8 @@ const DIMENSIONS: Array<
       const content = readFileSync(path, 'utf-8');
       // Ours (governedwork fork): a heading line for exactly this version — `## [x.y.z]` or
       // `## x.y.z` followed by `]`, whitespace or the end — never a longer version or prose.
-      const versionEntryRe = new RegExp(`^##\\s+\\[?${input.manifest.version.replace(/\./g, '\\.')}(?:\\]|\\s|$)`, 'm');
+      // The gap after `##` is spaces or tabs: `\s` would let a bare `##` line head the next line.
+      const versionEntryRe = new RegExp(`^##[ \\t]+\\[?${input.manifest.version.replace(/\./g, '\\.')}(?:\\]|\\s|$)`, 'm');
       if (!versionEntryRe.test(content)) {
         return {
           passed: false,
