@@ -300,26 +300,40 @@ export function loadRoutingFixtures(skillsDir: string): LoadResult {
     } catch {
       continue;
     }
-    const lines = content.split('\n');
-    for (let i = 0; i < lines.length; i++) {
-      const raw = lines[i].trim();
-      if (!raw) continue;
-      if (raw.startsWith('//') || raw.startsWith('#')) continue;
-      try {
-        const obj = JSON.parse(raw) as RoutingFixture;
-        if (typeof obj.intent !== 'string') {
-          malformed.push({ file: fixturePath, line: i + 1, raw, error: `missing required field 'intent' (found keys: ${Object.keys(obj).join(', ')})` });
-          continue;
-        }
-        fixtures.push({ ...obj, source: fixturePath });
-      } catch (err) {
-        malformed.push({
-          file: fixturePath,
-          line: i + 1,
-          raw,
-          error: (err as Error).message,
-        });
+    const parsed = parseRoutingFixtures(content, fixturePath);
+    fixtures.push(...parsed.fixtures);
+    malformed.push(...parsed.malformed);
+  }
+  return { fixtures, malformed };
+}
+
+/**
+ * Parse one routing-eval.jsonl file's content (the format above). Ours
+ * (governedwork fork): split out of loadRoutingFixtures so the skillpack
+ * rubric counts intents exactly as the eval loads them.
+ */
+export function parseRoutingFixtures(content: string, fixturePath: string): LoadResult {
+  const fixtures: RoutingFixture[] = [];
+  const malformed: LoadResult['malformed'] = [];
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i].trim();
+    if (!raw) continue;
+    if (raw.startsWith('//') || raw.startsWith('#')) continue;
+    try {
+      const obj = JSON.parse(raw) as RoutingFixture;
+      if (typeof obj.intent !== 'string') {
+        malformed.push({ file: fixturePath, line: i + 1, raw, error: `missing required field 'intent' (found keys: ${Object.keys(obj).join(', ')})` });
+        continue;
       }
+      fixtures.push({ ...obj, source: fixturePath });
+    } catch (err) {
+      malformed.push({
+        file: fixturePath,
+        line: i + 1,
+        raw,
+        error: (err as Error).message,
+      });
     }
   }
   return { fixtures, malformed };
