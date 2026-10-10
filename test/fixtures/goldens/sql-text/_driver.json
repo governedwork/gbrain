@@ -2528,6 +2528,15 @@
             "via": "tagged"
           },
           {
+            "paramCount": 0,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": true
+            },
+            "via": "unsafe"
+          },
+          {
             "paramCount": 3,
             "unsafeOptions": {
               "prepare": true,
