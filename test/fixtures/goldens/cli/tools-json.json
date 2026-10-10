@@ -2,8 +2,8 @@
   "golden": {
     "exitCode": 0,
     "stderr": "",
-    "stdoutBytes": 209938,
-    "stdoutSha256": "a8804aad5e3f0691c8a937f411df17e2592662c8eed52ea9c116f90ad05b433d",
+    "stdoutBytes": 215107,
+    "stdoutSha256": "54ac99604f97c665a286fdc871013dcf443dbebb04a744a8470495c7cf722367",
     "toolNames": [
       "remember",
       "entity",
@@ -14,6 +14,7 @@
       "delete_page",
       "list_pages",
       "restore_page",
+      "rename_page",
       "purge_deleted_pages",
       "capture",
       "fetch",
@@ -159,6 +160,8 @@
       "schema_review_orphans",
       "schema_apply_mutations",
       "reload_schema_pack",
+      "put_schema_pack",
+      "get_schema_pack",
       "run_onboard",
       "run_skillopt",
       "open_loops",
@@ -661,6 +664,56 @@
           },
           "required": [
             "slug"
+          ],
+          "type": "object"
+        },
+        "scope": "write"
+      },
+      {
+        "description": "Rename one live page to a new slug in the same source, in place: the page row keeps its id, so its content, chunks and embeddings, tags, timeline, versions, takes and inbound/outbound graph links stay attached. The same transaction records the old slug as a slug alias (get_page on the old slug redirects and reports resolved_slug; [[old]] links keep resolving) and moves facts keyed to the old slug, fact withdrawals and frontmatter aliases (page_aliases) to the new slug. Textual [[wikilinks]] in other pages' bodies are NOT rewritten; they resolve through the alias. Rows that only store the slug as text (open loops, file records, take proposals) are not moved. Renames one page, not its children: rename each projects/x/* child with its own call. Database-canonical sources only: a source with a working tree (local_path, or sync.repo_path for default) is refused with source_writeback_required, because its file paths are its slugs; rename there with git mv, commit and sync. Read the page revision first and pass expected_revision; retain request_id for replay. Refuses with page_not_found when the page is missing or soft-deleted, slug_conflict when new_slug is held in that source by a live page, a soft-deleted page, or an alias to another page, and revision_conflict when the page changed. The committed receipt reports status renamed, slug (the new slug), renamed_from and the new revision.",
+        "idempotent": true,
+        "local_only": false,
+        "mutating": true,
+        "name": "rename_page",
+        "parameters": {
+          "expected_revision": "string?",
+          "force": "boolean?",
+          "new_slug": "string",
+          "request_id": "string?",
+          "slug": "string",
+          "source_id": "string?"
+        },
+        "required_scopes": [],
+        "schema": {
+          "properties": {
+            "expected_revision": {
+              "description": "Revision read; omit to create.",
+              "type": "string"
+            },
+            "force": {
+              "description": "Ignore the revision.",
+              "type": "boolean"
+            },
+            "new_slug": {
+              "description": "Slug the page moves to, e.g. 'projects/new-name'. Must be free in the source (no live page, soft-deleted page or alias to another page).",
+              "type": "string"
+            },
+            "request_id": {
+              "description": "UUID; retry with it on timeout.",
+              "type": "string"
+            },
+            "slug": {
+              "description": "Current slug of the page to rename, e.g. 'projects/old-name'.",
+              "type": "string"
+            },
+            "source_id": {
+              "description": "Source holding the page (a multi-source brain can hold the same slug in several sources); the rename stays inside it. Defaults to ctx.sourceId. Remote callers may only target their write source — federated read grants do not confer rename access.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "slug",
+            "new_slug"
           ],
           "type": "object"
         },
@@ -6300,6 +6353,82 @@
           "type": "object"
         },
         "scope": "admin"
+      },
+      {
+        "description": "Publish a new revision of a brain-resident schema pack (stored in the database, not on disk). Compare-and-swap on expected_revision (null to create). The manifest must parse and resolve its extends/borrow_from chain. Rollback: publish an older revision's manifest from get_schema_pack.",
+        "idempotent": false,
+        "local_only": false,
+        "mutating": true,
+        "name": "put_schema_pack",
+        "parameters": {
+          "expected_revision": "string?",
+          "manifest": "object",
+          "name": "string",
+          "note": "string?",
+          "source_id": "string?"
+        },
+        "required_scopes": [
+          "skill_publisher"
+        ],
+        "schema": {
+          "properties": {
+            "expected_revision": {
+              "description": "Current head revision; JSON null to create.",
+              "type": "string"
+            },
+            "manifest": {
+              "description": "Complete gbrain-schema-pack-v1 manifest.",
+              "type": "object"
+            },
+            "name": {
+              "description": "Pack name (not a bundled pack).",
+              "type": "string"
+            },
+            "note": {
+              "description": "Why this revision exists.",
+              "type": "string"
+            },
+            "source_id": {
+              "description": "Owning source (default: the connection's write source).",
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "manifest"
+          ],
+          "type": "object"
+        },
+        "scope": "admin"
+      },
+      {
+        "description": "Read a brain-resident schema pack: head revision, the manifest at head or at a given revision, and its full revision history.",
+        "idempotent": true,
+        "local_only": false,
+        "mutating": false,
+        "name": "get_schema_pack",
+        "parameters": {
+          "name": "string",
+          "revision": "string?"
+        },
+        "required_scopes": [],
+        "schema": {
+          "properties": {
+            "name": {
+              "description": "Pack name.",
+              "type": "string"
+            },
+            "revision": {
+              "description": "A revision from history (default: head).",
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ],
+          "type": "object"
+        },
+        "scope": "read"
       },
       {
         "description": "Probe brain health + optionally submit onboard remediations. Admin scope required. Protected handlers (LLM-bearing) require run_protected_onboard scope ADDITIONALLY.",

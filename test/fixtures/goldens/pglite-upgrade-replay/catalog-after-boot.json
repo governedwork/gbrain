@@ -278,6 +278,9 @@
       "retrieval_weights.retrieval_weights_pkey": "p PRIMARY KEY (source_id, element_kind, element_key)",
       "retrieval_weights.retrieval_weights_source_id_fkey": "f FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE",
       "retrieval_weights.retrieval_weights_weight_check": "c CHECK (((weight >= (0)::double precision) AND (weight <= (1)::double precision)))",
+      "schema_pack_heads.schema_pack_heads_pkey": "p PRIMARY KEY (name)",
+      "schema_pack_heads.schema_pack_heads_revision_fkey": "f FOREIGN KEY (revision) REFERENCES schema_pack_revisions(revision)",
+      "schema_pack_revisions.schema_pack_revisions_pkey": "p PRIMARY KEY (revision)",
       "search_telemetry.search_telemetry_pkey": "p PRIMARY KEY (date, mode, intent)",
       "session_context_state.session_context_state_pkey": "p PRIMARY KEY (source_id, client_id, session_id)",
       "shared_skill_delivery_batches.shared_skill_delivery_batches_installation_id_epoch_sequenc_key": "u UNIQUE (installation_id, epoch, sequence)",
@@ -387,7 +390,7 @@
       "gbrain_graduation_fence()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=cd4642fe8deee2a3c14ef41f53862f0a449b2d8a10e47177bd4f5d2e05ce8803",
       "gbrain_guard_effect_protocol()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=e8b5589dafd4a355106104daffdf57c7776d34fe18c5b5f5336a27de188688a1",
       "gbrain_guard_protocol_activation()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=f27354966c25d961fcecbffebba0e45747ad3de23575351319f6aee4f9aefd47",
-      "gbrain_guard_request_protocol()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=12baf1d365a8aa3009ac0fe6605497e6433304e8d5915a3fc0b0b39ad748f6c2",
+      "gbrain_guard_request_protocol()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=093dbdd566ce33aff03ca310e163f5fd0d66a5f0b39d2e458e84f432c0f9fee6",
       "gbrain_guard_skill_publication()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=e854c0d058e75a65c3a90127c5c417380975100e83fc34288f6085e786df10a9",
       "gbrain_lease_shared_skill_delivery()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=5e493c1ac8dce8cb025a736629e563437c4b214744137c302c532c20bf7e7acf",
       "gbrain_preserve_fact_withdrawal()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=9beb118551a08451a228146373f50f2aa2ce0cfe89937e937d361b33224aa0aa",
@@ -690,6 +693,12 @@
         "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
       ],
       "retrieval_weights": [
+        "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+      ],
+      "schema_pack_heads": [
+        "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+      ],
+      "schema_pack_revisions": [
         "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
       ],
       "search_telemetry": [
@@ -1085,6 +1094,9 @@
       "retrieval_feedback_client_time_idx": "CREATE INDEX retrieval_feedback_client_time_idx ON public.retrieval_feedback USING btree (client_id, applied_at DESC)",
       "retrieval_feedback_pkey": "CREATE UNIQUE INDEX retrieval_feedback_pkey ON public.retrieval_feedback USING btree (event_id, signal, element_kind, source_id, element_key)",
       "retrieval_weights_pkey": "CREATE UNIQUE INDEX retrieval_weights_pkey ON public.retrieval_weights USING btree (source_id, element_kind, element_key)",
+      "schema_pack_heads_pkey": "CREATE UNIQUE INDEX schema_pack_heads_pkey ON public.schema_pack_heads USING btree (name)",
+      "schema_pack_revisions_name_idx": "CREATE INDEX schema_pack_revisions_name_idx ON public.schema_pack_revisions USING btree (name, published_at)",
+      "schema_pack_revisions_pkey": "CREATE UNIQUE INDEX schema_pack_revisions_pkey ON public.schema_pack_revisions USING btree (revision)",
       "search_telemetry_pkey": "CREATE UNIQUE INDEX search_telemetry_pkey ON public.search_telemetry USING btree (date, mode, intent)",
       "session_context_state_pkey": "CREATE UNIQUE INDEX session_context_state_pkey ON public.session_context_state USING btree (source_id, client_id, session_id)",
       "session_context_state_updated_idx": "CREATE INDEX session_context_state_updated_idx ON public.session_context_state USING btree (updated_at)",
@@ -2787,6 +2799,29 @@
           "7 updated_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
         "flags": "relkind=r rls=false force_rls=false"
+      },
+      "schema_pack_heads": {
+        "columns": [
+          "1 name text/text NOT NULL",
+          "2 revision uuid/uuid NOT NULL",
+          "3 source_id text/text NOT NULL",
+          "4 updated_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
+        ],
+        "flags": "relkind=r rls=true force_rls=false"
+      },
+      "schema_pack_revisions": {
+        "columns": [
+          "1 revision uuid/uuid NOT NULL",
+          "2 name text/text NOT NULL",
+          "3 source_id text/text NOT NULL",
+          "4 manifest jsonb/jsonb NOT NULL",
+          "5 manifest_hash text/text NOT NULL",
+          "6 parent_revision uuid/uuid NULL",
+          "7 published_by text/text NOT NULL",
+          "8 published_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
+          "9 note text/text NULL"
+        ],
+        "flags": "relkind=r rls=true force_rls=false"
       },
       "search_telemetry": {
         "columns": [
