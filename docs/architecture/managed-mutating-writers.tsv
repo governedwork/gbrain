@@ -63,6 +63,7 @@ op	forget_fact	coordinator	submitForgetMutation records a coordinated fact withd
 op	code_traversal_cache_clear	no_canonical_write	Derived traversal cache only.
 op	migrate_embeddings	no_canonical_write	Embedding projections under the migration budget; no canonical content.
 op	schema_apply_mutations	no_canonical_write	Schema-pack files outside the brain database.
+op	put_schema_pack	no_canonical_write	Ours (governedwork fork): a brain-resident pack revision in schema_pack_revisions/schema_pack_heads, outside the guarded canonical tables.
 op	run_onboard	no_canonical_write	Runs remediation steps; each step keeps its own writer boundary.
 op	run_skillopt	no_canonical_write	Skill files and proposals outside the brain database.
 op	loops_close	coordinator	open_loops state rows; the commitment fact is retired (expired, fence row struck) through the loop-fact-retirement coordinator mutation (#5869).

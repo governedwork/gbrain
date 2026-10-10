@@ -202,6 +202,8 @@ const SWEEP: Record<string, Row> = {
   ontology_dimensions: { args: {} },
   entity_identity_list: { args: {} },
   get_active_schema_pack: { args: {} },
+  // Ours (governedwork fork): the fixture seeds no brain-resident pack, so the read has nothing to return.
+  get_schema_pack: { skip: 'reads an operator-published pack manifest and its revision history, no page text; pinned by test/fork-brain-resident-schema-packs.test.ts' },
   list_schema_packs: { args: {} },
   schema_stats: { args: {} },
   schema_lint: { args: {} },
