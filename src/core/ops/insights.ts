@@ -10,9 +10,11 @@
  */
 
 import type { Operation } from './contract.ts';
+import type { VolunteeredPage, VolunteerUsageStats } from '../context/volunteer.ts';
 import { opError } from './contract.ts';
 import { invalidParam, paramUse } from './op-fix.ts';
 import { sourceScopeOpts, readPolicyOpts } from './context.ts';
+import { OUTPUT_FORMAT_PARAMS } from './output-format.ts';
 import {
   FIND_EXPERTS_DESCRIPTION,
   FIND_CONTRADICTIONS_DESCRIPTION,
@@ -63,6 +65,17 @@ const volunteer_context: Operation = {
         'APPROXIMATE: "used" = pages.last_retrieved_at > volunteered_at.',
     },
     days: { type: 'number', description: 'Stats window in days (default 30; stats mode only).' },
+    ...OUTPUT_FORMAT_PARAMS,
+  },
+  // format text|hook: the hook lane's volunteered-pages block (stats mode: the precision summary).
+  renderText: async (result) => {
+    const r = result as { pages?: VolunteeredPage[] } & Partial<VolunteerUsageStats>;
+    if (r.approximate === true) {
+      const { formatVolunteerStats } = await import('../context/volunteer.ts');
+      return formatVolunteerStats(r as VolunteerUsageStats);
+    }
+    const { renderVolunteeredBlock } = await import('../context/turn-context.ts');
+    return renderVolunteeredBlock(r.pages ?? []);
   },
   handler: async (ctx, p) => {
     const { parseWindow, volunteerContext, volunteerUsageStats } = await import('../context/volunteer.ts');
