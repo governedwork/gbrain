@@ -2420,8 +2420,8 @@
         "idempotent": true,
         "name": "shared_brain_skills_and_membership",
         "sql": {
-          "length": 15917,
-          "sha256": "6d54ba001944603fd35abe6d6f355f106322a4e0dda206cfd93622fc1493e4aa"
+          "length": 16040,
+          "sha256": "ed667890629d50a56285fcadd0d3518c3995be7e3e7da9c8da8de24a5bc95ef3"
         },
         "sqlFor": "absent",
         "transaction": "absent",

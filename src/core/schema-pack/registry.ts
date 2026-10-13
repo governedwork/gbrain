@@ -147,7 +147,7 @@ export function _resetPackCacheForTests(): void {
  * `GBRAIN_PACK_STAT_TTL_MS` env override. Invalid values fall back to
  * the default with no warning (this is a power-user knob).
  */
-function resolveStatTtlMs(): number {
+export function resolveStatTtlMs(): number {
   const raw = process.env.GBRAIN_PACK_STAT_TTL_MS;
   if (!raw) return STAT_TTL_MS_DEFAULT;
   const parsed = Number.parseInt(raw, 10);

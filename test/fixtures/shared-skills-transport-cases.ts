@@ -65,8 +65,10 @@ export function sharedSkillsTransportCases(databaseUrl?: string) {
       expect(catalog.skills).toHaveLength(1);
       const original = await call<SharedSkillDetail>(reader, 'get_skill', { schema_version: 2, name: 'alpha' });
       expect(original.revision).toBe(catalog.skills[0].revision);
-      const legacy = await call<{ schema_version: number; count: number; skills: { name: string }[] }>(reader, 'list_skills');
-      expect(legacy.schema_version).toBe(1); expect(legacy.count).toBe(1); expect(legacy.skills[0].name).toBe('alpha');
+      const legacy = await call<{ schema_version: number; count: number; skills: { name: string; section: string }[] }>(reader, 'list_skills');
+      // fork (governedwork): host skills are listed beside the shared ones (shared-skills/beside-host.ts).
+      const published = legacy.skills.filter(skill => skill.section === 'Published skills');
+      expect(legacy.schema_version).toBe(1); expect(published).toHaveLength(1); expect(published[0].name).toBe('alpha');
       expect(await call<typeof legacy>(reader, 'list_skills', { schema_version: 1 })).toEqual(legacy);
       const legacySkill = await call(reader, 'get_skill', { name: 'alpha' });
       expect(legacySkill.schema_version).toBe(1); expect(legacySkill.body).toBe(original.body);

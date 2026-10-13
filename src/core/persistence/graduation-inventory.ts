@@ -131,6 +131,9 @@ export const GRADUATION_INVENTORY: Inventory = {
     carry('retrieval_events', 'operational', 'Recorded answers (answer_id, client, op) within the retention window.'),
     carry('retrieval_feedback', 'user_data', 'Ratings and citation signals with the weight change each applied.'),
     carry('retrieval_weights', 'user_data', 'Learned retrieval feedback weights per page and edge.'),
+    // Ours (governedwork fork): brain-resident schema packs (schema-pack/db-store.ts).
+    carry('schema_pack_heads', 'user_data', 'The head revision of each brain-resident schema pack; it decides how the brain is shaped.'),
+    carry('schema_pack_revisions', 'user_data', 'Every published revision of a brain-resident schema pack, the rollback history.'),
     carry('search_telemetry', 'operational', 'Search telemetry rollups.'),
     carry('session_context_state', 'operational', 'Ambient recall session state.'),
     carry('shared_skill_delivery_batches', 'operational', 'Shared-skill delivery batches and acknowledgments.'),

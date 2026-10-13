@@ -10,7 +10,8 @@ import { opError, OperationError } from '../ops/contract.ts';
 import { QUARANTINE_KEY } from '../quarantine.ts';
 import { QUARANTINE_OVERRIDE_KEY } from '../quarantine-override.ts';
 import { EMBED_SKIP_KEY } from '../embed-skip.ts';
-import { loadResolvedPackByName } from '../schema-pack/load-active.ts';
+import { loadDeclaredPackByName } from '../schema-pack/load-active.ts';
+import type { DeclaredPack } from '../schema-pack/borrow-lint-rules.ts';
 import { invalidatePackCache, type ResolvedPack } from '../schema-pack/registry.ts';
 import { SchemaPackManifestSchema } from '../schema-pack/manifest-v1.ts';
 import { runFilePlaneLintRules } from '../schema-pack/lint-rules.ts';
@@ -276,11 +277,14 @@ export async function inspectCompanyBrain(options: InspectCompanyBrainOptions): 
   let pack: ResolvedPack | null = null;
   try {
     if (!options.pack) invalidatePackCache(COMPANY_BRAIN_PROFILE);
-    pack = options.pack ?? await loadResolvedPackByName(COMPANY_BRAIN_PROFILE);
+    // Ours (governedwork fork): the pack as declared lets the borrow_from lint rules run; a caller-supplied pack has none.
+    let declared: DeclaredPack | undefined;
+    if (options.pack) pack = options.pack;
+    else ({ resolved: pack, declared } = await loadDeclaredPackByName(COMPANY_BRAIN_PROFILE));
     SchemaPackManifestSchema.parse(pack.manifest);
     if (pack.manifest.name !== COMPANY_BRAIN_PROFILE) throw new Error();
     plan.schema = { name: pack.manifest.name, version: pack.manifest.version, identity: pack.identity, resolved_digest: resolvedCompanySchemaDigest(pack) };
-    const lint = await runFilePlaneLintRules(pack.manifest);
+    const lint = await runFilePlaneLintRules(pack.manifest, { declared });
     const lintCounts = new Map<string, { severity: InspectionFinding['severity']; count: number }>();
     for (const issue of [...lint.errors, ...lint.warnings]) {
       const previous = lintCounts.get(issue.rule);

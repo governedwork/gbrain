@@ -464,7 +464,7 @@ export async function computeManifestSha8(manifest: SchemaPackManifest): Promise
   return createHash('sha256').update(canonical).digest('hex').slice(0, 8);
 }
 
-function canonicalJSONStringify(value: unknown): string {
+export function canonicalJSONStringify(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
   if (Array.isArray(value)) return '[' + value.map(canonicalJSONStringify).join(',') + ']';
   const obj = value as Record<string, unknown>;

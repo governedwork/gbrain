@@ -26,7 +26,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { GBrainConfig } from '../config.ts';
 import { gbrainPath } from '../config.ts';
+import { brainResidentPack } from './db-store.ts';
 import type { SchemaPackManifest } from './manifest-v1.ts';
+import type { DeclaredPack } from './borrow-lint-rules.ts';
 import { loadPackFromFile } from './loader.ts';
 import {
   resolveActivePackName,
@@ -117,6 +119,8 @@ function defaultPackLocator(name: string): string | null {
   // gate it (same slug grammar as locateMutablePackFile) BEFORE the join so
   // a path-shaped value can't reach anything outside schema-packs/.
   if (!isValidPackName(name)) return null;
+  // Ours: a brain-resident pack shadows the disk and has no file to snapshot.
+  if (brainResidentPack(name)) return null;
   const baseDir = gbrainPath('schema-packs', name);
   const candidates = ['pack.yaml', 'pack.yml', 'pack.json'];
   for (const c of candidates) {
@@ -131,6 +135,8 @@ function defaultPackLocator(name: string): string | null {
  * the extends chain. Throws UnknownPackError when the pack isn't on disk.
  */
 async function loadPackManifestByName(name: string): Promise<SchemaPackManifest> {
+  const resident = isBundledPackName(name) ? null : brainResidentPack(name);
+  if (resident) return resident;
   const path = _packLocator(name);
   if (!path) {
     throw new UnknownPackError(name);
@@ -170,6 +176,11 @@ export async function loadActivePack(input: LoadActivePackInput): Promise<Resolv
  * <name>` resolves by name via loadResolvedPackByName, #4501).
  */
 export async function resolveLoadedPack(manifest: SchemaPackManifest): Promise<ResolvedPack> {
+  // Ours (governedwork fork): resolvePack's identity fast path compares only this pack's
+  // own bytes, so a cached entry whose parent or borrow source changed on disk would come
+  // back stale. tryCachedPack runs the stat-TTL dependency check loadActivePack relies on
+  // and evicts such an entry (the cascade included); its return value is not needed here.
+  tryCachedPack(manifest.name);
   // Thread the locator so resolvePack can snapshot file paths + mtimes
   // for the stat-TTL gate on subsequent calls (codex C6 + D11 + D13).
   return await resolvePack(manifest, loadPackManifestByName, {
@@ -188,10 +199,61 @@ export async function resolveLoadedPack(manifest: SchemaPackManifest): Promise<R
  * SchemaPackManifestError).
  */
 export async function loadResolvedPackByName(name: string): Promise<ResolvedPack> {
+  return await resolveLoadedPack(await loadPackManifestByName(name));
+}
+
+/**
+ * Ours (governedwork fork): a loaded manifest as declared, with the loader + resolver this module
+ * resolves it through — what the borrow_from lint rules need
+ * (LintOpts.declared): the resolved manifest hides every borrow outcome.
+ */
+export function declaredPack(manifest: SchemaPackManifest): DeclaredPack {
+  return { manifest, loadByName: loadPackManifestByName, resolve: resolveLoadedPack };
+}
+
+/** Ours (governedwork fork): `loadResolvedPackByName`, plus the pack as declared. */
+export async function loadDeclaredPackByName(
+  name: string,
+): Promise<{ resolved: ResolvedPack; declared: DeclaredPack }> {
   const manifest = await loadPackManifestByName(name);
-  return await resolvePack(manifest, loadPackManifestByName, {
-    loadByPath: (n) => _packLocator(n),
-  });
+  return { resolved: await resolveLoadedPack(manifest), declared: declaredPack(manifest) };
+}
+
+/**
+ * Ours (governedwork fork): `loadActivePack`, plus the active pack as declared. Skips the TTL
+ * fast path (it holds only the resolved form); resolveLoadedPack still applies the
+ * stat-TTL dependency check before resolvePack's identity cache answers.
+ */
+export async function loadActivePackDeclared(
+  input: LoadActivePackInput,
+): Promise<{ resolved: ResolvedPack; declared: DeclaredPack }> {
+  return await loadDeclaredPackByName(resolveActivePackName(buildResolutionInput(input)).pack_name);
+}
+
+/**
+ * Ours (governedwork fork): every pack name resolving `root` and linting its borrows reads —
+ * root, its extends chain and every borrow_from source, each followed transitively —
+ * so a caller can be authorized for all of them before any is resolved. A pack
+ * that does not load ends its branch (resolution fails on it, reading nothing).
+ */
+export async function packResolutionNames(root: string): Promise<string[]> {
+  const seen = new Set<string>();
+  const pending = [root];
+  while (pending.length > 0) {
+    const name = pending.pop()!;
+    if (seen.has(name)) continue;
+    seen.add(name);
+    let manifest: SchemaPackManifest;
+    try {
+      manifest = await loadPackManifestByName(name);
+    } catch (err) {
+      if (err instanceof UnknownPackError) continue;
+      throw err;
+    }
+    if (manifest.extends) pending.push(manifest.extends);
+    for (const entry of manifest.borrow_from) pending.push(entry.pack);
+  }
+  return [...seen];
 }
 
 /**

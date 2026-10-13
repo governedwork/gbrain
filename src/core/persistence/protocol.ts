@@ -1,5 +1,6 @@
 import type { SqlEngine, WriteRequest } from './model.ts';
 import { opError, OperationError } from '../ops/contract.ts';
+import { isDatabaseCanonicalSource } from './database-canonical.ts';
 
 const declared = new WeakSet<object>();
 /**
@@ -55,7 +56,7 @@ export async function assertSharedSkillPersistence(engine: SqlEngine, sourceId?:
     throw new OperationError('writer_not_quiesced', 'Shared skill publication requires an activated protocol-2 canonical owner.',
       'Stop older writers and direct-file skill servers, then activate shared skill persistence on the canonical host.');
   }
-  if (sourceId !== undefined) {
+  if (sourceId !== undefined && !await isDatabaseCanonicalSource(engine, sourceId)) {
     const owners = await engine.executeRaw(`SELECT w.id FROM sources s JOIN persistence_source_bindings b
       ON b.source_id=s.id AND b.source_incarnation=s.incarnation JOIN persistence_worktrees w ON w.id=b.worktree_id
       JOIN persistence_writer_protocols p ON p.worktree_id=w.id AND p.host_id=w.owner_host_id AND p.owner_epoch=w.owner_epoch

@@ -99,6 +99,9 @@ export {
 export {
   loadActivePack,
   loadResolvedPackByName,
+  loadDeclaredPackByName,
+  loadActivePackDeclared,
+  declaredPack,
   resolveLoadedPack,
   resolveActivePackNameOnly,
   __setPackLocatorForTests,
@@ -232,3 +235,5 @@ export {
   runAllLintRules,
   runFilePlaneLintRules,
 } from './lint-rules.ts';
+
+export { type DeclaredPack } from './borrow-lint-rules.ts';

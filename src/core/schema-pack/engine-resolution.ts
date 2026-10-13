@@ -4,6 +4,7 @@ import type { BrainEngine } from '../engine.ts';
 import { OperationError } from '../ops/contract.ts';
 import { loadActivePack, loadResolvedPackByName, type LoadActivePackInput } from './load-active.ts';
 import { invalidatePackCache, type ResolvedPack } from './registry.ts';
+import { refreshBrainResidentPacks } from './db-store.ts';
 
 export type EngineSchemaOptions = Omit<LoadActivePackInput, 'cfg' | 'dbConfig' | 'perSourceDb'>;
 
@@ -18,6 +19,7 @@ export async function engineSchemaInput(
   options: EngineSchemaOptions,
 ): Promise<LoadActivePackInput> {
   const dbConfig = await readDbSchemaPack(engine);
+  if (engine && 'executeRaw' in engine) await refreshBrainResidentPacks(engine as Parameters<typeof refreshBrainResidentPacks>[0]);
   const perSourceDb = new Map<string, string>();
   if (options.sourceId) {
     const value = (await engine?.getConfig(`schema_pack.source.${options.sourceId}`))?.trim();
