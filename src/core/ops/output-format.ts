@@ -57,6 +57,13 @@ function hookDocument(event: HookEvent, text: string): string {
   return JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext: text } });
 }
 
+/** Cut `text` to at most `n` UTF-16 units without splitting a surrogate pair. */
+function cutAt(text: string, n: number): string {
+  const end = Math.max(0, n);
+  const code = text.charCodeAt(end - 1);
+  return text.slice(0, code >= 0xd800 && code <= 0xdbff ? end - 1 : end);
+}
+
 /**
  * The shaped output for `params.format`, or null when the caller wants JSON
  * (or the op has no text rendering). `extraBlocks` (rendered notices) follow
@@ -70,20 +77,21 @@ export async function shapeOutput(
 ): Promise<string | null> {
   const format = requestedOutputFormat(params);
   if (format === 'json' || !op.renderText) return null;
-  const text = [await op.renderText(result), ...extraBlocks].filter(Boolean).join('\n\n');
-  if (format === 'text') return text;
-  if (!text) return '{}';
+  const body = await op.renderText(result);
+  const join = (b: string) => [b, ...extraBlocks].filter(Boolean).join('\n\n');
+  if (format === 'text') return join(body);
+  if (!join(body)) return '{}';
   const event: HookEvent = (HOOK_EVENTS as readonly unknown[]).includes(params.hook_event)
     ? (params.hook_event as HookEvent)
     : 'UserPromptSubmit';
   // Over the cap the harness diverts the output to a file and injects nothing,
-  // so trim the text until the document fits. JSON escaping inflates the text
-  // by a content-dependent ratio, so cut in proportion, not by the overshoot.
-  let kept = text;
-  let doc = hookDocument(event, kept);
-  while (doc.length > CLAUDE_HOOK_OUTPUT_CAP_CHARS) {
-    kept = kept.slice(0, Math.max(0, Math.floor((kept.length * CLAUDE_HOOK_OUTPUT_CAP_CHARS) / doc.length) - 16));
-    doc = hookDocument(event, kept);
+  // so trim the op's text (never the notices) until the document fits. JSON
+  // escaping inflates text by a content-dependent ratio, so cut in proportion.
+  let kept = body;
+  let doc = hookDocument(event, join(kept));
+  while (doc.length > CLAUDE_HOOK_OUTPUT_CAP_CHARS && kept.length > 0) {
+    kept = cutAt(kept, Math.floor((kept.length * CLAUDE_HOOK_OUTPUT_CAP_CHARS) / doc.length) - 16);
+    doc = hookDocument(event, join(kept));
   }
   return doc;
 }

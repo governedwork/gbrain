@@ -47,6 +47,15 @@ describe('shapeOutput', () => {
     expect(JSON.parse(doc).hookSpecificOutput.additionalContext.length).toBeGreaterThan(1000);
   });
 
+  it('trimming cuts the op text, never the folded notices, and never splits a surrogate pair', async () => {
+    const notice = '[gbrain notice degraded kind=degraded]';
+    const doc = (await shapeOutput(textOp, { text: '\u{1F600}'.repeat(CLAUDE_HOOK_OUTPUT_CAP_CHARS) }, { format: 'hook' }, [notice]))!;
+    expect(doc.length).toBeLessThanOrEqual(CLAUDE_HOOK_OUTPUT_CAP_CHARS);
+    const ctx = JSON.parse(doc).hookSpecificOutput.additionalContext as string;
+    expect(ctx.endsWith(`\n\n${notice}`)).toBe(true);
+    expect(ctx).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])/);
+  });
+
   it('withoutOutputFormat drops only the shaping keys', () => {
     expect(withoutOutputFormat({ format: 'hook', hook_event: 'SessionStart', window: 'w' })).toEqual({ window: 'w' });
   });
