@@ -6096,6 +6096,8 @@
         "name": "volunteer_context",
         "parameters": {
           "days": "number?",
+          "format": "string?",
+          "hook_event": "string?",
           "max_pages": "number?",
           "min_confidence": "number?",
           "min_trust": "string?",
@@ -6111,6 +6113,23 @@
             "days": {
               "description": "Stats window in days (default 30; stats mode only).",
               "type": "number"
+            },
+            "format": {
+              "description": "Output shape (default json). 'text' returns the compact injectable block; 'hook' returns {hookSpecificOutput: {hookEventName, additionalContext}} for a Claude Code or Codex hook.",
+              "enum": [
+                "json",
+                "text",
+                "hook"
+              ],
+              "type": "string"
+            },
+            "hook_event": {
+              "description": "hookEventName for format 'hook' (default UserPromptSubmit).",
+              "enum": [
+                "UserPromptSubmit",
+                "SessionStart"
+              ],
+              "type": "string"
             },
             "max_pages": {
               "description": "Max pages to volunteer (default 3, hard cap 5).",

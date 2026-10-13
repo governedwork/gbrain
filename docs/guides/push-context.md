@@ -181,6 +181,37 @@ on request)`, plus a structured `brief` field. Remote callers get the dated
 fact and page-edit arms (world pages only, the same text `get_versions` and
 `get_timeline` already return them); open loops are withheld
 (`withheld_arms: ["loops"]`).
+### Hooks that call the brain directly (`format`)
+
+A harness can also call the ops itself, with no serve socket and no `gbrain
+hook` process: a Claude Code or Codex `mcp_tool` hook calling
+`volunteer_context` over MCP (a remote brain included), or a `command` hook
+running the CLI. A hook reads the tool's text content as its output, and
+neither harness injects the default JSON answer (Claude Code parses it as hook
+output and ignores every key; plain text from an `mcp_tool` hook is dropped on
+`UserPromptSubmit`). `volunteer_context` and `context_pack` therefore take:
+
+| `format` | Answer |
+|---|---|
+| `json` (default) | the op's JSON document, unchanged |
+| `text` | the compact injectable block: the same volunteered-pages block the hook lane injects, or the pack's `text` |
+| `hook` | `{"hookSpecificOutput":{"hookEventName":<hook_event>,"additionalContext":<the block>}}`, trimmed under the Claude Code hook-output cap; `{}` when nothing was volunteered |
+
+`hook_event` is `UserPromptSubmit` (default) or `SessionStart`. The answer is
+one content block; any notices are folded into the text. Claude Code accepts
+only the `hook` document; Codex accepts `hook` or `text`. Shaping is
+presentation only: the handler, its privacy gates and its output redaction run
+exactly as for JSON. On the CLI, `--format text|hook` is shaped from the JSON
+answer, so it works against any host version.
+
+```json
+{ "type": "mcp_tool", "server": "gbrain", "tool": "volunteer_context",
+  "input": { "window": "${prompt}", "session_id": "${session_id}", "format": "hook" } }
+```
+
+Claude Code does not run `mcp_tool` hooks on `SessionStart` at launch; a
+`command` hook running `gbrain context-pack --entities … --format text` covers
+that event.
 
 ## The OpenClaw reflex volunteer arm
 

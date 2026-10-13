@@ -983,6 +983,11 @@ through as written. Search rows carry the same frontmatter value as raw
 `status` and a pack or backlink row's `page_status` agree whenever the value is
 a string of 40 characters or fewer. A link row's `status` is the relationship's
 temporal state, a different field, and the `status` input filter is unchanged.
+`format` (`json` default, `text`, `hook`) and `hook_event` are an opt-in
+presentation for harness hooks (`docs/guides/push-context.md`): `text` returns
+`text` alone and `hook` returns it as a Claude Code / Codex hook document. A
+shaped answer is not a v1 response document (no `protocol_version`); the
+response contract above is the `json` answer.
 
 #### context_pack core memory (additive)
 
