@@ -209,6 +209,11 @@ answer, so it works against any host version.
   "input": { "window": "${prompt}", "session_id": "${session_id}", "format": "hook" } }
 ```
 
+Pass `session_id` and the op dedupes per session: pages already volunteered to
+that session (on any channel) in the last 12 hours are not volunteered again,
+read back from `context_volunteer_events`, so a per-prompt hook surfaces a page
+once rather than on every mention.
+
 Claude Code does not run `mcp_tool` hooks on `SessionStart` at launch; a
 `command` hook running `gbrain context-pack --entities … --format text` covers
 that event.
