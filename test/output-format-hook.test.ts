@@ -2,7 +2,8 @@
  * `format: text | hook` on volunteer_context and context_pack
  * (ops/output-format.ts): the shapes a Claude Code / Codex hook can inject.
  * Unit cases for shapeOutput, then in-process through dispatchToolCall (the
- * layer both MCP transports share) against in-memory PGLite.
+ * layer both MCP transports share) against in-memory PGLite. Also the
+ * per-session dedupe a per-prompt hook relies on.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
@@ -12,6 +13,7 @@ import { dispatchToolCall } from '../src/mcp/dispatch.ts';
 import { shapeOutput, withoutOutputFormat } from '../src/core/ops/output-format.ts';
 import { CLAUDE_HOOK_OUTPUT_CAP_CHARS } from '../src/core/bootstrap/host-specs.ts';
 import { TURN_CONTEXT_ENVELOPE } from '../src/core/context/turn-context.ts';
+import { awaitPendingVolunteerEventWrites, SESSION_DEDUPE_HOURS } from '../src/core/context/volunteer-events.ts';
 
 const textOp = { renderText: (r: unknown) => (r as { text: string }).text };
 
@@ -136,5 +138,32 @@ describe('context_pack format', () => {
     const json = JSON.parse((await call('context_pack', { entities: 'Zelda Quartermain' })).content[0].text);
     const res = await call('context_pack', { entities: 'Zelda Quartermain', format: 'text' });
     expect(res.content[0].text).toBe(json.text);
+  });
+});
+
+describe('volunteer_context per-session dedupe', () => {
+  it('a page volunteered to a session is not volunteered to it again; other sessions still get it', async () => {
+    const first = JSON.parse((await call('volunteer_context', { window: WINDOW, session_id: 'sess-a' })).content[0].text);
+    expect(first.count).toBe(1);
+    await awaitPendingVolunteerEventWrites();
+    const again = JSON.parse((await call('volunteer_context', { window: WINDOW, session_id: 'sess-a' })).content[0].text);
+    expect(again.count).toBe(0);
+    const hook = await call('volunteer_context', { window: WINDOW, session_id: 'sess-a', format: 'hook' });
+    expect(hook.content[0].text).toBe('{}');
+    const other = JSON.parse((await call('volunteer_context', { window: WINDOW, session_id: 'sess-b' })).content[0].text);
+    expect(other.count).toBe(1);
+    const anonymous = JSON.parse((await call('volunteer_context', { window: WINDOW })).content[0].text);
+    expect(anonymous.count).toBe(1);
+  });
+
+  it('only events inside the dedupe window count', async () => {
+    await call('volunteer_context', { window: WINDOW, session_id: 'sess-old' });
+    await awaitPendingVolunteerEventWrites();
+    await engine.executeRaw(
+      `UPDATE context_volunteer_events SET volunteered_at = now() - ($1 || ' hours')::interval WHERE session_id = 'sess-old'`,
+      [String(SESSION_DEDUPE_HOURS + 1)],
+    );
+    const later = JSON.parse((await call('volunteer_context', { window: WINDOW, session_id: 'sess-old' })).content[0].text);
+    expect(later.count).toBe(1);
   });
 });

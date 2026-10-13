@@ -6156,7 +6156,7 @@
               "type": "string"
             },
             "session_id": {
-              "description": "Optional caller session id, logged for attribution.",
+              "description": "Optional caller session id, logged for attribution. Pages already volunteered to this session in the last 12 hours are not volunteered again.",
               "type": "string"
             },
             "stats": {
