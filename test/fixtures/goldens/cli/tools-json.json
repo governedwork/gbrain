@@ -2,8 +2,8 @@
   "golden": {
     "exitCode": 0,
     "stderr": "",
-    "stdoutBytes": 211252,
-    "stdoutSha256": "c51b20e4250fcaf1715c36b8bc168703d6aacfb2a01b15c53685679199e37cba",
+    "stdoutBytes": 211342,
+    "stdoutSha256": "4109008eff4f335eab65e0baa1059df154156308b21b73188c2032434eb6e974",
     "toolNames": [
       "remember",
       "entity",
@@ -5185,7 +5185,7 @@
               "type": "string"
             },
             "session_id": {
-              "description": "Optional caller session id, logged for attribution.",
+              "description": "Optional caller session id, logged for attribution. Pages already volunteered to this session in the last 12 hours are not volunteered again.",
               "type": "string"
             },
             "stats": {
