@@ -877,9 +877,30 @@ export interface ToolResultShape {
 export function toolResultWithNotices(result: unknown, notices: readonly Notice[], ctx: RenderContext): ToolResultShape {
   const out: ToolResultShape = { content: [{ type: 'text', text: JSON.stringify(result) }] };
   if (notices.length === 0) return out;
-  const rendered = orderNotices(notices).map(n => redactForTransport(renderNotice(n, ctx), ctx.transport));
+  const rendered = renderedNotices(notices, ctx);
   for (const n of rendered) out.content.push({ type: 'text', text: noticeBlock(n) });
   out._meta = { gbrain_notices: rendered };
+  return out;
+}
+
+function renderedNotices(notices: readonly Notice[], ctx: RenderContext): RenderedNotice[] {
+  return orderNotices(notices).map(n => redactForTransport(renderNotice(n, ctx), ctx.transport));
+}
+
+/** The notices as the prefixed text blocks `toolResultWithNotices` appends. */
+export function noticeBlocks(notices: readonly Notice[], ctx: RenderContext): string[] {
+  return renderedNotices(notices, ctx).map(noticeBlock);
+}
+
+/**
+ * MCP success result whose body is an op's shaped text (`format: text|hook`,
+ * ops/output-format.ts): exactly ONE content block, because a harness hook
+ * reads the whole content as its output — the caller folds the notice blocks
+ * into `text`; they still mirror rendered under `_meta.gbrain_notices`.
+ */
+export function shapedToolResult(text: string, notices: readonly Notice[], ctx: RenderContext): ToolResultShape {
+  const out: ToolResultShape = { content: [{ type: 'text', text }] };
+  if (notices.length > 0) out._meta = { gbrain_notices: renderedNotices(notices, ctx) };
   return out;
 }
 

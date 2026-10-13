@@ -17,7 +17,8 @@ import { withRequestConfigSnapshot, withoutRequestConfigSnapshot } from '../core
 import { resolveBrainId } from '../core/brain-resolver.ts';
 import { getCliOptions } from '../core/cli-options.ts';
 import { VERB_NAMES, MEMORY_VERBS_VERSION } from '../core/verbs.ts';
-import { cliRenderContext, orderNotices, redactForTransport, renderNotice, toAgentError, toolErrorResult, toolResultWithNotices, type Notice, type RenderContext } from '../core/agent-output.ts';
+import { cliRenderContext, orderNotices, redactForTransport, renderNotice, toAgentError, noticeBlocks, shapedToolResult, toolErrorResult, toolResultWithNotices, type Notice, type RenderContext } from '../core/agent-output.ts';
+import { shapeOutput } from '../core/ops/output-format.ts';
 import { cliOnlyRefusal, isCallable } from '../core/ops/callable.ts';
 import { hostFix, scopeDeniedError } from '../core/ops/op-fix.ts';
 import { mutedNoticeCodes, processNoticeLedger, __resetProcessNoticeLedgerForTests, type NoticeLedger, type NoticeAudience } from '../core/notice-ledger.ts';
@@ -1133,8 +1134,12 @@ async function dispatchResolvedCall(
     if (opts.transport === 'stdio' && opts.remote !== false) { const drain = takeFactsDrainNotice(); if (drain) notices.push(drain); } // Lane D facts drain
     notices.push(...await sessionSafetyNotices(engine, opts, ctx.config));
     notices.push(...await grantBlockedNotices(engine, opts, false));
-    const out: ToolResult = toolResultWithNotices(result, admitNotices(notices, opts), dispatchRenderContext(opts));
-    if (evidenceBlocks.length > 0) out.content.splice(1, 0, ...evidenceBlocks.map(text => ({ type: 'text' as const, text })));
+    const admitted = admitNotices(notices, opts);
+    const renderCtx = dispatchRenderContext(opts);
+    // format text|hook (ops/output-format.ts): one block, evidence and notices folded in.
+    const shaped = await shapeOutput(op, result, safeParams, [...evidenceBlocks, ...noticeBlocks(admitted, renderCtx)]);
+    const out: ToolResult = shaped !== null ? shapedToolResult(shaped, admitted, renderCtx) : toolResultWithNotices(result, admitted, renderCtx);
+    if (shaped === null && evidenceBlocks.length > 0) out.content.splice(1, 0, ...evidenceBlocks.map(text => ({ type: 'text' as const, text })));
     if (opts.transport === 'stdio') {
       maybeRefreshBackupStatusInProcess(engine);
     }

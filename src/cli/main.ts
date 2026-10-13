@@ -37,7 +37,8 @@ import { OPERATION_MANIFEST, cliOps } from './op-manifest.ts';
 import { loadOperation } from '../core/operation-load.ts';
 import { resolveSourceIdEngineFree } from '../core/source-resolver.ts';
 import { installCliRoutingFor } from './fix-routing-provider.ts';
-import { formatVolunteeredPage } from '../core/context/volunteer.ts';
+import { formatVolunteeredPage, formatVolunteerStats } from '../core/context/volunteer.ts';
+import { shapeOutput, withoutOutputFormat } from '../core/ops/output-format.ts';
 import type { Operation, OperationContext } from '../core/operations.ts';
 import { currentCliWriteWait } from '../core/persistence/write-wait.ts';
 import { isScopeErrorCode } from '../core/error-catalogue.ts';
@@ -701,7 +702,8 @@ async function runSharedOperation(command: string, subArgs: string[], cliOpts: C
     // routed path. Date → ISO string; bigint → string (postgres.js shape);
     // Buffer → object. Microsecond-cost; eliminates a whole drift bug class.
     const { result, stderr: noticeText } = applyCliOpNotices(normalizeLocalResult(rawResult), params.json === true);
-    const output = formatResult(op.name, result, params);
+    const shaped = await shapeOutput(op, result, params); // --format text|hook (ops/output-format.ts)
+    const output = shaped !== null ? `${shaped}\n` : formatResult(op.name, result, params);
     // Awaited delivery (#3423): queued stdout writes past 64KiB lose their
     // tail to a slow pipe reader when the exit grace lapses — see
     // writeStdoutFinal.
@@ -796,7 +798,8 @@ async function runThinClientRouted(
 
   try {
     const { callRemoteTool, unpackToolResult } = await import('../core/mcp-client.ts');
-    const raw = await callRemoteTool(cfg, op.name, params, {
+    // --format is shaped here from the JSON answer, so any host version serves it.
+    const raw = await callRemoteTool(cfg, op.name, withoutOutputFormat(params), {
       timeoutMs,
       signal: sigintController.signal,
       ...(op.mutating ? { writeWaitMs: currentCliWriteWait().waitMs } : {}),
@@ -815,7 +818,8 @@ async function runThinClientRouted(
     hintAmbientNarrowing(op, params, result, ambientScope);
     const skew = (await import('../core/search/evidence-delivery.ts')).deliveryVersionSkewWarning(op.name, params, envelopeMeta?.retrieval as Record<string, unknown> | undefined, result);
     if (skew) process.stderr.write(skew + '\n');
-    const output = formatResult(op.name, result, params);
+    const shaped = await shapeOutput(op, result, params);
+    const output = shaped !== null ? `${shaped}\n` : formatResult(op.name, result, params);
     // Awaited delivery (#3423) — same contract as the local-engine path.
     if (output) await writeStdoutFinal(output);
     maybePrintConceptNudge(op.name, params);
@@ -1623,17 +1627,7 @@ export function formatResult(
     case 'volunteer_context': {
       const r = result as any;
       // Stats mode (the feedback loop).
-      if (r && r.approximate === true && Array.isArray(r.by_arm)) {
-        const lines = [
-          `volunteered-context precision — last ${r.days} day(s) (${r.note})`,
-          `total: ${r.total_volunteered} volunteered, ${r.total_used} used`,
-        ];
-        for (const a of r.by_arm) {
-          lines.push(`  ${a.match_arm}/${a.channel}: ${a.used}/${a.volunteered} used (precision ${a.precision})`);
-        }
-        if (!r.by_arm.length) lines.push('  (no volunteer events in the window)');
-        return lines.join('\n') + '\n';
-      }
+      if (r && r.approximate === true && Array.isArray(r.by_arm)) return formatVolunteerStats(r) + '\n';
       const pages = (r?.pages ?? []) as any[];
       if (!pages.length) return 'Nothing volunteered (no entity cleared the confidence gate).\n';
       return pages.map((p) => formatVolunteeredPage(p)).join('\n') + '\n';
