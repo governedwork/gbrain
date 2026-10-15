@@ -58,10 +58,13 @@ async function runAndCapture(engine: BrainEngine, extraArgs: string[] = []): Pro
   return logs.join('\n');
 }
 
+/** Answers the rollup query with `rollupRow` and every other query (the DB-resident schema-pack reads that run
+ * first) with no rows, so the bundled pack stays active; only the rollup query is captured. */
 function stubEngine(rollupRow: Record<string, unknown>, capturedSql?: string[]): BrainEngine {
   return {
     getConfig: async () => null,
     executeRaw: async (sql: string) => {
+      if (!/\bextract_rollup_7d\b/.test(sql)) return [];
       capturedSql?.push(sql);
       return [rollupRow];
     },
