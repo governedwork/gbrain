@@ -526,7 +526,10 @@ against the current base on the wardrobe, posts the required `lander/verdict` an
 session on the presence board when the PR bounces, is held or merges. Never `gh pr merge`, never `--auto`,
 never a watch loop.
 
-The fork runs no CI of its own, so the lander's check is its only gate: the unit suite
-(`bun run test`, sharded to the run's CPU budget, with `GBRAIN_TEST_SKIP_LAUNCHD=1` — no sandboxed run can
-bootstrap a launchd job). Run `bun run verify` and anything your change needs beyond the unit suite
-yourself, and say in the PR what you ran.
+The fork runs no CI of its own, so the lander's check is its only gate, in two steps. Per PR:
+`bun run typecheck`, then the test files the change names — a changed `test/*.test.ts`, and
+`test/<name>.test.ts` of each changed `src/**/<name>.ts`. Once per base: the whole unit suite (`bun run test`,
+sharded to the run's CPU budget); a red it finds holds the queue until the base is fixed. Both run with
+`GBRAIN_TEST_SKIP_LAUNCHD=1` — no sandboxed run can bootstrap a launchd job. So run the tests your change
+can break beyond the ones it names, `bun run verify`, and anything else it needs yourself, and say in the PR
+what you ran.
