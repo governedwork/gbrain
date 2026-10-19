@@ -355,6 +355,19 @@ export const VOLUNTEER_STATS_NOTE =
   'last-retrieved throttle causes false negatives; unrelated reads of the same ' +
   'page cause false positives.';
 
+/** Human rendering of the precision summary — `gbrain volunteer-context --stats` and `format: text`. */
+export function formatVolunteerStats(r: VolunteerUsageStats): string {
+  const lines = [
+    `volunteered-context precision — last ${r.days} day(s) (${r.note})`,
+    `total: ${r.total_volunteered} volunteered, ${r.total_used} used`,
+  ];
+  for (const a of r.by_arm) {
+    lines.push(`  ${a.match_arm}/${a.channel}: ${a.used}/${a.volunteered} used (precision ${a.precision})`);
+  }
+  if (!r.by_arm.length) lines.push('  (no volunteer events in the window)');
+  return lines.join('\n');
+}
+
 /**
  * Per-arm/channel precision over the last N days, source-scoped. Read-only;
  * returns zeroed stats on pre-v117 brains (no table).

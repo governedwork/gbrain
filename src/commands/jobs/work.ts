@@ -188,6 +188,9 @@ export async function runJobsWork({ args, engine, queue }: JobsCommandContext): 
     }
   }
 
+  // Ours (governedwork fork): see keepBrainResidentPacksFresh.
+  (await import('../../core/schema-pack/db-store.ts')).keepBrainResidentPacksFresh(engine);
+
   const worker = new MinionWorker(engine, {
     queue: queueName, concurrency, maxRssMb, healthCheckInterval,
     jobIsolation, childCliInvocation, childTiniPath,

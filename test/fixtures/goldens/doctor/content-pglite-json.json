@@ -511,10 +511,10 @@
                   "days_to_exhaustion": null,
                   "exhaustion_date": null,
                   "limit": 68719476736,
-                  "max_day_7d": 114245,
-                  "net_per_day_7d": 22378,
+                  "max_day_7d": 114557,
+                  "net_per_day_7d": 22430,
                   "pct": 0,
-                  "per_day_7d": 114245,
+                  "per_day_7d": 114557,
                   "reclaimable_bytes": 16318,
                   "recommended_limit": 137438953472,
                   "resource": "terminal_bytes",
@@ -522,7 +522,7 @@
                   "spike_day": null,
                   "status": "ok",
                   "under_reserved_receipts": 0,
-                  "used": 114245,
+                  "used": 114557,
                   "window_days": 1
                 },
                 {
@@ -548,10 +548,10 @@
                   "days_to_exhaustion": null,
                   "exhaustion_date": null,
                   "limit": 17179869184,
-                  "max_day_7d": 114245,
-                  "net_per_day_7d": 22378,
+                  "max_day_7d": 114557,
+                  "net_per_day_7d": 22430,
                   "pct": 0,
-                  "per_day_7d": 114245,
+                  "per_day_7d": 114557,
                   "reclaimable_bytes": 16318,
                   "recommended_limit": 34359738368,
                   "resource": "terminal_bytes",
@@ -559,7 +559,7 @@
                   "spike_day": null,
                   "status": "ok",
                   "under_reserved_receipts": 0,
-                  "used": 114245,
+                  "used": 114557,
                   "window_days": 1
                 }
               ],
@@ -863,7 +863,7 @@
           "category": "brain",
           "details": {
             "archived": 0,
-            "as_of": "<ts>+00",
+            "as_of": "<ts>+01",
             "failed": 0,
             "ocr_required": 0,
             "oldest_age_seconds": "<volatile>",
@@ -975,14 +975,14 @@
         {
           "category": "meta",
           "elapsed_ms": "<volatile>",
-          "message": "1258 column(s) verified against live schema",
+          "message": "1271 column(s) verified against live schema",
           "name": "schema_columns",
           "status": "ok"
         },
         {
           "category": "meta",
           "elapsed_ms": "<volatile>",
-          "message": "All 149 table(s) the applied migrations create exist.",
+          "message": "All 151 table(s) the applied migrations create exist.",
           "name": "schema_missing_tables",
           "status": "ok"
         },
@@ -2371,7 +2371,7 @@
         {
           "category": "ops",
           "elapsed_ms": "<volatile>",
-          "message": "No configured collectors declare output paths",
+          "message": "No collector output dir falls inside a db_only path",
           "name": "db_only_collector_collision",
           "status": "ok"
         },

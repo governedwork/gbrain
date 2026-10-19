@@ -344,6 +344,7 @@ test/purge-missing-cache-6911.test.ts
 test/purge-read-surfaces.test.ts
 test/recall-page-fill.test.ts
 test/remediation-manual-only.test.ts
+test/rename-page-op.test.ts
 test/repair-apply-pending-6543.test.ts
 test/repair-embedding-effects.test.ts
 test/repair-failed-writes-conflict-6429.test.ts
