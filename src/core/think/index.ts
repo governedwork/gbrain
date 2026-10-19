@@ -34,7 +34,8 @@ import { hasAnthropicKey } from '../ai/anthropic-key.ts';
 import { parseTemporalWindow } from './temporal-window.ts';
 import { resolveThinkTemporalContext } from './temporal-context.ts';
 import { resolveExcludePrivatePages } from '../search/private-visibility.ts';
-import { deliverEvidence, effectivePlan, resolveEvidencePlan, EVIDENCE_BLOCK_CHAR_CAP, THINK_RETURN_UNIT_CONFIG_KEY, type DeliveryMeta } from '../search/evidence-delivery.ts';
+import { deliverEvidence, effectivePlan, resolveEvidencePlan, DEFAULT_REMOTE_BUDGET_MAX, EVIDENCE_BLOCK_CHAR_CAP, THINK_RETURN_UNIT_CONFIG_KEY, type DeliveryMeta } from '../search/evidence-delivery.ts';
+import { DEFAULT_WHOLE_PAGES_BUDGET, deliveredReports, excerptReports, readWholePages, type EvidencePageReport } from './whole-pages.ts';
 import { startThinkDecide, thinkAbstainResult, type ThinkAbstention } from './decide.ts';
 import { classifyIntent } from './intent.ts';
 import { maintenanceTransaction } from '../persistence/attribution.ts';
@@ -150,6 +151,15 @@ export interface RunThinkOpts {
    * question date. Invalid or future values throw ReferenceDateError.
    */
   referenceDate?: string;
+  /**
+   * Per-call evidence delivery, as `query`/`search` take it (validated by
+   * resolveEvidencePlan); unset keeps the `think.return_unit` config path.
+   */
+  returnUnit?: unknown;
+  returnWindow?: unknown;
+  tokenBudget?: unknown;
+  /** Pages to read in full, first, within their own budget (whole-pages.ts); reported in `evidence_pages`. */
+  wholePages?: string[];
 }
 
 
@@ -217,6 +227,12 @@ export interface ThinkResult {
   usage?: { input_tokens: number; output_tokens: number } | null;
   /** Evidence delivery meta, present only when think.return_unit is not chunk. */
   evidence_delivery?: import('../search/evidence-delivery.ts').DeliveryMeta;
+  /**
+   * What each page in the prompt was: whole, an excerpt, a delivered unit, or
+   * not shown (whole-pages.ts). About the inspected evidence only: a page the
+   * gather never found is not listed, so `whole` never means "all the brain has".
+   */
+  evidence_pages?: EvidencePageReport[];
   /** Gathered pages with the revision retrieved, for retrieval-feedback recording; the op layer strips it. */
   feedback_evidence?: Array<{ source_id: string; slug: string; content_hash: string | null }>;
   /** Only set when --save was true and the caller persisted a synthesis page. */
@@ -523,23 +539,54 @@ async function persistCitations(
  * the renderer passes through whole instead of cutting its own excerpts;
  * auto's unchanged chunks keep the usual excerpts.
  */
-async function renderThinkPages(engine: BrainEngine, opts: RunThinkOpts, pages: SearchResult[], timeZone: string): Promise<{ pagesBlock: string; evidenceDelivery?: DeliveryMeta }> {
-  const plan = await resolveEvidencePlan(engine, {
-    remote: opts.remote, returnUnit: undefined, returnWindow: undefined, budget: undefined,
-    snippetChars: undefined, snippetCap: 0, configKey: THINK_RETURN_UNIT_CONFIG_KEY, op: 'think',
-  });
-  const applied = effectivePlan(plan, pages);
-  if (!applied) return { pagesBlock: renderPagesBlock(pages, pagesBlockExcerptLen(pages.length), opts.question, { timeZone }) };
-  const delivered = await deliverEvidence(engine, pages, applied, {
+async function renderThinkPages(engine: BrainEngine, opts: RunThinkOpts, pages: SearchResult[], timeZone: string): Promise<{ pagesBlock: string; evidenceDelivery?: DeliveryMeta; evidencePages: EvidencePageReport[] }> {
+  const scope = {
     ...(opts.allowedSources !== undefined && opts.allowedSources.length > 0 ? { sourceIds: opts.allowedSources } : opts.sourceId !== undefined ? { sourceId: opts.sourceId } : {}),
     excludePrivate: opts.excludePrivate ?? await resolveExcludePrivatePages(engine, opts.remote),
     requireSafeChunks: opts.remote !== false,
+  };
+  // whole_pages: read first, rendered first and verbatim, out of the gathered rows below.
+  const wholeRows: SearchResult[] = [];
+  const reports: EvidencePageReport[] = [];
+  if (opts.wholePages && opts.wholePages.length > 0) {
+    const asked = typeof opts.tokenBudget === 'number' && Number.isFinite(opts.tokenBudget) && opts.tokenBudget > 0 ? Math.floor(opts.tokenBudget) : DEFAULT_WHOLE_PAGES_BUDGET;
+    const budget = opts.remote === false ? asked : Math.min(asked, DEFAULT_REMOTE_BUDGET_MAX);
+    const { blocks, missing } = await readWholePages(engine, opts.wholePages, scope, budget);
+    blocks.forEach((b, i) => { wholeRows.push(b.row); reports.push({ ...b.report, rank: i + 1 }); });
+    reports.push(...missing);
+  }
+  const wholeKeys = new Set(wholeRows.map(r => `${r.source_id ?? 'default'}:${r.slug}`));
+  const rest = wholeKeys.size > 0 ? pages.filter(p => !wholeKeys.has(`${p.source_id ?? 'default'}:${p.slug}`)) : pages;
+  const isWhole = new Set<SearchResult>(wholeRows);
+  const excerptLen = pagesBlockExcerptLen(rest.length);
+
+  const plan = await resolveEvidencePlan(engine, {
+    remote: opts.remote, returnUnit: opts.returnUnit, returnWindow: opts.returnWindow, budget: opts.tokenBudget,
+    snippetChars: undefined, snippetCap: 0, configKey: THINK_RETURN_UNIT_CONFIG_KEY, op: 'think',
   });
-  const pagesBlock = applied.unit === 'auto'
-    ? renderPagesBlock(delivered.results, pagesBlockExcerptLen(pages.length), opts.question,
-      { verbatim: r => r.delivered?.reason !== 'not_conversation' && r.delivered?.reason !== 'conversation_over_budget', verbatimLen: EVIDENCE_BLOCK_CHAR_CAP, timeZone })
-    : renderPagesBlock(delivered.results, EVIDENCE_BLOCK_CHAR_CAP, opts.question, { verbatim: true, timeZone });
-  return { pagesBlock, evidenceDelivery: delivered.delivery };
+  const applied = effectivePlan(plan, rest);
+  if (!applied) {
+    const rows = [...wholeRows, ...rest];
+    const pagesBlock = isWhole.size > 0
+      ? renderPagesBlock(rows, excerptLen, opts.question, { verbatim: r => isWhole.has(r), verbatimLen: EVIDENCE_BLOCK_CHAR_CAP, timeZone })
+      : renderPagesBlock(rows, excerptLen, opts.question, { timeZone });
+    return { pagesBlock, evidencePages: [...reports, ...excerptReports(rest, excerptLen, wholeRows.length + 1)] };
+  }
+  const delivered = await deliverEvidence(engine, rest, applied, scope);
+  const verbatimRest = (r: SearchResult & { delivered?: { reason?: string } }) =>
+    applied.unit !== 'auto' || (r.delivered?.reason !== 'not_conversation' && r.delivered?.reason !== 'conversation_over_budget');
+  const rows: SearchResult[] = [...wholeRows, ...delivered.results];
+  const pagesBlock = applied.unit === 'auto' || isWhole.size > 0
+    ? renderPagesBlock(rows, excerptLen, opts.question,
+      { verbatim: r => isWhole.has(r) || verbatimRest(r), verbatimLen: EVIDENCE_BLOCK_CHAR_CAP, timeZone })
+    : renderPagesBlock(rows, EVIDENCE_BLOCK_CHAR_CAP, opts.question, { verbatim: true, timeZone });
+  const restReports = deliveredReports(rest, delivered.results, delivered.delivery, wholeRows.length + 1, EVIDENCE_BLOCK_CHAR_CAP)
+    .map((rep, i) => {
+      const r = delivered.results[i];
+      // auto renders a non-conversation row as the usual excerpt, never whole.
+      return r && !verbatimRest(r) ? { ...rep, whole: false, shown_as: 'excerpt' as const, chars_shown: Math.min(excerptLen, String(r.chunk_text ?? '').length) } : rep;
+    });
+  return { pagesBlock, evidenceDelivery: delivered.delivery, evidencePages: [...reports, ...restReports] };
 }
 
 /**
@@ -626,7 +673,7 @@ export async function runThink(
   // budget-aware — 600 chars is the FLOOR (a big gather never collapses each
   // page below it) and a small gather spreads the block budget into much
   // larger, often complete, per-page windows.
-  const { pagesBlock, evidenceDelivery } = await renderThinkPages(engine, opts, gather.pages, temporal.timeZone);
+  const { pagesBlock, evidenceDelivery, evidencePages } = await renderThinkPages(engine, opts, gather.pages, temporal.timeZone);
   const takesForPrompt = gather.takes.map(takesHitToTakeForPrompt);
   const { rendered: takesBlock, sanitizedCount } = renderTakesBlock(takesForPrompt);
   if (sanitizedCount > 0) {
@@ -848,6 +895,7 @@ export async function runThink(
         synthesis_status: modelProblem ? 'model_unusable' : 'no_llm',
         ...(stubExtractive ? { extractive: stubExtractive } : {}),
         usage: null,         // [E2] no LLM ran — no accounting
+        evidence_pages: evidencePages,
         diagnostics: {
           pagesFromHybrid: gather.diagnostics.pagesFromHybrid,
           takesFromKeyword: gather.diagnostics.takesFromKeyword,
@@ -991,6 +1039,7 @@ export async function runThink(
     feedback_evidence: gather.pages.map(pg => ({ source_id: pg.source_id ?? 'default', slug: pg.slug, content_hash: pg.content_hash ?? null })),
     ...(extractive ? { extractive } : {}),
     usage, ...(evidenceDelivery ? { evidence_delivery: evidenceDelivery } : {}),
+    evidence_pages: evidencePages,
     diagnostics: {
       pagesFromHybrid: gather.diagnostics.pagesFromHybrid,
       takesFromKeyword: gather.diagnostics.takesFromKeyword,

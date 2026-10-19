@@ -17,6 +17,7 @@ import {
   validatePageSlug,
 } from './context.ts';
 import { embedQuery } from '../embedding.ts';
+import { parseWholePages } from '../think/whole-pages.ts';
 import { ALL_SOURCES } from '../source-id.ts';
 import { privatePagesFilterFragment } from '../search/private-visibility.ts';
 
@@ -218,6 +219,10 @@ const think: Operation = {
     since: { type: 'string', description: 'Start of temporal window (YYYY-MM-DD or YYYY-MM)' },
     until: { type: 'string', description: 'End of temporal window' },
     reference_date: { type: 'string', description: 'YYYY-MM-DD the question\'s relative time words resolve against (default: today in brain.timezone).' },
+    whole_pages: { type: 'array', items: { type: 'string' }, description: 'Up to 5 page slugs (usually the anchor) to read in full and put first, within token_budget (default 24000; remote max 32000). The response\'s evidence_pages says for every page in the prompt whether it reached the model whole, as an excerpt, or not at all — about the inspected evidence, not the whole brain.' },
+    return_unit: { type: 'string', enum: ['chunk', 'window', 'section', 'page', 'auto'], description: "Evidence unit for the gathered pages, as query takes it (default: the think.return_unit config, else 'auto')." },
+    return_window: { type: 'number', description: 'Neighbor chunks each side for window (1-3).' },
+    token_budget: { type: 'number', description: 'Token budget for the delivered evidence (remote max 32000); also bounds whole_pages.' },
   },
   // Local CLI can persist with save/take; remote/MCP callers are forced
   // read-only below before runThink/persistSynthesis sees those flags.
@@ -233,6 +238,7 @@ const think: Operation = {
     // forwards to findTrajectory. CLI callers don't go through this op
     // and get default scope + remote=false from runThink's CLI path.
     const thinkScope = thinkSourceScopeOpts(ctx);
+    const wholePages = parseWholePages(p.whole_pages);
     const { runThink, persistSynthesis } = await import('../think/index.ts');
     const result = await runThink(ctx.engine, {
       question: String(p.question),
@@ -251,6 +257,10 @@ const think: Operation = {
       since: p.since ? String(p.since) : undefined,
       until: p.until ? String(p.until) : undefined,
       ...(typeof p.reference_date === 'string' ? { referenceDate: p.reference_date } : {}),
+      ...(p.return_unit !== undefined ? { returnUnit: p.return_unit } : {}),
+      ...(p.return_window !== undefined ? { returnWindow: p.return_window } : {}),
+      ...(p.token_budget !== undefined ? { tokenBudget: p.token_budget } : {}),
+      ...(wholePages ? { wholePages } : {}),
       takesHoldersAllowList: readHolders(ctx),
       ...thinkScope,
       excludePrivate: (await readPolicyOpts(ctx)).excludePrivate,
