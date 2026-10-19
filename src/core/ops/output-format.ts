@@ -27,7 +27,11 @@ export type OutputFormat = (typeof OUTPUT_FORMATS)[number];
 export const HOOK_EVENTS = ['UserPromptSubmit', 'SessionStart'] as const;
 export type HookEvent = (typeof HOOK_EVENTS)[number];
 
-/** Spread into the `params` of every op that sets `renderText`. */
+/**
+ * Spread into the `params` of every op that sets `renderText`. Full-surface-only: dispatch admits them on every
+ * surface, but the starter tool list does not advertise them (its 25,000-character budget, mcp-schema-budget.test.ts);
+ * a hook names `format` itself.
+ */
 export const OUTPUT_FORMAT_PARAMS: Record<'format' | 'hook_event', ParamDef> = {
   format: {
     type: 'string',
@@ -35,11 +39,13 @@ export const OUTPUT_FORMAT_PARAMS: Record<'format' | 'hook_event', ParamDef> = {
     description:
       "Output shape (default json). 'text' returns the compact injectable block; 'hook' returns " +
       '{hookSpecificOutput: {hookEventName, additionalContext}} for a Claude Code or Codex hook.',
+    fullSurfaceOnly: true,
   },
   hook_event: {
     type: 'string',
     enum: [...HOOK_EVENTS],
     description: "hookEventName for format 'hook' (default UserPromptSubmit).",
+    fullSurfaceOnly: true,
   },
 };
 

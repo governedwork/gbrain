@@ -1137,12 +1137,7 @@ async function dispatchResolvedCall(
     if (opts.transport === 'stdio' && opts.remote !== false) { const drain = takeFactsDrainNotice(); if (drain) notices.push(drain); } // Lane D facts drain
     notices.push(...await sessionSafetyNotices(engine, opts, ctx.config));
     notices.push(...await grantBlockedNotices(engine, opts, false));
-    const admitted = admitNotices(notices, opts);
-    const renderCtx = dispatchRenderContext(opts);
-    // format text|hook (ops/output-format.ts): one block, evidence and notices folded in.
-    const shaped = await shapeOutput(op, result, safeParams, [...evidenceBlocks, ...noticeBlocks(admitted, renderCtx)]);
-    const out: ToolResult = shaped !== null ? shapedToolResult(shaped, admitted, renderCtx) : toolResultWithNotices(result, admitted, renderCtx);
-    if (shaped === null && evidenceBlocks.length > 0) out.content.splice(1, 0, ...evidenceBlocks.map(text => ({ type: 'text' as const, text })));
+    const out = await finalToolResult(op, result, safeParams, evidenceBlocks, admitNotices(notices, opts), dispatchRenderContext(opts));
     if (opts.transport === 'stdio') {
       maybeRefreshBackupStatusInProcess(engine);
     }
@@ -1182,4 +1177,17 @@ async function dispatchResolvedCall(
     notices.push(...await grantBlockedNotices(engine, opts, refusedByGrant(e)));
     return errorResult(e, opts, { op: name, mutating: op.mutating === true, idempotent: op.idempotent === true, notices: admitNotices(notices, opts) });
   }
+}
+
+/**
+ * Ours (governedwork fork): the call's tool result. `format` text|hook (ops/output-format.ts) answers in one block
+ * with evidence and notices folded in; otherwise the JSON result with its notices and evidence blocks.
+ */
+async function finalToolResult(op: Parameters<typeof shapeOutput>[0], result: unknown, safeParams: Record<string, unknown>, evidenceBlocks: string[],
+  admitted: ReturnType<typeof admitNotices>, renderCtx: ReturnType<typeof dispatchRenderContext>): Promise<ToolResult> {
+  const shaped = await shapeOutput(op, result, safeParams, [...evidenceBlocks, ...noticeBlocks(admitted, renderCtx)]);
+  if (shaped !== null) return shapedToolResult(shaped, admitted, renderCtx);
+  const out = toolResultWithNotices(result, admitted, renderCtx);
+  if (evidenceBlocks.length > 0) out.content.splice(1, 0, ...evidenceBlocks.map(text => ({ type: 'text' as const, text })));
+  return out;
 }

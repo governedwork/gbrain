@@ -791,6 +791,50 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
     "area": "pages"
   },
   {
+    "name": "rename_page",
+    "idempotent": true,
+    "outputRedaction": "no_stored_text",
+    "description": "Rename one live page to a new slug in the same source, in place: the page row keeps its id, so its content, chunks and embeddings, tags, timeline, versions, takes and inbound/outbound graph links stay attached. The same transaction records the old slug as a slug alias (get_page on the old slug redirects and reports resolved_slug; [[old]] links keep resolving) and moves facts keyed to the old slug, fact withdrawals and frontmatter aliases (page_aliases) to the new slug. Textual [[wikilinks]] in other pages' bodies are NOT rewritten; they resolve through the alias. Rows that only store the slug as text (open loops, file records, take proposals) are not moved. Renames one page, not its children: rename each projects/x/* child with its own call. Database-canonical sources only: a source with a working tree (local_path, or sync.repo_path for default) is refused with source_writeback_required, because its file paths are its slugs; rename there with git mv, commit and sync. Read the page revision first and pass expected_revision; retain request_id for replay. Refuses with page_not_found when the page is missing or soft-deleted, slug_conflict when new_slug is held in that source by a live page, a soft-deleted page, or an alias to another page, and revision_conflict when the page changed. The committed receipt reports status renamed, slug (the new slug), renamed_from and the new revision.",
+    "params": {
+      "source_id": {
+        "type": "string",
+        "description": "Source holding the page (a multi-source brain can hold the same slug in several sources); the rename stays inside it. Defaults to ctx.sourceId. Remote callers may only target their write source — federated read grants do not confer rename access."
+      },
+      "expected_revision": {
+        "type": "string",
+        "description": "Revision read; omit to create."
+      },
+      "force": {
+        "type": "boolean",
+        "description": "Ignore the revision."
+      },
+      "request_id": {
+        "type": "string",
+        "description": "Reuse only to retry."
+      },
+      "slug": {
+        "type": "string",
+        "required": true,
+        "description": "Current slug of the page to rename, e.g. 'projects/old-name'."
+      },
+      "new_slug": {
+        "type": "string",
+        "required": true,
+        "description": "Slug the page moves to, e.g. 'projects/new-name'. Must be free in the source (no live page, soft-deleted page or alias to another page)."
+      }
+    },
+    "mutating": true,
+    "scope": "write",
+    "cliHints": {
+      "name": "rename",
+      "positional": [
+        "slug",
+        "new_slug"
+      ]
+    },
+    "area": "pages"
+  },
+  {
     "name": "edit_page",
     "idempotent": true,
     "outputRedaction": {
@@ -5092,7 +5136,7 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
       },
       "session_id": {
         "type": "string",
-        "description": "Optional caller session id, logged for attribution."
+        "description": "Optional caller session id, logged for attribution. Pages already volunteered to this session in the last 12 hours are not volunteered again."
       },
       "turn": {
         "type": "number",
@@ -5105,6 +5149,25 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
       "days": {
         "type": "number",
         "description": "Stats window in days (default 30; stats mode only)."
+      },
+      "format": {
+        "type": "string",
+        "enum": [
+          "json",
+          "text",
+          "hook"
+        ],
+        "description": "Output shape (default json). 'text' returns the compact injectable block; 'hook' returns {hookSpecificOutput: {hookEventName, additionalContext}} for a Claude Code or Codex hook.",
+        "fullSurfaceOnly": true
+      },
+      "hook_event": {
+        "type": "string",
+        "enum": [
+          "UserPromptSubmit",
+          "SessionStart"
+        ],
+        "description": "hookEventName for format 'hook' (default UserPromptSubmit).",
+        "fullSurfaceOnly": true
       }
     },
     "cliHints": {
@@ -5544,6 +5607,25 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
       "prefer_source_id": {
         "type": "string",
         "description": "Source to try first (thin clients send .gbrain-source here); never narrows.",
+        "fullSurfaceOnly": true
+      },
+      "format": {
+        "type": "string",
+        "enum": [
+          "json",
+          "text",
+          "hook"
+        ],
+        "description": "Output shape (default json). 'text' returns the compact injectable block; 'hook' returns {hookSpecificOutput: {hookEventName, additionalContext}} for a Claude Code or Codex hook.",
+        "fullSurfaceOnly": true
+      },
+      "hook_event": {
+        "type": "string",
+        "enum": [
+          "UserPromptSubmit",
+          "SessionStart"
+        ],
+        "description": "hookEventName for format 'hook' (default UserPromptSubmit).",
         "fullSurfaceOnly": true
       }
     },
@@ -6298,6 +6380,70 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
     },
     "scope": "admin",
     "mutating": false,
+    "area": "schema"
+  },
+  {
+    "name": "put_schema_pack",
+    "idempotent": false,
+    "outputRedaction": "no_stored_text",
+    "description": "Publish a new revision of a brain-resident schema pack (stored in the database, not on disk). Compare-and-swap on expected_revision (null to create). The manifest must parse and resolve its extends/borrow_from chain. Rollback: publish an older revision's manifest from get_schema_pack.",
+    "params": {
+      "name": {
+        "type": "string",
+        "required": true,
+        "description": "Pack name (not a bundled pack)."
+      },
+      "manifest": {
+        "type": "object",
+        "required": true,
+        "description": "Complete gbrain-schema-pack-v1 manifest."
+      },
+      "expected_revision": {
+        "type": "string",
+        "description": "Current head revision; JSON null to create."
+      },
+      "note": {
+        "type": "string",
+        "description": "Why this revision exists."
+      },
+      "source_id": {
+        "type": "string",
+        "description": "Owning source (default: the connection's write source)."
+      }
+    },
+    "scope": "admin",
+    "requiredScopes": [
+      "skill_publisher"
+    ],
+    "mutating": true,
+    "cliHints": {
+      "name": "put-schema-pack",
+      "positional": []
+    },
+    "area": "schema"
+  },
+  {
+    "name": "get_schema_pack",
+    "mutating": false,
+    "idempotent": true,
+    "outputRedaction": "no_stored_text",
+    "description": "Read a brain-resident schema pack: head revision, the manifest at head or at a given revision, and its full revision history.",
+    "params": {
+      "name": {
+        "type": "string",
+        "required": true,
+        "description": "Pack name."
+      },
+      "revision": {
+        "type": "string",
+        "description": "A revision from history (default: head)."
+      }
+    },
+    "scope": "read",
+    "cliHints": {
+      "name": "get-schema-pack",
+      "positional": []
+    },
     "area": "schema"
   },
   {

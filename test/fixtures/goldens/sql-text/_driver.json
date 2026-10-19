@@ -2537,6 +2537,15 @@
             "via": "unsafe"
           },
           {
+            "paramCount": 0,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": true
+            },
+            "via": "unsafe"
+          },
+          {
             "paramCount": 3,
             "unsafeOptions": {
               "prepare": true,
@@ -2680,6 +2689,24 @@
           {
             "paramCount": 1,
             "via": "tagged"
+          },
+          {
+            "paramCount": 0,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": true
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 0,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": true
+            },
+            "via": "unsafe"
           },
           {
             "paramCount": 4,

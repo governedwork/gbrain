@@ -122,6 +122,7 @@ import { requestToolsOperations } from './ops/request-tools.ts';
 import { noticesOperations } from './ops/notices.ts';
 import { pageEditOperations } from './ops/page-edit.ts';
 import { pageAppendOperations } from './ops/page-append.ts';
+import { pageRenameOperations } from './ops/page-rename.ts'; // ours (governedwork fork)
 import { pageBatchOperations } from './ops/page-batch.ts';
 import { pageUploadOperations } from './ops/page-upload.ts';
 import { feedbackOperations } from './ops/feedback.ts';
@@ -143,7 +144,7 @@ export const operations: Operation[] = [
   ...verbOperations,
   // Page CRUD (get_page, put_page, delete_page, list_pages + the v0.26.5
   // destructive-guard ops restore_page, purge_deleted_pages) — ops/pages.ts
-  ...pagesOperations, ...pageEditOperations, ...pageAppendOperations, ...pageBatchOperations, ...pageUploadOperations,
+  ...pagesOperations, ...pageRenameOperations, ...pageEditOperations, ...pageAppendOperations, ...pageBatchOperations, ...pageUploadOperations,
   ...persistenceOperations,
   // Search (search, query) — ops/search.ts
   ...searchOperations,

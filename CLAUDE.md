@@ -519,7 +519,7 @@ installation is not proof of native use. Read
 ## This fork: how a pull request lands
 
 This is GovernedWork's fork. Its pull requests target the branch for the upstream version it carries
-(`brains-v<upstream>`, e.g. `brains-v0.60.133.0`), never `master`, and they land through the lander
+(`brains-v<upstream>`, e.g. `brains-v0.60.310.0`), never `master`, and they land through the lander
 (governedwork/lander), never by hand: open the PR (a draft while you work on it), then run
 `lander enqueue <pr-url>` once — the `lander` on PATH — and stop. The lander validates the PR's exact head
 against the current base on the wardrobe, posts the required `lander/verdict` and merges; it tells your
