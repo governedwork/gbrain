@@ -145,6 +145,9 @@ const ROWS: readonly Row[] = [
   ['retrieval_events', 'out_of_scope', 'no_memory_text', 'id client_id op'],
   ['retrieval_feedback', 'out_of_scope', 'no_memory_text', 'event_id signal element_kind source_id element_key client_id'],
   ['retrieval_weights', 'out_of_scope', 'no_memory_text', 'source_id element_kind element_key content_hash'],
+  // Ours (governedwork fork): brain-resident schema packs are manifests a source publishes, no memory text.
+  ['schema_pack_heads', 'out_of_scope', 'no_memory_text', 'name source_id'],
+  ['schema_pack_revisions', 'out_of_scope', 'no_memory_text', 'name source_id manifest manifest_hash published_by note'],
   ['search_telemetry', 'out_of_scope', 'no_memory_text', 'date mode intent'],
   ['session_context_state', 'out_of_scope', 'probed_reported', 'source_id client_id session_id standing_entities surfaced_slugs checkpoint_manifest', 'checkpoint_manifest standing_entities'],
   ['shared_skill_delivery_batches', 'out_of_scope', 'no_memory_text', 'view_token authority_digest revisions evidence'],

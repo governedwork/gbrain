@@ -3148,33 +3148,6 @@ DO $rls$ BEGIN
   END IF;
 END $rls$;
 -- END GENERATED from src/core/write-gate-schema.ts (WRITE_GATE_SCHEMA_SQL)
--- Ours (governedwork fork): brain-resident schema packs.
--- BEGIN GENERATED from src/core/schema-pack/brain-pack-schema.ts (BRAIN_PACK_SCHEMA_SQL). Edit that file, then run: bun run build:schema
-CREATE TABLE IF NOT EXISTS schema_pack_revisions (
-  revision uuid PRIMARY KEY,
-  name text NOT NULL,
-  source_id text NOT NULL,
-  manifest jsonb NOT NULL,
-  manifest_hash text NOT NULL,
-  parent_revision uuid,
-  published_by text NOT NULL,
-  published_at timestamptz NOT NULL DEFAULT now(),
-  note text
-);
-CREATE INDEX IF NOT EXISTS schema_pack_revisions_name_idx ON schema_pack_revisions(name, published_at);
-CREATE TABLE IF NOT EXISTS schema_pack_heads (
-  name text PRIMARY KEY,
-  revision uuid NOT NULL REFERENCES schema_pack_revisions(revision),
-  source_id text NOT NULL,
-  updated_at timestamptz NOT NULL DEFAULT now()
-);
-DO $rls$ BEGIN
-  IF EXISTS (SELECT 1 FROM pg_roles r WHERE pg_has_role(current_user, r.oid, 'USAGE') AND (r.rolbypassrls OR r.rolsuper)) THEN
-    ALTER TABLE schema_pack_revisions ENABLE ROW LEVEL SECURITY;
-    ALTER TABLE schema_pack_heads ENABLE ROW LEVEL SECURITY;
-  END IF;
-END $rls$;
--- END GENERATED from src/core/schema-pack/brain-pack-schema.ts (BRAIN_PACK_SCHEMA_SQL)
 
 -- #5255/#5176 (O-DX-8): last upstream observation per source, recorded by sync
 -- from the checkout's Git state (upstream ref, its last fetch/push time, commits
@@ -3350,3 +3323,31 @@ DO $rls$ BEGIN
   END IF;
 END $rls$;
 -- END GENERATED from src/core/belief/schema.ts (BELIEF_LEDGER_SCHEMA_SQL)
+
+-- Ours (governedwork fork): brain-resident schema packs.
+-- BEGIN GENERATED from src/core/schema-pack/brain-pack-schema.ts (BRAIN_PACK_SCHEMA_SQL). Edit that file, then run: bun run build:schema
+CREATE TABLE IF NOT EXISTS schema_pack_revisions (
+  revision uuid PRIMARY KEY,
+  name text NOT NULL,
+  source_id text NOT NULL,
+  manifest jsonb NOT NULL,
+  manifest_hash text NOT NULL,
+  parent_revision uuid,
+  published_by text NOT NULL,
+  published_at timestamptz NOT NULL DEFAULT now(),
+  note text
+);
+CREATE INDEX IF NOT EXISTS schema_pack_revisions_name_idx ON schema_pack_revisions(name, published_at);
+CREATE TABLE IF NOT EXISTS schema_pack_heads (
+  name text PRIMARY KEY,
+  revision uuid NOT NULL REFERENCES schema_pack_revisions(revision),
+  source_id text NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+DO $rls$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles r WHERE pg_has_role(current_user, r.oid, 'USAGE') AND (r.rolbypassrls OR r.rolsuper)) THEN
+    ALTER TABLE schema_pack_revisions ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE schema_pack_heads ENABLE ROW LEVEL SECURITY;
+  END IF;
+END $rls$;
+-- END GENERATED from src/core/schema-pack/brain-pack-schema.ts (BRAIN_PACK_SCHEMA_SQL)
