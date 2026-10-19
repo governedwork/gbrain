@@ -3995,6 +3995,32 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
       "reference_date": {
         "type": "string",
         "description": "YYYY-MM-DD the question's relative time words resolve against (default: today in brain.timezone)."
+      },
+      "whole_pages": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Up to 5 page slugs (usually the anchor) to read in full and put first, within token_budget (default 24000; remote max 32000). The response's evidence_pages says for every page in the prompt whether it reached the model whole, as an excerpt, or not at all — about the inspected evidence, not the whole brain."
+      },
+      "return_unit": {
+        "type": "string",
+        "enum": [
+          "chunk",
+          "window",
+          "section",
+          "page",
+          "auto"
+        ],
+        "description": "Evidence unit for the gathered pages, as query takes it (default: the think.return_unit config, else 'auto')."
+      },
+      "return_window": {
+        "type": "number",
+        "description": "Neighbor chunks each side for window (1-3)."
+      },
+      "token_budget": {
+        "type": "number",
+        "description": "Token budget for the delivered evidence (remote max 32000); also bounds whole_pages."
       }
     },
     "mutating": true,
