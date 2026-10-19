@@ -8517,25 +8517,20 @@ fact and page-edit arms (world pages only, the same text `get_versions` and
 (`withheld_arms: ["loops"]`).
 ### Hooks that call the brain directly (`format`)
 
-A harness can also call the ops itself, with no serve socket and no `gbrain
-hook` process: a Claude Code or Codex `mcp_tool` hook calling
-`volunteer_context` over MCP (a remote brain included), or a `command` hook
-running the CLI. A hook reads the tool's text content as its output, and
-neither harness injects the default JSON answer (Claude Code parses it as hook
-output and ignores every key; plain text from an `mcp_tool` hook is dropped on
-`UserPromptSubmit`). `volunteer_context` and `context_pack` therefore take:
+A Claude Code or Codex `mcp_tool` hook (or a `command` hook running the CLI)
+can call the ops itself. A hook reads the tool's text content as its output
+and ignores the default JSON answer, so `volunteer_context` and
+`context_pack` take `format`:
 
 | `format` | Answer |
 |---|---|
 | `json` (default) | the op's JSON document, unchanged |
-| `text` | the compact injectable block: the same volunteered-pages block the hook lane injects, or the pack's `text` |
-| `hook` | `{"hookSpecificOutput":{"hookEventName":<hook_event>,"additionalContext":<the block>}}`, trimmed under the Claude Code hook-output cap; `{}` when nothing was volunteered |
+| `text` | the compact injectable block (the hook lane's volunteered pages, or the pack's `text`) |
+| `hook` | `{"hookSpecificOutput":{"hookEventName":<hook_event>,"additionalContext":<the block>}}`, trimmed under the hook-output cap; `{}` when empty |
 
-`hook_event` is `UserPromptSubmit` (default) or `SessionStart`. The answer is
-one content block; any notices are folded into the text. Claude Code accepts
-only the `hook` document; Codex accepts `hook` or `text`. Shaping is
-presentation only: the handler, its privacy gates and its output redaction run
-exactly as for JSON. On the CLI, `--format text|hook` is shaped from the JSON
+`hook_event` is `UserPromptSubmit` (default) or `SessionStart`. One content
+block, notices folded in; Claude Code accepts only `hook`, Codex `hook` or
+`text`. Shaping is presentation only. The CLI's `--format` shapes the JSON
 answer, so it works against any host version.
 
 ```json
@@ -8543,14 +8538,8 @@ answer, so it works against any host version.
   "input": { "window": "${prompt}", "session_id": "${session_id}", "format": "hook" } }
 ```
 
-Pass `session_id` and the op dedupes per session: pages already volunteered to
-that session (on any channel) in the last 12 hours are not volunteered again,
-read back from `context_volunteer_events`, so a per-prompt hook surfaces a page
-once rather than on every mention.
-
-Claude Code does not run `mcp_tool` hooks on `SessionStart` at launch; a
-`command` hook running `gbrain context-pack --entities … --format text` covers
-that event.
+Claude Code runs no `mcp_tool` hook on `SessionStart` at launch; use a
+`command` hook running `gbrain context-pack --entities … --format text`.
 
 ## The OpenClaw reflex volunteer arm
 
