@@ -52,11 +52,23 @@ function conflictOf(fn: () => unknown): { local: string; remote: string; paths: 
   throw new Error('expected integrate_conflict');
 }
 
-/** Hold an OS lock file in a child (flock) until killed. */
-async function holdLock(path: string): Promise<{ kill(): void }> {
+const NATIVE_LOCK = join(import.meta.dir, '..', 'src', 'core', 'persistence', 'native-lock.ts');
+
+/**
+ * Hold an OS lock file in a child until killed: the same native flock the product takes (`flock -x` semantics),
+ * through gbrain's own binding, so no `flock(1)` binary is needed (macOS ships none). Resolves once it holds.
+ */
+async function holdLock(path: string, seconds = 30): Promise<{ kill(): void }> {
   writeFileSync(path, '');
-  const holder = spawn('flock', [path, 'sleep', '30'], { stdio: 'ignore' });
-  await new Promise(r => setTimeout(r, 300));
+  const script = `const { acquireNativeLockSync } = await import(${JSON.stringify(NATIVE_LOCK)});
+globalThis.lockHandle = acquireNativeLockSync(${JSON.stringify(path)}, { timeoutMs: 5000 }); // kept: a collected handle unlocks
+if (!globalThis.lockHandle) process.exit(3);
+process.stdout.write('held\\n'); setTimeout(() => {}, ${seconds * 1000});`;
+  const holder = spawn(process.execPath, ['-e', script], { stdio: ['ignore', 'pipe', 'inherit'] });
+  await new Promise<void>((ok, fail) => {
+    holder.stdout!.on('data', () => ok());
+    holder.on('exit', code => fail(new Error(`lock holder exited ${code} before it held ${path}`)));
+  });
   return { kill: () => holder.kill('SIGKILL') };
 }
 
@@ -302,15 +314,13 @@ describe('lock', () => {
   test('a held lock makes commit-push fail loudly (commit_lock_busy) and commits nothing', async () => {
     const { a } = setup();
     const lockPath = join(a, '.git', 'brain-commit.lock');
-    writeFileSync(lockPath, '');
-    const holder = spawn('flock', [lockPath, 'sleep', '20'], { stdio: 'ignore' });
+    const holder = await holdLock(lockPath, 20);
     try {
-      await new Promise(r => setTimeout(r, 300));
       writeFileSync(join(a, 'x.md'), 'mine\n');
       expect(() => commitAndPush({ repo: a, paths: ['x.md'], message: 'm', cwd: a, lockWaitMs: 300 }))
         .toThrow(expect.objectContaining({ code: 'commit_lock_busy' }));
       expect(status(a)).toBe(' M x.md');
-    } finally { holder.kill('SIGKILL'); }
+    } finally { holder.kill(); }
   }, 30_000);
 
   test('the re-entrancy marker is honored only when it names this lock and the lock is really held', () => {
@@ -377,16 +387,14 @@ exec "${Bun.which('git')}" "$@"
   test('write-through commits still land path-scoped when another writer holds the lock past the short budget', async () => {
     const { a } = setup();
     const lockPath = join(a, '.git', 'brain-commit.lock');
-    writeFileSync(lockPath, '');
-    const holder = spawn('flock', [lockPath, 'sleep', '20'], { stdio: 'ignore' });
+    const holder = await holdLock(lockPath, 20);
     try {
-      await new Promise(r => setTimeout(r, 300));
       writeFileSync(join(a, 'x.md'), 'page write\n');
       writeFileSync(join(a, 'y.md'), 'other writer\n');
       expect(commitPathsLocked(a, [join(a, 'x.md')], 'gbrain: write-through x', { lockWaitMs: 200 })).not.toBeNull();
       expect(git(a, 'show', 'HEAD:x.md')).toBe('page write');
       expect(status(a)).toBe(' M y.md');
-    } finally { holder.kill('SIGKILL'); }
+    } finally { holder.kill(); }
   }, 30_000);
 });
 

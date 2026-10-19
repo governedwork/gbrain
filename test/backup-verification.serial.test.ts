@@ -254,7 +254,7 @@ test('successive bounded checks prioritize pending roots and retain identity-bou
     const reordered = await getBackupStatus(engine([...roots].reverse()), { ...verified, forceRefresh: true, now: new Date(now.getTime() + 2000) });
     expect(reordered.totals.recoverable_repos).toBe(BACKUP_REMOTE_PROBE_CAP);
   } finally { probe.mockRestore(); }
-}, 25_000);
+}, 60_000); // ~14 s on a quiet Mac; a 2-CPU sandboxed lander unit overran 25 s
 
 test('retained evidence is invalidated by local identity, source, commit, remote, push and clock changes', async () => {
   for (const change of ['head', 'branch', 'origin', 'replacement', 'dirty', 'push', 'source', 'future', 'stale']) {
@@ -279,7 +279,7 @@ test('retained evidence is invalidated by local identity, source, commit, remote
     const result = await assessBackupRepository(root, 'source_repo', change === 'source' ? 'changed-id' : 'source-id', checked, undefined, first);
     expect(result.verification?.state).not.toBe('verified');
   }
-}, 15_000);
+}, 45_000); // ~5 s on a quiet Mac; a 2-CPU sandboxed lander unit overran 15 s
 
 test('the remote probe reads the user git config through HOME, so an insteadOf rewrite reaches the remote (#5794)', async () => {
   const { root, remote } = await repository();
