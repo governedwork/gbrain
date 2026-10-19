@@ -283,6 +283,7 @@ or a physical projection that leaves attribution untouched):
 - `src/core/persistence/memory-prepare.ts` (3): `remember` request preparer.
 - `src/core/persistence/page-prepare.ts` (12): page request preparer (including the restore of a segmented page over 24 MiB, which flips `deleted_at` without re-serializing, and the tag flip of a segmented page, which versions it and changes its tag rows and `content_hash` without re-serializing).
 - `src/core/persistence/prepared-maintenance.ts` (3): managed maintenance request preparer.
+- `src/core/persistence/rename-prepare.ts` (1): `rename_page` request preparer (ours, governedwork fork).
 - `src/core/persistence/semantic-pages.ts` (1): `add_timeline_entry` request preparer.
 - `src/core/persistence/sync-image.ts` (2): managed sync image request preparer; a Git rename retires the old page inside the same publication.
 - `src/core/persistence/sync-prepare.ts` (4): managed sync request preparer.
