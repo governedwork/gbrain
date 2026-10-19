@@ -834,7 +834,7 @@
           "category": "brain",
           "details": {
             "archived": 0,
-            "as_of": "<ts>+00",
+            "as_of": "<ts>+01",
             "failed": 0,
             "ocr_required": 0,
             "oldest_age_seconds": "<volatile>",
@@ -946,14 +946,14 @@
         {
           "category": "meta",
           "elapsed_ms": "<volatile>",
-          "message": "1258 column(s) verified against live schema",
+          "message": "1271 column(s) verified against live schema",
           "name": "schema_columns",
           "status": "ok"
         },
         {
           "category": "meta",
           "elapsed_ms": "<volatile>",
-          "message": "All 149 table(s) the applied migrations create exist.",
+          "message": "All 151 table(s) the applied migrations create exist.",
           "name": "schema_missing_tables",
           "status": "ok"
         },
@@ -2178,7 +2178,7 @@
         {
           "category": "ops",
           "elapsed_ms": "<volatile>",
-          "message": "No configured collectors declare output paths",
+          "message": "No collector output dir falls inside a db_only path",
           "name": "db_only_collector_collision",
           "status": "ok"
         },

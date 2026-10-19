@@ -334,6 +334,18 @@
           },
           {
             "lane": "tx",
+            "params": [],
+            "sql": "SELECT COALESCE(max(updated_at)::text,'') || ':' || count(*) AS generation FROM schema_pack_heads",
+            "textSha256": "91e1074c44ca092d93142ea8c6eb75ef1f5891b75ddc12029da967036b8764cf"
+          },
+          {
+            "lane": "tx",
+            "params": [],
+            "sql": "SELECT h.name, h.revision::text AS revision, h.source_id, r.manifest FROM schema_pack_heads h JOIN schema_pack_revisions r ON r.revision = h.revision",
+            "textSha256": "7c70acdcdea5fb33b2e9ca6e22c982ebefa78cb05e17b6f261827ad1ad6ff51b"
+          },
+          {
+            "lane": "tx",
             "params": [
               "string",
               "string",
@@ -516,6 +528,18 @@
             ],
             "sql": "SELECT value FROM config WHERE key = $1",
             "textSha256": "32d050605cb95dccb4dcc33a20003cfd10f1fd8e194c317d54e08869acb32e9c"
+          },
+          {
+            "lane": "tx",
+            "params": [],
+            "sql": "SELECT COALESCE(max(updated_at)::text,'') || ':' || count(*) AS generation FROM schema_pack_heads",
+            "textSha256": "91e1074c44ca092d93142ea8c6eb75ef1f5891b75ddc12029da967036b8764cf"
+          },
+          {
+            "lane": "tx",
+            "params": [],
+            "sql": "SELECT h.name, h.revision::text AS revision, h.source_id, r.manifest FROM schema_pack_heads h JOIN schema_pack_revisions r ON r.revision = h.revision",
+            "textSha256": "7c70acdcdea5fb33b2e9ca6e22c982ebefa78cb05e17b6f261827ad1ad6ff51b"
           },
           {
             "lane": "tx",

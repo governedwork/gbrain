@@ -144,7 +144,8 @@ The project formerly known as old-name.
            JOIN persistence_requests r ON r.id = p.revision_write_request_id WHERE p.id=$1`, [before.page.id]);
       expect(stamp).toEqual({ request_id: result.request_id as string, principal_kind: 'local_cli' });
       expect(await pageRow(oldSlug)).toEqual([]);
-      expect([await count('page_versions'), await count('timeline_entries'), await count('content_chunks')]).toEqual([versions, timeline, chunks]);
+      // updateSlug versions the page as it stood before the move (upstream belief ledger W2, page-at-time): one more.
+      expect([await count('page_versions'), await count('timeline_entries'), await count('content_chunks')]).toEqual([versions + 1, timeline, chunks]);
       expect((await engine.executeRaw('SELECT 1 FROM links WHERE from_page_id=$1 AND to_page_id=$2', [referrer.page.id, before.page.id])).length).toBe(1);
       // The referrer's body is not rewritten; its [[old]] link resolves through the alias.
       expect((await engine.readPageSnapshot('notes/referrer', { sourceId: DB_SOURCE }))!.page.compiled_truth).toContain(`[[${oldSlug}]]`);

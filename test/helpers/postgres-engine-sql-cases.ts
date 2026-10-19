@@ -18,6 +18,7 @@ import { resetFtsLanguageCache } from '../../src/core/fts-language.ts';
 import { makeFakeSql, type FakeSql, type RecordedStatement, type Responder } from './fake-postgres-sql.ts';
 import { withEnv } from './with-env.ts';
 import { LEGACY_EMBEDDING_CONFIG } from './legacy-embedding-config.ts';
+import { _resetBrainResidentPacksForTests } from '../../src/core/schema-pack/db-store.ts';
 
 export const W1_DOMAINS = [
   'pages', 'links', 'tags', 'timeline', 'sources', 'files',
@@ -248,6 +249,9 @@ export async function withPinnedSqlEnvironment<T>(rlsScopeBinding: '1' | undefin
 }
 
 export async function runCase(c: SqlCase): Promise<CaseCapture> {
+  // Ours (governedwork fork): the brain-resident pack overlay is process state; a case's trace must not depend on
+  // whether an earlier capture already loaded it.
+  _resetBrainResidentPacksForTests();
   const { engine, fake } = makeEngineWithFake(c.rows);
   try {
     await c.run(engine);

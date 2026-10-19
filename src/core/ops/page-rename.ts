@@ -6,10 +6,11 @@ import { enforceClientSlugFence, enforceSubagentSlugFence, validatePageSlug } fr
 
 /**
  * rename_page — coordinated, database-canonical page rename. Lives beside
- * ops/pages.ts (which lists it in pagesOperations, the contractual catalog
- * order) and is prepared by persistence/rename-prepare.ts.
+ * ops/pages.ts and is listed right after pagesOperations in operations.ts (the
+ * manifest generator needs each op exported by exactly one module); prepared by
+ * persistence/rename-prepare.ts.
  */
-export const rename_page: Operation = {
+const rename_page: Operation = {
   name: 'rename_page',
   idempotent: true,
   outputRedaction: 'no_stored_text',
@@ -38,3 +39,5 @@ export const rename_page: Operation = {
   },
   cliHints: { name: 'rename', positional: ['slug', 'new_slug'] },
 };
+
+export const pageRenameOperations: Operation[] = [rename_page];
