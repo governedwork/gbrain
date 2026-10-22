@@ -6,6 +6,7 @@ import { sealPageTextProjection } from '../page-state/projections.ts';
 import { assertKnowledgePublicationAllowed } from '../shared-skills/knowledge-guard.ts';
 import { engineMutationPrecondition, parseMutationPrecondition } from './preconditions.ts';
 import { getWorktreeBinding } from './ownership.ts';
+import { withTrustKeep } from './context.ts';
 import { pageIdentityError } from './page-identity.ts';
 import { pageFix, pageRefusal } from './page-prepare.ts';
 import type { PreparedMutation } from './coordinator.ts';
@@ -102,7 +103,10 @@ export async function prepareRenameMutation(engine: BrainEngine, row: WriteReque
     // old page's identity and revision; the target is rechecked under the lock.
     validate: async tx => { await assertRenameTargetFree(tx, row.source_id, row.slug, newSlug); },
     apply: async tx => {
-      const moved = await tx.updateSlug(row.slug, newSlug, source);
+      // A rename moves no content, but the trust triggers count `slug` and the
+      // facts' `entity_slug` as content columns; the keep scope stops the move
+      // from stamping the page and its facts down to the renamer's tier.
+      const moved = await withTrustKeep(tx, ['pages', 'facts'], () => tx.updateSlug(row.slug, newSlug, source));
       if (moved !== 1) throw opError('page_identity_changed', 'The page could not move to its new slug.',
         `No page was at ${row.slug} when the rename ran, so nothing was committed. Read the page and its revision before deciding to submit the rename again with a new request_id.`);
       // A slug change advances the knowledge revision; reseal the text
