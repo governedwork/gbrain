@@ -19,9 +19,22 @@ import { SCHEMA_PACK_API_VERSION } from '../src/core/schema-pack/manifest-v1.ts'
 import {
   _resetBrainResidentPacksForTests, brainResidentPack, keepBrainResidentPacksFresh, refreshBrainResidentPacks,
 } from '../src/core/schema-pack/db-store.ts';
+import { BRAIN_PACK_SCHEMA_SQL } from '../src/core/schema-pack/brain-pack-schema.ts';
+import { SCHEMA_SQL } from '../src/core/schema-embedded.generated.ts';
+import { PGLITE_SCHEMA_SQL } from '../src/core/pglite-schema.generated.ts';
 
 let engine: PGLiteEngine;
 let home: string;
+
+describe('fresh-install schema', () => {
+  test('both engine blobs carry the brain-resident pack DDL fragment verbatim', () => {
+    const fragment = BRAIN_PACK_SCHEMA_SQL.trim();
+    expect(fragment).toContain('CREATE TABLE IF NOT EXISTS schema_pack_revisions');
+    expect(fragment).toContain('CREATE TABLE IF NOT EXISTS schema_pack_heads');
+    expect(SCHEMA_SQL).toContain(fragment);
+    expect(PGLITE_SCHEMA_SQL).toContain(fragment);
+  });
+});
 
 beforeAll(async () => {
   engine = new PGLiteEngine();

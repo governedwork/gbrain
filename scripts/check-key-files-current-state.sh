@@ -77,10 +77,17 @@ done
 # ── Gate 2: CLAUDE.md size cap ─────────────────────────────────────────────
 claude="$ROOT/CLAUDE.md"
 if [ -f "$claude" ]; then
-  bytes=$(wc -c < "$claude" | tr -d ' ')
+  # Ours (governedwork fork): the cap measures upstream's CLAUDE.md; the fork's closing
+  # "## This fork:" section has its own cap so it can neither hide upstream growth nor grow unchecked.
+  fork_bytes=$(awk '/^## This fork:/{f=1} f' "$claude" | wc -c | tr -d ' ')
+  bytes=$(( $(wc -c < "$claude" | tr -d ' ') - fork_bytes ))
+  if [ "$fork_bytes" -gt "${GBRAIN_CLAUDE_MD_FORK_MAX_BYTES:-2000}" ]; then
+    fail=1
+    echo "FAIL: CLAUDE.md's fork section is $fork_bytes bytes, over the ${GBRAIN_CLAUDE_MD_FORK_MAX_BYTES:-2000} cap." >&2
+  fi
   if [ "$bytes" -gt "$MAX_BYTES" ]; then
     fail=1
-    echo "FAIL: CLAUDE.md is $bytes bytes, over the $MAX_BYTES cap." >&2
+    echo "FAIL: CLAUDE.md is $bytes bytes (without the fork section), over the $MAX_BYTES cap." >&2
     echo "      CLAUDE.md is orientation + resolver, not the implementation spec. Per-file/" >&2
     echo "      per-command/per-test detail belongs in the on-demand reference docs" >&2
     echo "      (docs/architecture/KEY_FILES.md, docs/TESTING.md, docs/RELEASING.md), not here." >&2
