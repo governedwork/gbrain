@@ -106,6 +106,7 @@ export async function preparePersistedMutation(e: BrainEngine, row: WriteRequest
   if (row.operation === 'append_page') return (await import('./page-upload.ts')).withStagedBodyIf(e, row, async () => (await import('./page-append.ts')).prepareAppendMutation(e, row, cfg, signal, clock));
   if (['put_page','capture','delete_page','restore_page','revert_version','edit_page'].includes(row.operation)) return preparePageMutation(e, row, cfg, undefined, signal,
     { coordinated: await writeSwitchOn(e, 'single_write_group').catch(() => true), clock });
+  if (row.operation === 'rename_page') return (await import('./rename-prepare.ts')).prepareRenameMutation(e, row, cfg, signal);
   throw new OperationError('unsupported_mutation_protocol', 'No compatible mutation preparer is registered for this operation.', `Request ${row.request_id} (${row.operation}) was accepted by a gbrain version whose preparer this one lacks, so it has not run. Run gbrain upgrade on every host that serves this brain; the request stays journaled and resumes after the upgrade.`);
 }
 /**

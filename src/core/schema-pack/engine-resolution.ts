@@ -4,6 +4,8 @@ import type { BrainEngine } from '../engine.ts';
 import { OperationError } from '../ops/contract.ts';
 import { loadActivePack, loadResolvedPackByName, type LoadActivePackInput } from './load-active.ts';
 import { invalidatePackCache, type ResolvedPack } from './registry.ts';
+import { refreshBrainResidentPacks } from './db-store.ts';
+import { isBundledPackName } from './bundled.ts';
 
 export type EngineSchemaOptions = Omit<LoadActivePackInput, 'cfg' | 'dbConfig' | 'perSourceDb'>;
 
@@ -22,7 +24,14 @@ export async function engineSchemaInput(
   const perSourceDb = new Map<string, string>();
   const value = sourceValue?.trim();
   if (options.sourceId && value) perSourceDb.set(options.sourceId, value);
-  return { ...options, cfg: loadConfigFileOnly(), dbConfig, perSourceDb };
+  const cfg = loadConfigFileOnly();
+  // Ours (governedwork fork): reload the brain-resident pack overlay only when a tier names a pack GBrain does not
+  // bundle; a brain on a bundled pack (the default) pays no query for it. serve and the jobs worker keep it fresh.
+  const named = [options.perCall, ...perSourceDb.values(), options.gbrainYml, dbConfig, cfg?.schema_pack, process.env.GBRAIN_SCHEMA_PACK?.trim()];
+  if (engine && 'executeRaw' in engine && named.some(n => n && !isBundledPackName(n))) {
+    await refreshBrainResidentPacks(engine as Parameters<typeof refreshBrainResidentPacks>[0]);
+  }
+  return { ...options, cfg, dbConfig, perSourceDb };
 }
 
 export async function loadActivePackForEngine(

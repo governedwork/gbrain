@@ -5,6 +5,7 @@ import { isThinClient } from '../config.ts';
 import { opError, OperationError, type OperationContext } from '../ops/contract.ts';
 import { readFix } from '../ops/op-fix.ts';
 import { getWorktreeBinding, readPersistenceBrain } from '../persistence/ownership.ts';
+import { isDatabaseCanonicalSource } from '../persistence/database-canonical.ts';
 import { checkedContentRoot, inventorySkillpack, sameInventory, type PackInventory } from './setup-files.ts';
 import { contentSetupKey, installPackagedSharedSkills, setupSharedBrainContent, type SharedContentReceipt } from './setup.ts';
 import type { DatabaseContentExportReceipt } from './migration-export.ts';
@@ -138,6 +139,41 @@ export async function runSharedSkillsMigration(ctx: OperationContext, options: {
     if (!row.root) {
       if (sourcePolicy.mode === 'explicit_pack_required') {
         await pending('projection', sourcePolicy.reason);
+        continue;
+      }
+      // Ours (governedwork fork): a database-canonical source keeps its skills only in the database, so it has no
+      // checkout to export or inventory, and gets the default pack the way an owned root with no pack does. As there,
+      // a source that already holds a pack keeps it, no policy is written, and a policy that does not approve the
+      // pack's requirements leaves the stage pending (requirements_changed) instead of widening it.
+      if (contentCheckpoint?.includes('"db_only"') && await isDatabaseCanonicalSource(ctx.engine, source.id)) {
+        row.stages.push({ stage: 'inventory', status: 'complete', reason: 'Database-canonical source: its skills live only in the database; there is no checkout to inventory.' });
+        await persist();
+        if (!brain.enabled || !brain.skill_bundles_enabled) {
+          await pending('ownership', 'writer_not_quiesced: explicitly activate the shared-skill writer protocol (gbrain sources writer activate, then --shared-skills); a database-canonical source has no root to claim.');
+          continue;
+        }
+        row.stages.push({ stage: 'ownership', status: 'complete' });
+        await persist();
+        const [pack] = await ctx.engine.executeRaw<{ pack_id: string }>('SELECT pack_id FROM shared_skill_packs WHERE source_id=$1 AND source_incarnation=$2::uuid', [source.id, source.incarnation]);
+        if (!pack && dryRun) {
+          row.stages.push({ stage: 'projection', status: 'planned', reason: 'Add the release-pinned self-contained memory pack database-only through the canonical publisher, preserving publication consent.' });
+        } else {
+          if (!pack) {
+            try {
+              await installPackagedSharedSkills(ctx, source.id);
+            } catch (error) {
+              await pending('projection', error instanceof OperationError ? `${error.code}: ${error.message}` : 'Pack initialization failed; inspect the canonical receipt before retrying.');
+              continue;
+            }
+          }
+          row.stages.push({ stage: 'projection', status: 'complete', ...(pack ? { reason: `The source already holds pack ${pack.pack_id}; it is kept.` } : {}) });
+        }
+        row.stages.push({ stage: 'policy', status: publication === 'consent_required' ? 'action_required' : 'complete',
+          reason: publication === 'disabled' ? 'Explicit publishing opt-out preserved.' : publication === 'prose_only' ? 'Only previously approved SKILL.md prose is eligible; no reference, asset, script or editor permission was added.' : 'Owner publication consent is required.' });
+        row.member_installations = await inspectSharedMemberMigration(ctx.engine, source.id, source.incarnation);
+        await pending('members', row.member_installations.length
+          ? `${row.member_installations.filter(member => member.state === 'delivery_reported').length} of ${row.member_installations.length} known installations report delivery. Inspect each installation’s next_action; native activation and unknown/disconnected installations are not verified.`
+          : 'No installation has enrolled for this source. Existing grants are unchanged; approve following and reconnect each intended adapter. Native activation is unverified.');
         continue;
       }
       await pending('inventory', 'db_only_export_required: preview gbrain apply-migrations --migration 0.53.0 --export-db-only --content-root <new-root> --export-source ' + source.id + ' --dry-run --json; approve quiescence and backup choice before exporting. Memory stays available.');

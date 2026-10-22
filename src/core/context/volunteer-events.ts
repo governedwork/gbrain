@@ -198,6 +198,30 @@ export async function insertVolunteerEvents(
   );
 }
 
+/** How far back `volunteer_context` looks for a session's earlier volunteers. */
+export const SESSION_DEDUPE_HOURS = 12;
+
+/**
+ * Slugs already volunteered to this session (any channel) within
+ * SESSION_DEDUPE_HOURS, source-scoped — the op's per-session dedupe, so a
+ * per-prompt hook volunteers a page once, not on every mention. Fail-open:
+ * a failed read (pre-v117 brain, DB blip) dedupes nothing.
+ */
+export async function sessionVolunteeredSlugs(
+  engine: BrainEngine,
+  sessionId: string,
+  sourceIds: string[],
+): Promise<Set<string>> {
+  const rows = await engine.executeRaw<{ slug: string }>(
+    `SELECT DISTINCT slug FROM context_volunteer_events
+      WHERE source_id = ANY($1::text[])
+        AND session_id = $2
+        AND volunteered_at > now() - ($3 || ' hours')::interval`,
+    [sourceIds, sessionId, String(SESSION_DEDUPE_HOURS)],
+  ).catch(() => []);
+  return new Set(rows.map((r) => r.slug));
+}
+
 // ── Fire-and-forget sink (eng-review D4) ─────────────────────────────────
 // Mirrors src/core/last-retrieved.ts: track every dangling INSERT promise in
 // a module Set, register a drainer so finishCliTeardown settles them
