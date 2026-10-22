@@ -48,7 +48,7 @@ export const OP_READ_TRUST: Readonly<Record<string, ReadTrustHandling>> = {
   get_skill_asset: 'text_free', join_brain: 'text_free', sync_brain_skills: 'text_free', leave_brain: 'text_free',
   get_calibration_profile: 'text_free', whoami: 'text_free', sources_list: 'text_free', sources_status: 'text_free', sources_resolve_path: 'text_free',
   sources_inspect: 'text_free', request_tools: 'text_free', connectors_status: 'text_free',
-  get_active_schema_pack: 'text_free', list_schema_packs: 'text_free', schema_stats: 'text_free', schema_lint: 'text_free',
+  get_active_schema_pack: 'text_free', get_schema_pack: 'text_free' /* ours (governedwork fork): a pack manifest */, list_schema_packs: 'text_free', schema_stats: 'text_free', schema_lint: 'text_free',
   schema_graph: 'text_free', schema_explain_type: 'text_free',
   list_write_conflicts: 'text_free', get_brain_health: 'text_free',
 };

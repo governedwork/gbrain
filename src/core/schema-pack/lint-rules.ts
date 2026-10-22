@@ -18,6 +18,14 @@ import type { BrainEngine } from '../engine.ts';
 import { readRecentMutations } from './mutate-audit.ts';
 import { classifyStoredType, sanitizeTypeForDisplay, safeCliToken } from './type-usage.ts';
 import { NESTED_QUANTIFIER_RE } from './redos-guard.ts';
+import {
+  borrowChecksSkipped,
+  borrowDropsFrontmatterLinks,
+  borrowNameClash,
+  borrowNameUndeclared,
+  borrowReplacesInheritedType,
+  type DeclaredPack,
+} from './borrow-lint-rules.ts';
 
 export type LintSeverity = 'error' | 'warning';
 
@@ -47,6 +55,12 @@ export interface LintOpts {
    * re-review). Omitted = global scan (single-source brains, status quo).
    */
   sourceId?: string;
+  /**
+   * Ours (governedwork fork): the pack as declared, with the registry's loader + resolver. The
+   * borrow_from rules (borrow-lint-rules.ts) need it; without it they report
+   * one `borrow_checks_skipped` warning for a pack that borrows.
+   */
+  declared?: DeclaredPack;
 }
 
 export type LintRule = (manifest: SchemaPackManifest, opts?: LintOpts) =>
@@ -479,6 +493,11 @@ export const ALL_LINT_RULES: ReadonlyArray<{ name: string; rule: LintRule; plane
   { name: 'prefix_collision', rule: prefixCollision, planeAware: false },
   { name: 'prefix_strict_subset_overlap', rule: prefixStrictSubsetOverlap, planeAware: false },
   { name: 'link_regex_catastrophic_backtrack', rule: linkRegexCatastrophicBacktrack, planeAware: false },
+  { name: 'borrow_name_undeclared', rule: borrowNameUndeclared, planeAware: false },
+  { name: 'borrow_name_clash', rule: borrowNameClash, planeAware: false },
+  { name: 'borrow_replaces_inherited_type', rule: borrowReplacesInheritedType, planeAware: false },
+  { name: 'borrow_drops_frontmatter_links', rule: borrowDropsFrontmatterLinks, planeAware: false },
+  { name: 'borrow_checks_skipped', rule: borrowChecksSkipped, planeAware: false },
   { name: 'extractable_empty_corpus', rule: extractableEmptyCorpus, planeAware: true },
   { name: 'mutation_count_anomaly', rule: mutationCountAnomaly, planeAware: true },
   { name: 'stored_type_is_alias', rule: storedTypeIsAlias, planeAware: true },
@@ -527,11 +546,12 @@ export async function runAllLintRules(
  */
 export async function runFilePlaneLintRules(
   manifest: SchemaPackManifest,
+  opts?: Pick<LintOpts, 'declared'>,
 ): Promise<LintReport> {
   const issues: LintIssue[] = [];
   for (const { rule, planeAware } of ALL_LINT_RULES) {
     if (planeAware) continue;
-    const out = await rule(manifest);
+    const out = await rule(manifest, opts);
     issues.push(...out);
   }
   return classify(issues);
