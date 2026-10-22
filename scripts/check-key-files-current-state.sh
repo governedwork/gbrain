@@ -79,11 +79,12 @@ claude="$ROOT/CLAUDE.md"
 if [ -f "$claude" ]; then
   # Ours (governedwork fork): the cap measures upstream's CLAUDE.md; the fork's closing
   # "## This fork:" section has its own cap so it can neither hide upstream growth nor grow unchecked.
-  fork_bytes=$(awk '/^## This fork:/{f=1} f' "$claude" | wc -c | tr -d ' ')
+  fork_max="${GBRAIN_CLAUDE_MD_FORK_MAX_BYTES:-2000}"
+  fork_bytes=$(awk '/^## /{f=/^## This fork:/} f' "$claude" | wc -c | tr -d ' ')
   bytes=$(( $(wc -c < "$claude" | tr -d ' ') - fork_bytes ))
-  if [ "$fork_bytes" -gt "${GBRAIN_CLAUDE_MD_FORK_MAX_BYTES:-2000}" ]; then
+  if [ "$fork_bytes" -gt "$fork_max" ]; then
     fail=1
-    echo "FAIL: CLAUDE.md's fork section is $fork_bytes bytes, over the ${GBRAIN_CLAUDE_MD_FORK_MAX_BYTES:-2000} cap." >&2
+    echo "FAIL: CLAUDE.md's fork section is $fork_bytes bytes, over the $fork_max cap." >&2
   fi
   if [ "$bytes" -gt "$MAX_BYTES" ]; then
     fail=1

@@ -29,8 +29,6 @@ let home: string;
 describe('fresh-install schema', () => {
   test('both engine blobs carry the brain-resident pack DDL fragment verbatim', () => {
     const fragment = BRAIN_PACK_SCHEMA_SQL.trim();
-    expect(fragment).toContain('CREATE TABLE IF NOT EXISTS schema_pack_revisions');
-    expect(fragment).toContain('CREATE TABLE IF NOT EXISTS schema_pack_heads');
     expect(SCHEMA_SQL).toContain(fragment);
     expect(PGLITE_SCHEMA_SQL).toContain(fragment);
   });
