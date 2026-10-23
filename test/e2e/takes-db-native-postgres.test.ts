@@ -19,17 +19,22 @@ import { PostgresEngine } from '../../src/core/postgres-engine.ts';
 import { disposePersistenceConsumer } from '../../src/core/persistence/service.ts';
 import { isolatedPersistencePostgres } from '../helpers/persistence-postgres.ts';
 import { registerPostgresTests, requirePostgresTestDatabase } from '../helpers/test-backends.ts';
+import { hasDatabase } from './helpers.ts';
 
-await registerPostgresTests(() => import('../takes-db-native.test.ts'));
-const { call, callOk, seedBrain, takeRows, HOLDER, SLUG } = await import('../takes-db-native.test.ts');
+// With no database the file skips, as upstream's E2E files do (`hasDatabase() ? describe : describe.skip`), so a run
+// that names it without DATABASE_URL is not failed by it; scripts/run-e2e.sh, which sets DATABASE_URL, runs both arms.
+const d = hasDatabase() ? describe : describe.skip;
+if (hasDatabase()) await registerPostgresTests(() => import('../takes-db-native.test.ts'));
+const lifecycle = hasDatabase() ? await import('../takes-db-native.test.ts') : null;
 
-describe('pg_dump / pg_restore round trip on a managed Postgres brain', () => {
-  const adminUrl = requirePostgresTestDatabase();
+d('pg_dump / pg_restore round trip on a managed Postgres brain', () => {
+  let adminUrl: string;
   let source: { engine: PostgresEngine; databaseUrl: string; close: () => Promise<void> };
   let restored: BrainEngine | undefined;
   let restoredName: string | undefined;
   let dir: string;
   beforeAll(async () => {
+    adminUrl = requirePostgresTestDatabase();
     dir = mkdtempSync(join(tmpdir(), 'gbrain-takes-dump-'));
     source = await isolatedPersistencePostgres(adminUrl);
   }, 120_000);
@@ -54,6 +59,7 @@ describe('pg_dump / pg_restore round trip on a managed Postgres brain', () => {
   }
 
   test('pg_dump then pg_restore keeps every take, and the restored brain accepts the lifecycle', async () => {
+    const { call, callOk, seedBrain, takeRows, HOLDER, SLUG } = lifecycle!;
     const { granted } = await seedBrain(source.engine, true);
     const add = await callOk(source.engine, 'takes_add', { slug: SLUG, claim: 'Alice ships weekly', kind: 'take', holder: HOLDER, weight: 0.7 }, granted);
     const sup = await callOk(source.engine, 'takes_supersede', { slug: SLUG, row_num: add.row_num, claim: 'Alice ships daily' }, granted);
