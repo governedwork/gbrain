@@ -11,7 +11,7 @@
 
 import { expect, test } from 'bun:test';
 import express from 'express';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
@@ -24,7 +24,8 @@ import { withEnv } from './helpers/with-env.ts';
 const HOLDERS = ['world', 'companies/acme-example', 'people/alice-example'];
 
 test('the owner API registers and rescopes a client with its takes holders, and a token of it carries them', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'gbrain-fork-takes-holders-'));
+  // The real path: macOS's /var is a symlink, and the credential delivery home refuses one.
+  const root = mkdtempSync(join(realpathSync(tmpdir()), 'gbrain-fork-takes-holders-'));
   const engine = new PGLiteEngine();
   try {
     await engine.connect({}); await engine.initSchema();
