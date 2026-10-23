@@ -26,6 +26,7 @@ import { operationsByName } from '../src/core/operations.ts';
 import { prepareCanonicalProjections } from '../src/core/persistence/canonical-projections.ts';
 import { disposePersistenceConsumer } from '../src/core/persistence/service.ts';
 import { managedPersistenceEnabled } from '../src/core/persistence/ownership.ts';
+import { submitPageMutation } from '../src/core/persistence/page-mutations.ts';
 import { parseMarkdown, serializePageToMarkdown } from '../src/core/markdown.ts';
 import { extractTakes } from '../src/core/cycle/extract-takes.ts';
 import { isolatedPersistencePostgres } from './helpers/persistence-postgres.ts';
@@ -45,6 +46,7 @@ const PAGES: Record<string, string[]> = {
   'notes/capitalised': [struck(1, 'Old claim', 'world', 'Superseded by #2'), live(2, 'New claim')],
   'notes/chain': [struck(1, 'Old claim', 'world', 'superseded by #2; superseded by #3'), live(2, 'Mid claim'), live(3, 'New claim')],
   'notes/uncited': [struck(1, 'Old claim', 'world', 'deck'), live(2, 'New claim')],
+  'notes/held': [struck(1, 'Old claim', 'world', 'superseded by #3'), live(2, 'Mid claim'), live(3, 'New claim')],
 };
 
 for (const kind of testBackends()) {
@@ -69,6 +71,11 @@ for (const kind of testBackends()) {
       for (const [slug, rows] of Object.entries(PAGES)) await store(slug, rows);
       // The struck row's holder as an older writer spelled it: a cell Tier 1 normalises to `brain` on the next coordinated write.
       await engine.executeRaw(`UPDATE pages SET compiled_truth = replace(compiled_truth, '| 1 | ~~Old claim~~ | take | brain |', '| 1 | ~~Old claim~~ | take | Assistant |') WHERE source_id=$1 AND slug='notes/normalized'`, [SRC]);
+      // Row 3 of notes/held was confirmed by the owner: a lower-tier writer cannot change it, only file a proposal.
+      await engine.transaction(async tx => {
+        await tx.executeRaw(`SELECT set_config('gbrain.write_trust_promotion','user_confirmed',true)`);
+        await tx.executeRaw(`UPDATE takes SET trust_tier='user_confirmed' WHERE row_num=3 AND page_id=(SELECT id FROM pages WHERE source_id=$1 AND slug='notes/held')`, [SRC]);
+      });
       await engine.executeRaw('UPDATE persistence_brain SET enabled=true WHERE singleton=1');
       expect(await managedPersistenceEnabled(engine)).toBe(true);
     }, 120_000);
@@ -123,6 +130,22 @@ for (const kind of testBackends()) {
       expect(await call('takes_remove', { slug, row_num: 3 })).toMatchObject({ error: 'invalid_params', message: expect.stringContaining('replaces row #1') });
       expect(await call('takes_remove', { slug, row_num: 2 })).toMatchObject({ removed: true });
       expect((await rows(slug)).map(r => [r.row_num, r.superseded_by])).toEqual([[1, 3], [3, null]]);
+    }, 60_000);
+
+    test('a struck row keeps its pointer at a held row when a lower-tier put_page edits that row', async () => {
+      const slug = 'notes/held';
+      expect(await pointers(slug)).toEqual([3, null, null]);
+      const snapshot = (await engine.readPageSnapshot(slug, { sourceId: SRC }))!;
+      const edited = fence([...PAGES[slug]!.slice(0, 2), live(3, 'New claim, edited by an agent')]);
+      const out = await withEnv({ GBRAIN_HOME: home }, () => submitPageMutation(ctx(), { operation: 'put_page', waitMs: 30_000,
+        params: { request_id: randomUUID(), slug, expected_revision: snapshot.revision, content: `---\ntitle: Held\ntype: note\n---\n\n${edited}\n` } }));
+      expect(out).toMatchObject({ state: 'committed' });
+      const after = await rows(slug);
+      expect(after.map(r => r.superseded_by)).toEqual([3, null, null]); // the held row is still row 3 of the page the write projected
+      await withEnv({ GBRAIN_HOME: home }, async () => {
+        expect(await extractTakes(engine, { source: 'db', sourceId: SRC, slugs: [slug] })).toMatchObject({ pagesWithTakes: 1, warnings: [] });
+      });
+      expect(await pointers(slug)).toEqual([3, null, null]);
     }, 60_000);
 
     test('an uncited struck row projects no pointer and the managed reconcile keeps it that way', async () => {

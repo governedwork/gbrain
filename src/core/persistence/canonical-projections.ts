@@ -668,7 +668,8 @@ export async function prepareCanonicalProjections(engine: BrainEngine, page: Par
       if (above.length) await propagateFactLowering(tx, above);
       if (projectedTakes.length) {
         await step('takes', async () => {
-          await tx.addTakesBatch(projectedTakes.map(t => takesPreparation.toCanonicalBatchInput(id, t, projectedTakes)));
+          // The row set is the whole fence, held rows included: a struck row's citation of a held row is still a row of the page.
+          await tx.addTakesBatch(projectedTakes.map(t => takesPreparation.toCanonicalBatchInput(id, t, takes)));
           await resolveTakes();
         });
       }
