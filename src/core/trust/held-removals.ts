@@ -61,7 +61,8 @@ export async function acceptHeldRemoval(engine: BrainEngine, proposal: TrustProp
   if (segmentedOverCeiling(row)) assertInlineBody(row, 'trust confirm (held removal)');
   const body = row.body_storage === 'segmented' ? await materializeSegmentedBody(engine, Number(row.page_id), row.source_id)
     : { compiled_truth: row.compiled_truth ?? '', timeline: row.timeline ?? '' };
-  const fenceRow = table === 'takes' ? parseTakesFence(`${body.compiled_truth}\n${body.timeline}`).takes.find(t => t.rowNum === Number(row.row_num)) : undefined;
+  const fenceTakes = table === 'takes' ? parseTakesFence(`${body.compiled_truth}\n${body.timeline}`).takes : [];
+  const fenceRow = fenceTakes.find(t => t.rowNum === Number(row.row_num));
   if (proposal.proposer === 'takes_remove' && fenceRow && fenceRow.claim === row.claim) {
     const nonce = crypto.randomUUID();
     await engine.executeRaw(`UPDATE trust_proposals SET after_state = after_state || jsonb_build_object('accept_nonce', $2::text) WHERE id = $1 AND status = 'pending'`, [proposal.id, nonce]);
@@ -87,7 +88,7 @@ export async function acceptHeldRemoval(engine: BrainEngine, proposal: TrustProp
       await withWriteTrust(tx, writer, () => withBeliefBatch(tx, { sourceId: row.source_id, slugs: [row.slug], publicationId, op: 'trust_accept', remote: false, report,
         cause: { proposal: `tp${proposal.id}` } }, async () => {
         if (table === 'takes') {
-          if (fenceRow) await tx.addTakesBatch([takesPreparation.toCanonicalBatchInput(row.page_id, fenceRow)]);
+          if (fenceRow) await tx.addTakesBatch([takesPreparation.toCanonicalBatchInput(row.page_id, fenceRow, fenceTakes)]);
           else await tx.executeRaw('DELETE FROM takes WHERE id = $1', [row.id]);
         } else {
           await tx.executeRaw('DELETE FROM timeline_entries WHERE id = $1', [row.id]);

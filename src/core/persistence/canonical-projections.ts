@@ -668,7 +668,7 @@ export async function prepareCanonicalProjections(engine: BrainEngine, page: Par
       if (above.length) await propagateFactLowering(tx, above);
       if (projectedTakes.length) {
         await step('takes', async () => {
-          await tx.addTakesBatch(projectedTakes.map(t => takesPreparation.toCanonicalBatchInput(id, t)));
+          await tx.addTakesBatch(projectedTakes.map(t => takesPreparation.toCanonicalBatchInput(id, t, projectedTakes)));
           await resolveTakes();
         });
       }
