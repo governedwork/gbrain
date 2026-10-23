@@ -65,14 +65,34 @@ That prototype is superseded by upstream's own design, which this note pins:
 `superseded_by: null`, and `addTakesBatch`'s upsert writes that column. So the
 first reconcile after a `takes_supersede` struck the pointer the coordinated
 write had recorded (row 1 → `superseded_by` 2 became null) while the fence
-still said `superseded by #2`. The page-write projection already derives the
-pointer from that citation (`takesPreparation.toCanonicalBatchInput`); the
-reconcile now uses the same projection, so it cannot disagree with the write
-that produced the fence. The projection itself reads the last citation in the
-cell, case-insensitively, and projects null for a number that cannot be a row
-of the page (zero, the row itself, above int4): `takes.superseded_by` is an
-int4, and one such cell used to fail the whole upsert batch
-(`test/takes-canonical-projection.test.ts`).
+still said `superseded by #2`. This was the unmanaged reconcile path; the
+managed path (`managed_maintenance_takes_reextract`) already projected through
+`takesPreparation.toCanonicalBatchInput`, so the `reconcile: extractTakes` test
+discriminates on the unmanaged arms only, and
+`test/takes-supersession-citation.test.ts` pins the managed arm on a chain and
+an uncited struck row.
+
+The strike citation is now read in one place, `supersessionCitation` in
+`src/core/takes-fence.ts`: the LAST `superseded by #N` in the cell (the fence
+writer appends it after the row's own provenance, so a row struck twice ends
+with the live pointer), in any case. Every reader uses it:
+
+- the canonical projection (`toCanonicalBatchInput`, now given the page's rows)
+  points only at another row the page has; a citation to the row itself or to
+  a number the page lacks (zero, above int4, a row that was never there)
+  projects null, as its docstring always said. `takes.superseded_by` is an int4
+  and one out-of-range cell used to fail the whole upsert batch
+  (`test/takes-canonical-projection.test.ts`);
+- the coordinated takes verbs re-index every row they changed, including the
+  rows Tier 1 normalised on the way, through that projection. They used
+  `toBatchInput(…, null)`, so a `takes_add` that normalised a struck row's
+  holder nulled its pointer;
+- the `takes_remove` guard refuses the row the citation names. It read the
+  first citation case-sensitively, so `Superseded by #2` let row 2 go with a
+  dangling pointer and `#2; #3` guarded the wrong row;
+- fence-repair's renumber (`src/core/fence-repair/content.ts` and the gate in
+  `validate.ts`) follows and rewrites that same citation. Facts cells keep
+  their first-citation reading, which is what `facts-fence.ts` projects.
 
 ## The lifecycle gate
 
@@ -86,6 +106,7 @@ on PGLite and on Postgres, unmanaged and managed (`persistence_brain.enabled`):
 | holder grant enforced | `without the holder grant: …` (add with the private holder; update, supersede, resolve of the private row; supersede with a holder override) |
 | remote put_page | `put_page: a remote body without the fence keeps every take row`, `put_page: a forged takes fence is refused …` |
 | reconcile | `reconcile: extractTakes … keeps ids, resolutions and superseded_by`, `reconcile: the dream extract, extract_facts and consolidate phases …` |
+| strike citation (managed) | `takes_add after a Tier-1 normalisation of a struck row keeps its superseded_by`, `takes_remove refuses the row a capitalised citation names`, `takes_remove follows the last citation of a chain …`, `an uncited struck row projects no pointer …` |
 | restart | `restart: a fresh engine on the same database reads the same takes` |
 | backup / restore | `pg_dump then pg_restore keeps every take, and the restored brain accepts the lifecycle` (Postgres only, plain-format dump restored through `psql -v ON_ERROR_STOP=1`) |
 

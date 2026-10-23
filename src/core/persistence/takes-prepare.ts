@@ -3,7 +3,7 @@ import type { GBrainConfig } from '../config.ts';
 import { OperationError, opError, type OperationContext } from '../ops/contract.ts';
 import { readFix } from '../ops/op-fix.ts';
 import type { RegistryCode } from '../error-registry.ts';
-import { isValidHolder, parseTakesFence, upsertTakeRow, supersedeRow, type ParsedTake, type TakeQuality } from '../takes-fence.ts';
+import { isValidHolder, parseTakesFence, upsertTakeRow, supersedeRow, supersessionCitation, type ParsedTake, type TakeQuality } from '../takes-fence.ts';
 import { takesPreparation as edit, TakesWriteError } from '../takes-write.ts';
 import { serializePageToMarkdown } from '../markdown.ts';
 import { preparePageMutation } from './page-prepare.ts';
@@ -151,7 +151,7 @@ async function prepare(engine: BrainEngine, row: WriteRequest, config: GBrainCon
     requiredHolders.add(target.holder);
     if (target.resolvedAt) throw new TakesWriteError('already_resolved','Resolved takes are immutable.');
     if (row.operation==='takes_remove') {
-      const citing=parsed.takes.find(t=>t.rowNum!==number && Number(t.source?.match(/superseded by #(\d+)/)?.[1])===number);
+      const citing=parsed.takes.find(t=>t.rowNum!==number && supersessionCitation(t.source)===number);
       if (citing) throw takesRefusal('invalid_params',`Row #${number} replaces row #${citing.rowNum}.`,row,
         `Row #${citing.rowNum} on ${row.slug} cites row #${number} as "superseded by #${number}"; remove row #${citing.rowNum} first, or keep both.`);
       const [stored]=await engine.executeRaw<{id:number;claim:string;trust_tier:string}>('SELECT id,claim,trust_tier FROM takes WHERE page_id=$1 AND row_num=$2',[snapshot.page.id,number]);
@@ -241,8 +241,9 @@ async function prepare(engine: BrainEngine, row: WriteRequest, config: GBrainCon
   },apply:async tx=>{
     const outcome=await prepared.apply(tx);
     if (!prepared.noop) {
-      const batch:TakeBatchInput[]=changed.map(t=>edit.toBatchInput(snapshot.page.id,t,
-        t.rowNum===oldRow?Number(result.new_row):null));
+      // Every changed row (the one this verb wrote and the ones Tier 1 normalized) re-indexes through the canonical projection, so a struck row keeps the pointer its citation names.
+      const fenceRows=parseTakesFence(next).takes;
+      const batch:TakeBatchInput[]=changed.map(t=>edit.toCanonicalBatchInput(snapshot.page.id,t,fenceRows));
       if (batch.length) await tx.addTakesBatch(batch);
       if (removedRow!==undefined) await tx.executeRaw('DELETE FROM takes WHERE page_id=$1 AND row_num=$2',[snapshot.page.id,removedRow]);
       if (acceptedRemoval!==null && !await transitionTrustProposal(tx,acceptedRemoval,'pending','accepted')) throw new Error(`trust proposal tp${acceptedRemoval} is no longer pending`);

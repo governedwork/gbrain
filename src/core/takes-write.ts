@@ -50,6 +50,7 @@ import {
   type ParsedTake,
   type ParseResult,
   type TakeQuality,
+  supersessionCitation,
 } from './takes-fence.ts';
 import { locateOutsideCode } from './fence-scan.ts';
 import { withPageLock } from './page-lock.ts';
@@ -423,24 +424,22 @@ function toBatchInput(pageId: number, t: ParsedTake, supersededBy?: number | nul
 }
 
 /**
- * The strike pointer an inactive row's source cell carries: the LAST
- * `superseded by #N` citation (supersedeRow appends it after the row's own
- * provenance), as the fence writer spells it (case-insensitive). A cited number
- * that cannot be a row of this page (not a positive int4, or the row itself)
- * projects null: `takes.superseded_by` is an int4 and a batch upsert that
- * carries an out-of-range value fails every row in the batch.
+ * The strike pointer an inactive row's source cell carries: the citation
+ * `supersessionCitation` reads (the last one, in any case), when it names
+ * another row of this page. A citation to a row the page does not have, or to
+ * the row itself, projects null: `takes.superseded_by` is an int4 and a batch
+ * upsert that carries an out-of-range value fails every row in the batch, and
+ * a pointer at a row that does not exist is not a pointer.
  */
-const ROW_NUM_MAX = 2_147_483_647;
-function citedSupersededBy(t: ParsedTake): number | null {
+function citedSupersededBy(t: ParsedTake, page: readonly ParsedTake[]): number | null {
   if (t.active) return null;
-  const cited = [...(t.source ?? '').matchAll(/superseded by #(\d+)/gi)].at(-1)?.[1];
-  const n = cited === undefined ? NaN : Number(cited);
-  return Number.isSafeInteger(n) && n >= 1 && n <= ROW_NUM_MAX && n !== t.rowNum ? n : null;
+  const n = supersessionCitation(t.source);
+  return n !== null && n !== t.rowNum && page.some(row => row.rowNum === n) ? n : null;
 }
 
-/** The row a canonical takes fence projects: an inactive row citing `superseded by #N` points at row N. */
-function toCanonicalBatchInput(pageId: number, t: ParsedTake): TakeBatchInput {
-  return toBatchInput(pageId, t, citedSupersededBy(t));
+/** The row a canonical takes fence projects: an inactive row citing `superseded by #N` points at row N of `page`, the fence's rows. */
+function toCanonicalBatchInput(pageId: number, t: ParsedTake, page: readonly ParsedTake[]): TakeBatchInput {
+  return toBatchInput(pageId, t, citedSupersededBy(t, page));
 }
 
 async function withTakesLock<T>(

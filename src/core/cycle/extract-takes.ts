@@ -283,7 +283,7 @@ export async function extractTakesFromFs(
 
     result.pagesWithTakes++;
     for (const t of takes) {
-      buffer.push(takesPreparation.toCanonicalBatchInput(pageId, t));
+      buffer.push(takesPreparation.toCanonicalBatchInput(pageId, t, takes));
       if (buffer.length >= BATCH_SIZE) await flushBatch(engine, buffer, result, dryRun);
     }
   }
@@ -340,13 +340,13 @@ export async function extractTakesFromDb(
     if (covered.has(source_id)) {
       await withUnmanagedBeliefs(engine, source_id, [slug], 'takes_reextract', run => maintenanceTransaction(engine, tx => run(tx, async () => {
         const takes = await reconcilePageTakes(tx, page.id, read, slug, rebuild, false, result);
-        result.takesUpserted += await upsertProjectedTakes(engine, takes.map(t => takesPreparation.toCanonicalBatchInput(page.id, t)), result, tx);
+        result.takesUpserted += await upsertProjectedTakes(engine, takes.map(t => takesPreparation.toCanonicalBatchInput(page.id, t, takes)), result, tx);
       })));
       continue;
     }
     const takes = await reconcilePageTakes(engine, page.id, read, slug, rebuild, dryRun, result);
     for (const t of takes) {
-      buffer.push(takesPreparation.toCanonicalBatchInput(page.id, t));
+      buffer.push(takesPreparation.toCanonicalBatchInput(page.id, t, takes));
       if (buffer.length >= BATCH_SIZE) await flushBatch(engine, buffer, result, dryRun);
     }
   }
@@ -399,7 +399,7 @@ export const TAKES_REEXTRACT_INTENT = 'managed_maintenance_takes_reextract';
 /** The page's takes reconcile as it stands: what a write would prune, rebuild and upsert. */
 async function plannedTakes(db: BrainEngine, page: { id: number }, read: StreamedTakes, rebuild: boolean) {
   const { takes, warnings } = read.parsed;
-  const { rows } = buildTakeRows(takes.map(t => takesPreparation.toCanonicalBatchInput(page.id, t)));
+  const { rows } = buildTakeRows(takes.map(t => takesPreparation.toCanonicalBatchInput(page.id, t, takes)));
   const stored = await db.executeRaw<{ row_num: number; claim: string; kind: string; holder: string; weight: number | string; since_date: string | null;
     until_date: string | null; source: string | null; superseded_by: number | null; active: boolean }>(
     'SELECT row_num, claim, kind, holder, weight, since_date, until_date, source, superseded_by, active FROM takes WHERE page_id = $1', [page.id]);
@@ -496,7 +496,7 @@ export async function prepareTakesReextract(engine: BrainEngine, row: WriteReque
       const local: ExtractTakesResult = { pagesScanned: 0, pagesWithTakes: 0, takesUpserted: 0, warnings: [], failedFiles: [] };
       const read = page && (isSegmentedPage(page) ? segmented : await readPageTakes(tx, page));
       const takes = page && read ? await reconcilePageTakes(tx, page.id, read, row.slug, rebuild, false, local) : [];
-      const upserted = takes.length ? await upsertProjectedTakes(tx, takes.map(t => takesPreparation.toCanonicalBatchInput(page!.id, t)), local, tx) : 0;
+      const upserted = takes.length ? await upsertProjectedTakes(tx, takes.map(t => takesPreparation.toCanonicalBatchInput(page!.id, t, takes)), local, tx) : 0;
       return { status: 'completed', takes_upserted: upserted, with_takes: local.pagesWithTakes > 0, ...(local.writeGate ? { write_gate: local.writeGate } : {}),
         warnings: local.warnings.map(w => w.slice(row.slug.length + 2)) };
     } };

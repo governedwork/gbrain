@@ -45,7 +45,7 @@ import type { WriteRequest } from '../persistence/model.ts';
 import { managedPersistenceEnabled } from '../persistence/ownership.ts';
 import { maintenancePreflight, submitDatabaseMaintenanceIntent } from '../persistence/prepared-maintenance.ts';
 import { submitPageMutation } from '../persistence/page-mutations.ts';
-import { TAKES_FENCE_BEGIN, parseTakesFence, type ParsedTake } from '../takes-fence.ts';
+import { TAKES_FENCE_BEGIN, parseTakesFence, type ParsedTake, supersessionCitation } from '../takes-fence.ts';
 import { takesPreparation } from '../takes-write.ts';
 import { afterCursor, repairRequestId, type RepairCursor, type RepairHandler, type RepairItem, type RepairItemOutcome, type RepairScope } from './core.ts';
 
@@ -66,12 +66,11 @@ export interface SupersessionAnalysis {
   fence_changed: boolean;
 }
 
-const POINTER = /superseded by #(\d+)/i;
 const SELF_POINTER = /^superseded by #(\d+)$/i;
 
-/** The `superseded_by` the canonical projection derives from a fence row. */
-function projectedPointer(t: ParsedTake): number | null {
-  return takesPreparation.toCanonicalBatchInput(0, t).superseded_by ?? null;
+/** The `superseded_by` the canonical projection derives from a fence row of `page`. */
+function projectedPointer(t: ParsedTake, page: readonly ParsedTake[]): number | null {
+  return takesPreparation.toCanonicalBatchInput(0, t, page).superseded_by ?? null;
 }
 
 function isSelfPointer(t: ParsedTake): boolean {
@@ -88,11 +87,11 @@ export function analyzeSupersession(takes: ParsedTake[], evidence: { journal: Ar
   const linkedTo = new Map<number, number>();
   const linkedFrom = new Map<number, number>();
   for (const t of takes) {
-    const p = projectedPointer(t);
+    const p = projectedPointer(t, takes);
     if (p !== null && p !== t.rowNum && byRow.has(p)) { linkedTo.set(t.rowNum, p); linkedFrom.set(p, t.rowNum); }
   }
   // Struck rows that cite nothing, or only their own row number: the rows a link may be written onto.
-  const open = new Set(takes.filter(t => !t.active && !linkedTo.has(t.rowNum) && (!POINTER.test(t.source ?? '') || isSelfPointer(t))).map(t => t.rowNum));
+  const open = new Set(takes.filter(t => !t.active && !linkedTo.has(t.rowNum) && (supersessionCitation(t.source) === null || isSelfPointer(t))).map(t => t.rowNum));
   const links: SupersessionLink[] = [];
   const ambiguous = new Map<number, number[]>();
   const link = (oldRow: number, newRow: number, kind: SupersessionEvidence) => {
@@ -180,8 +179,8 @@ async function readPage(engine: BrainEngine, page: TakePage): Promise<PageState>
   });
   const storedBy = new Map(stored.map(r => [Number(r.row_num), r.superseded_by === null ? null : Number(r.superseded_by)]));
   const reproject = analysis.ambiguous.length ? [] : analysis.takes
-    .filter(t => storedBy.has(t.rowNum) && storedBy.get(t.rowNum) !== projectedPointer(t))
-    .map(t => ({ row_num: t.rowNum, from: storedBy.get(t.rowNum)!, to: projectedPointer(t) }));
+    .filter(t => storedBy.has(t.rowNum) && storedBy.get(t.rowNum) !== projectedPointer(t, analysis.takes))
+    .map(t => ({ row_num: t.rowNum, from: storedBy.get(t.rowNum)!, to: projectedPointer(t, analysis.takes) }));
   return { page: { ...page, id: snapshot.page.id }, revision: snapshot.revision, content, analysis, reproject };
 }
 
