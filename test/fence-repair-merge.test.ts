@@ -189,6 +189,16 @@ describe('merge_fences', () => {
     expectRepaired(r);
   });
 
+  test('a takes row citing a chain follows the LAST citation to the renumbered row; the earlier one is history', () => {
+    const body = [takes([takesRow(1, 'Alpha take'), takesRow(2, 'Beta take')]),
+      takes([takesRow(1, 'Gamma take'), takesRow(2, 'Delta take'), takesRow(3, 'Epsilon take', { src: 'superseded by #1; superseded by #2' })])].join('\n');
+    const r = run(page(body));
+    expect(classes(r)).toEqual(['merge_fences', 'renumber']);
+    expect(parseTakesFence(r.page.compiled_truth).takes.map(t => [t.rowNum, t.claim, t.source ?? ''])).toEqual([
+      [1, 'Alpha take', 'notes'], [2, 'Beta take', 'notes'], [4, 'Gamma take', 'notes'], [5, 'Delta take', 'notes'], [3, 'Epsilon take', 'superseded by #1; superseded by #5']]);
+    expectRepaired(r);
+  });
+
   test('three fences, a heading that differs, prose between fences and CRLF endings', () => {
     const body = [facts([factsRow(1, 'Alpha claim')]), 'Prose between the fences.', '', facts([factsRow(2, 'Beta claim')], '## More facts'), facts([factsRow(3, 'Gamma claim')]), 'Trailing prose.', '']
       .join('\n').replace(/\n/g, '\r\n');

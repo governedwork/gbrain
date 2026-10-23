@@ -1036,14 +1036,14 @@
         {
           "category": "meta",
           "elapsed_ms": "<volatile>",
-          "message": "1296 column(s) verified against live schema",
+          "message": "1309 column(s) verified against live schema",
           "name": "schema_columns",
           "status": "ok"
         },
         {
           "category": "meta",
           "elapsed_ms": "<volatile>",
-          "message": "All 152 table(s) the applied migrations create exist.",
+          "message": "All 154 table(s) the applied migrations create exist.",
           "name": "schema_missing_tables",
           "status": "ok"
         },
@@ -2480,7 +2480,7 @@
         {
           "category": "ops",
           "elapsed_ms": "<volatile>",
-          "message": "No configured collectors declare output paths",
+          "message": "No collector output dir falls inside a db_only path",
           "name": "db_only_collector_collision",
           "status": "ok"
         },

@@ -1,0 +1,77 @@
+# Ours (governedwork fork), not upstream GBrain: the fork's full suite on Linux.
+#
+# Upstream's Test workflow runs on Ubicloud runners and only for master; the fork has neither. Its lander (on the
+# wardrobe, a macOS sandbox) gates each PR with the typecheck and the tests it names, but the whole suite assumes Linux
+# (flock(1), case-sensitive paths, process groups, ps), so on macOS it is red on bare upstream too. This workflow runs
+# the same suite on GitHub's free Linux runners (the fork is public), with upstream's own shard scripts, and
+# `fork-suite` is the context the brains-v* ruleset requires beside `lander/verdict` (operator ruling 2026-10-19,
+# arc gbrain-bump).
+name: fork-suite
+
+on:
+  pull_request:
+    branches: ['brains-v*']
+  push:
+    branches: ['brains-v*']
+  workflow_dispatch:
+
+concurrency:
+  group: fork-suite-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  BUN_VERSION: '1.4.3'
+
+jobs:
+  unit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - name: Install dependencies
+        timeout-minutes: 8
+        run: bun scripts/ci-bun-install.ts --frozen-lockfile
+      - name: Unit shard ${{ matrix.shard }}/12
+        run: bash scripts/test-shard.sh ${{ matrix.shard }} 12
+
+  serial:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - name: Install dependencies
+        timeout-minutes: 8
+        run: bun scripts/ci-bun-install.ts --frozen-lockfile
+      - name: Serial shard ${{ matrix.shard }}/4
+        run: bun run test:serial
+        env:
+          SHARD: ${{ matrix.shard }}/4
+
+  # The one required context: green only when every unit and serial shard passed.
+  fork-suite:
+    if: always()
+    needs: [unit, serial]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Every shard passed
+        run: |
+          echo "unit: ${{ needs.unit.result }}  serial: ${{ needs.serial.result }}"
+          test "${{ needs.unit.result }}" = success && test "${{ needs.serial.result }}" = success

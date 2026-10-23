@@ -26,6 +26,7 @@ import type { Operation, OperationContext } from './contract.ts';
 import type { Notice } from '../agent-output.ts';
 import { OperationError, opError, verbError } from './contract.ts';
 import { invalidParam, paramUse } from './op-fix.ts';
+import { OUTPUT_FORMAT_PARAMS } from './output-format.ts';
 import { assertExplicitSourceLive, federatedSearchScope, parseSourceIdParam, sourceScopeOpts, stampEvidenceSafe } from './context.ts';
 import { markKeywordHits } from '../search/evidence.ts';
 import { hybridSearchCached, stampContentFlags, type HybridSearchOpts } from '../search/hybrid.ts';
@@ -715,10 +716,13 @@ const context_pack: Operation = {
     entity_refs: { type: 'array', items: { type: 'object', properties: { source_id: { type: 'string' }, slug: { type: 'string' } } },
       description: 'Source-qualified entities: [{"source_id":"wiki","slug":"people/alice-example"}].', fullSurfaceOnly: true },
     prefer_source_id: { type: 'string', description: 'Source to try first (thin clients send .gbrain-source here); never narrows.', fullSurfaceOnly: true },
+    ...OUTPUT_FORMAT_PARAMS,
   },
   scope: 'read',
   verb: true,
   cliHints: { name: 'context-pack' },
+  // format text|hook: the pack's own injectable block (core memory + cards + threads + facts).
+  renderText: (result) => (result as { text?: string }).text ?? '',
   annotations: { title: 'context_pack (boundary bundle)', readOnlyHint: true },
   handler: async (ctx, p) => {
     const { assembleContextPack, renderPack, isAfter, PACK_DEFAULT_MAX_ENTITIES, renderCardLine, renderThreadLine, renderFactLine, packHeaderCost,

@@ -265,7 +265,22 @@ const PER_ITEM_HTTP_STATUSES = new Set([400, 408, 413, 422]);
 // halts an entire cycle phase, so a stray word inside a raw-output slice
 // must not trip it. Only specific provider phrasings qualify.
 export const BILLING_MESSAGE_RE =
-  /insufficient_quota|quota exceeded|exceeded your (?:current )?quota|credit balance is too low|spend limit|billing_not_active|billing hard limit|payment required/i;
+  /insufficient_quota|quota exceeded|exceeded your (?:current )?quota|credit balance is too low|no credits remaining|credit_balance_exhausted|spend limit|billing_not_active|billing hard limit|payment required/i;
+// The provider error-body codes (`error.type` / `error.code`) that name a billing condition. OpenAI's credit
+// exhaustion is a 429 whose message is prose and whose body says `insufficient_quota` / `credit_balance_exhausted`,
+// so the body decides it whatever the message says. Exact tokens, never prose.
+const BILLING_BODY_CODES = new Set(['insufficient_quota', 'credit_balance_exhausted', 'billing_hard_limit_reached', 'billing_not_active']);
+
+/** The `error.type` and `error.code` of a provider error body: APICallError's parsed `data`, else its raw `responseBody`. */
+function providerErrorCodes(err: unknown): string[] {
+  const { data, responseBody } = (err ?? {}) as { data?: unknown; responseBody?: unknown };
+  let body: unknown = data;
+  if (body == null && typeof responseBody === 'string') {
+    try { body = JSON.parse(responseBody); } catch { return []; }
+  }
+  const error = (body as { error?: { type?: unknown; code?: unknown } } | null)?.error;
+  return [error?.type, error?.code].filter((c): c is string => typeof c === 'string');
+}
 const AUTH_MESSAGE_RE =
   /authentication_error|permission_error|invalid (?:x-)?api[-_ ]?key|api key (?:is )?(?:invalid|expired|missing)|unauthorized|failed to authenticate|oauth session expired/i;
 export const RATE_MESSAGE_RE = /rate[-_ ]?limit(?:ed|_error)?\b|too many requests/i;
@@ -391,10 +406,12 @@ function statusToClass(status: number): GlobalLlmErrorClass | null {
  */
 export function classifyGlobalLlmError(err: unknown): GlobalLlmErrorClass | null {
   const messages: string[] = [];
+  const bodyCodes: string[] = [];
   let status: number | undefined;
   let cur: unknown = err;
   for (let depth = 0; depth < 3 && cur != null; depth++) {
     if (status === undefined) status = numericStatusOf(cur);
+    bodyCodes.push(...providerErrorCodes(cur));
     if (typeof cur === 'string') messages.push(cur);
     else if (typeof (cur as { message?: unknown }).message === 'string') {
       messages.push((cur as { message: string }).message);
@@ -414,7 +431,7 @@ export function classifyGlobalLlmError(err: unknown): GlobalLlmErrorClass | null
   const rawIdx = message.indexOf('--- raw ---');
   const phraseText = rawIdx === -1 ? message : message.slice(0, rawIdx);
 
-  if (BILLING_MESSAGE_RE.test(phraseText)) return 'billing';
+  if (BILLING_MESSAGE_RE.test(phraseText) || bodyCodes.some((c) => BILLING_BODY_CODES.has(c))) return 'billing';
   if (MODEL_NOT_FOUND_MESSAGE_RE.test(phraseText)) return 'model_not_found';
   if (status !== undefined) {
     const byStatus = statusToClass(status);

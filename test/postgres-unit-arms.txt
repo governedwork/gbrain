@@ -371,6 +371,7 @@ test/purge-sync-tombstone-hold-7130.test.ts
 test/recall-page-fill.test.ts
 test/receipt-compaction-newest-sync-gbra130.test.ts
 test/remediation-manual-only.test.ts
+test/rename-page-op.test.ts
 test/repair-apply-pending-6543.test.ts
 test/repair-embedding-effects.test.ts
 test/repair-failed-writes-conflict-6429.test.ts

@@ -2613,6 +2613,24 @@ installation is not proof of native use. Read
 [shared brain skills](docs/guides/shared-brain-skills.md) and its
 [key-file contracts](docs/architecture/key-files/shared-skills.md) before changing this lifecycle.
 
+## This fork: how a pull request lands
+
+This is GovernedWork's fork. Its pull requests target the branch for the upstream version it carries
+(`brains-v<upstream>`, e.g. `brains-v0.60.342.0`), never `master`, and they land through the lander
+(governedwork/lander), never by hand: open the PR (a draft while you work on it), then run
+`lander enqueue <pr-url>` once — the `lander` on PATH — and stop. The lander validates the PR's exact head
+against the current base on the wardrobe, posts the required `lander/verdict` and merges; it tells your
+session on the presence board when the PR bounces, is held or merges. Never `gh pr merge`, never `--auto`,
+never a watch loop.
+
+The fork runs no CI of its own, so the lander's check is its only gate, in two steps. Per PR:
+`bun run typecheck`, then the test files the change names — a changed `test/*.test.ts`, and
+`test/<name>.test.ts` of each changed `src/**/<name>.ts`. Once per base: the whole unit suite (`bun run test`,
+sharded to the run's CPU budget); a red it finds holds the queue until the base is fixed. Both run with
+`GBRAIN_TEST_SKIP_LAUNCHD=1` — no sandboxed run can bootstrap a launchd job. So run the tests your change
+can break beyond the ones it names, `bun run verify`, and anything else it needs yourself, and say in the PR
+what you ran.
+
 ---
 
 ## INSTALL_FOR_AGENTS.md
@@ -8497,6 +8515,31 @@ on request)`, plus a structured `brief` field. Remote callers get the dated
 fact and page-edit arms (world pages only, the same text `get_versions` and
 `get_timeline` already return them); open loops are withheld
 (`withheld_arms: ["loops"]`).
+### Hooks that call the brain directly (`format`)
+
+A Claude Code or Codex `mcp_tool` hook (or a `command` hook running the CLI)
+can call the ops itself. A hook reads the tool's text content as its output
+and ignores the default JSON answer, so `volunteer_context` and
+`context_pack` take `format`:
+
+| `format` | Answer |
+|---|---|
+| `json` (default) | the op's JSON document, unchanged |
+| `text` | the compact injectable block (the hook lane's volunteered pages, or the pack's `text`) |
+| `hook` | `{"hookSpecificOutput":{"hookEventName":<hook_event>,"additionalContext":<the block>}}`, trimmed under the hook-output cap; `{}` when empty |
+
+`hook_event` is `UserPromptSubmit` (default) or `SessionStart`. One content
+block, notices folded in; Claude Code accepts only `hook`, Codex `hook` or
+`text`. Shaping is presentation only. The CLI's `--format` shapes the JSON
+answer, so it works against any host version.
+
+```json
+{ "type": "mcp_tool", "server": "gbrain", "tool": "volunteer_context",
+  "input": { "window": "${prompt}", "session_id": "${session_id}", "format": "hook" } }
+```
+
+Claude Code runs no `mcp_tool` hook on `SessionStart` at launch; use a
+`command` hook running `gbrain context-pack --entities … --format text`.
 
 ## The OpenClaw reflex volunteer arm
 
@@ -9754,6 +9797,11 @@ through as written. Search rows carry the same frontmatter value as raw
 `status` and a pack or backlink row's `page_status` agree whenever the value is
 a string of 40 characters or fewer. A link row's `status` is the relationship's
 temporal state, a different field, and the `status` input filter is unchanged.
+`format` (`json` default, `text`, `hook`) and `hook_event` are an opt-in
+presentation for harness hooks (`docs/guides/push-context.md`): `text` returns
+`text` alone and `hook` returns it as a Claude Code / Codex hook document. A
+shaped answer is not a v1 response document (no `protocol_version`); the
+response contract above is the `json` answer.
 
 #### context_pack core memory (additive)
 

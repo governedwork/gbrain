@@ -134,7 +134,8 @@ for (const backend of testBackends()) {
         take(2, 'Widget co raises', false, 'deck'), take(3, 'Widget co raises more', true, 'superseded by #3')]),
       expected_revision: (await engine.readPageSnapshot('notes/journal', { sourceId: 'default' }))!.revision });
 
-      expect((await takeRows(engine, 'default', 'notes/chain')).map(r => r.superseded_by)).toEqual([null, 2, null, null]);
+      // Row 2's self-pointer is a fence defect only: the canonical projection never stores a row as its own successor.
+      expect((await takeRows(engine, 'default', 'notes/chain')).map(r => r.superseded_by)).toEqual([null, null, null, null]);
       expect((await takeRows(engine, 'default', 'notes/journal')).map(r => r.superseded_by)).toEqual([null, null, null]);
 
       const revisions = async () => Promise.all(['notes/chain', 'notes/ambiguous', 'notes/journal'].map(async slug =>
