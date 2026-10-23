@@ -159,22 +159,6 @@ async function deleteDivergedTakes(engine: BrainEngine, pageId: number, takes: P
   [JSON.stringify(takes.map(t => ({ row_num: t.rowNum, claim: t.claim })))], 'replaced');
 }
 
-function parsedTakeToBatchInput(pageId: number, t: ParsedTake): TakeBatchInput {
-  return {
-    page_id: pageId,
-    row_num: t.rowNum,
-    claim: t.claim,
-    kind: t.kind,
-    holder: t.holder,
-    weight: t.weight,
-    since_date: t.sinceDate,
-    until_date: t.untilDate,
-    source: t.source,
-    active: t.active,
-    superseded_by: null,
-  };
-}
-
 const BATCH_SIZE = 100;
 
 /**
@@ -299,7 +283,7 @@ export async function extractTakesFromFs(
 
     result.pagesWithTakes++;
     for (const t of takes) {
-      buffer.push(parsedTakeToBatchInput(pageId, t));
+      buffer.push(takesPreparation.toCanonicalBatchInput(pageId, t));
       if (buffer.length >= BATCH_SIZE) await flushBatch(engine, buffer, result, dryRun);
     }
   }
@@ -356,13 +340,13 @@ export async function extractTakesFromDb(
     if (covered.has(source_id)) {
       await withUnmanagedBeliefs(engine, source_id, [slug], 'takes_reextract', run => maintenanceTransaction(engine, tx => run(tx, async () => {
         const takes = await reconcilePageTakes(tx, page.id, read, slug, rebuild, false, result);
-        result.takesUpserted += await upsertProjectedTakes(engine, takes.map(t => parsedTakeToBatchInput(page.id, t)), result, tx);
+        result.takesUpserted += await upsertProjectedTakes(engine, takes.map(t => takesPreparation.toCanonicalBatchInput(page.id, t)), result, tx);
       })));
       continue;
     }
     const takes = await reconcilePageTakes(engine, page.id, read, slug, rebuild, dryRun, result);
     for (const t of takes) {
-      buffer.push(parsedTakeToBatchInput(page.id, t));
+      buffer.push(takesPreparation.toCanonicalBatchInput(page.id, t));
       if (buffer.length >= BATCH_SIZE) await flushBatch(engine, buffer, result, dryRun);
     }
   }
