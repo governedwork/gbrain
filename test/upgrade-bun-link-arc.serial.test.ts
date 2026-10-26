@@ -395,9 +395,11 @@ describe('runUpgrade — bun-link arc (real git vs local bare origin; bun/gbrain
 describe('runUpgrade — bun-link Bun floor gate (#5855)', () => {
   test('a target whose Bun floor is above the host Bun is refused with the fix; nothing is swapped', async () => {
     const fx = buildFixture('floor-unmet', '>=9.9.9');
-    const run = await spawnWithShims(fx, [fx.driver, '--swap-only']);
+    // The gate reports the lower of the bun on PATH and the running Bun: the shim answers below any real Bun, so the
+    // message names the shim on every host (a host Bun older than the shim's default 1.4.2 would be named instead).
+    const run = await spawnWithShims(fx, [fx.driver, '--swap-only'], { GBRAIN_TEST_BUN_VERSION: '1.0.0' });
     expect(run.code).toBe(78);
-    expect(run.err).toContain(`gbrain ${SHIM_NEW_VERSION} requires Bun >=9.9.9; bun on PATH (${join(fx.shimDir, 'bun')}) is 1.4.2. `
+    expect(run.err).toContain(`gbrain ${SHIM_NEW_VERSION} requires Bun >=9.9.9; bun on PATH (${join(fx.shimDir, 'bun')}) is 1.0.0. `
       + 'Fix: bun upgrade, then gbrain upgrade. Docs: docs/guides/upgrades-auto-update.md#bun-floor');
     expect(run.err).toContain('Nothing was changed.');
     expect(git(['rev-parse', 'HEAD'], fx.clone).trim()).toBe(fx.cloneHeadBefore);

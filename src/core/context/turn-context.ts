@@ -486,6 +486,11 @@ function dropLowestConfidence(items: Array<{ confidence: number }>): void {
   items.splice(idx, 1);
 }
 
+/** The volunteered-pages block alone, in this lane's shape — `volunteer_context` with `format: text`. */
+export function renderVolunteeredBlock(volunteered: VolunteeredPage[]): string {
+  return render([], volunteered, []);
+}
+
 /** Render the envelope + labeled sections. '' when every section is empty. */
 function render(
   pointers: ReflexPointer[],

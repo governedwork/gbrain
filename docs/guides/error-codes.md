@@ -3755,6 +3755,14 @@ More: [docs/guides/repair.md#setup-owner-conflict](../../docs/guides/repair.md#s
 
 More: [docs/guides/shared-brain-skills.md#troubleshoot-leave-and-recover](../../docs/guides/shared-brain-skills.md#troubleshoot-leave-and-recover)
 
+### slug_conflict
+
+<a id="slug_conflict"></a>
+
+| Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
+|---|---|---|---|---|---|---|
+| The rename target slug is already held in this source: by a live page, a soft-deleted page, or a slug alias that redirects to another page. | A slug names one page per source, and a soft-deleted page keeps its slug until it is purged. Taking the slug would overwrite that page or drop the alias's redirect, so the rename stops and nothing moves. | Choose a new_slug that no page, soft-deleted page or alias holds in this source (reading the target slug with deleted pages included shows what holds it), then submit the rename with a new request_id. | agent | `repeat the read that failed` | 1 | no |
+
 ### slug_page_mismatch
 
 <a id="slug_page_mismatch"></a>

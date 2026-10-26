@@ -181,6 +181,31 @@ on request)`, plus a structured `brief` field. Remote callers get the dated
 fact and page-edit arms (world pages only, the same text `get_versions` and
 `get_timeline` already return them); open loops are withheld
 (`withheld_arms: ["loops"]`).
+### Hooks that call the brain directly (`format`)
+
+A Claude Code or Codex `mcp_tool` hook (or a `command` hook running the CLI)
+can call the ops itself. A hook reads the tool's text content as its output
+and ignores the default JSON answer, so `volunteer_context` and
+`context_pack` take `format`:
+
+| `format` | Answer |
+|---|---|
+| `json` (default) | the op's JSON document, unchanged |
+| `text` | the compact injectable block (the hook lane's volunteered pages, or the pack's `text`) |
+| `hook` | `{"hookSpecificOutput":{"hookEventName":<hook_event>,"additionalContext":<the block>}}`, trimmed under the hook-output cap; `{}` when empty |
+
+`hook_event` is `UserPromptSubmit` (default) or `SessionStart`. One content
+block, notices folded in; Claude Code accepts only `hook`, Codex `hook` or
+`text`. Shaping is presentation only. The CLI's `--format` shapes the JSON
+answer, so it works against any host version.
+
+```json
+{ "type": "mcp_tool", "server": "gbrain", "tool": "volunteer_context",
+  "input": { "window": "${prompt}", "session_id": "${session_id}", "format": "hook" } }
+```
+
+Claude Code runs no `mcp_tool` hook on `SessionStart` at launch; use a
+`command` hook running `gbrain context-pack --entities … --format text`.
 
 ## The OpenClaw reflex volunteer arm
 

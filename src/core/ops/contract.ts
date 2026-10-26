@@ -830,6 +830,15 @@ export interface Operation {
     stdin?: string;
     hidden?: boolean;
   };
+  /**
+   * The op's compact injectable rendering of its own (redacted) result. An op
+   * that sets it spreads OUTPUT_FORMAT_PARAMS into `params`, and a caller's
+   * `format: 'text' | 'hook'` then gets this text (or a harness hook document
+   * carrying it) instead of the JSON result — see ops/output-format.ts. The
+   * handler never sees `format`: the MCP dispatcher and the CLI renderer shape
+   * the output after the handler and its output redaction ran.
+   */
+  renderText?: (result: unknown) => string | Promise<string>;
 }
 
 /**

@@ -12,7 +12,8 @@ import { join, resolve } from 'node:path';
 const REPO = resolve(import.meta.dir, '..', '..');
 const GUARD = join(REPO, 'scripts', 'check-postgres-lane-coverage.ts');
 const FIXTURES = join(REPO, 'test', 'fixtures', 'guards', 'check-postgres-lane-coverage.ts');
-const ALLOWLISTED = { 'test/export-scale.slow.test.ts': "for (const backend of testBackends()) describe(backend, () => {});\n" };
+const ARM = "for (const backend of testBackends()) describe(backend, () => {});\n";
+const ALLOWLISTED = { 'test/export-scale.slow.test.ts': ARM, 'test/takes-supersession-citation.test.ts': ARM };
 const dirs: string[] = [];
 afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
 
@@ -61,14 +62,14 @@ describe('check-postgres-lane-coverage.ts', () => {
       'tests/heavy/arm.sh': 'bun test test/heavy.test.ts\n',
     });
     expect(r.code, r.out).toBe(0);
-    expect(r.out).toContain('4 test files with a DATABASE_URL-gated arm; 3 run in a Postgres lane, 1 allowlisted.');
+    expect(r.out).toContain('5 test files with a DATABASE_URL-gated arm; 3 run in a Postgres lane, 2 allowlisted.');
   });
 
   test('a test/postgres-unit-arms.txt row is a Postgres lane', () => {
     const arm = ALLOWLISTED['test/export-scale.slow.test.ts'];
     const r = run({ 'test/listed.test.ts': arm, 'test/postgres-unit-arms.txt': '# comment\ntest/listed.test.ts\n' });
     expect(r.code, r.out).toBe(0);
-    expect(r.out).toContain('2 test files with a DATABASE_URL-gated arm; 1 run in a Postgres lane, 1 allowlisted.');
+    expect(r.out).toContain('3 test files with a DATABASE_URL-gated arm; 1 run in a Postgres lane, 2 allowlisted.');
   });
 
   test('a list row for a missing file or a file with no gated arm is stale and names the line to delete', () => {

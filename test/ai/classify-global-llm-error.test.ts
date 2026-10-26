@@ -146,6 +146,41 @@ describe('classifyGlobalLlmError — positives', () => {
     expect(classifyGlobalLlmError(new Error('monthly quota exceeded for this key'))).toBe('billing');
   });
 
+  // OpenAI's credit exhaustion is a 429 whose message is "You have no credits remaining" and whose body names the
+  // condition only in `type`/`code` (insufficient_quota, credit_balance_exhausted): a billing condition, never a
+  // transient rate limit (the AI SDK keeps the parsed body on APICallError's `data` and the raw one on `responseBody`).
+  test('OpenAI credit exhaustion is billing, not rate_limit: the phrase, and the body codes behind a 429', () => {
+    const body = { error: { message: 'You have no credits remaining.', type: 'insufficient_quota', param: null, code: 'credit_balance_exhausted' } };
+    expect(classifyGlobalLlmError(new Error('You have no credits remaining.'))).toBe('billing');
+    expect(classifyGlobalLlmError(errWithStatus('You have no credits remaining.', 429))).toBe('billing');
+    const apiError = (message: string, withData: boolean) => new APICallError({
+      message,
+      url: 'https://api.openai.com/v1/chat/completions',
+      requestBodyValues: {},
+      statusCode: 429,
+      responseBody: JSON.stringify(body),
+      ...(withData ? { data: body } : {}),
+      isRetryable: true,
+    });
+    // The codes alone decide it, from the parsed body or the raw one, whatever the message says.
+    expect(classifyGlobalLlmError(apiError('provider request failed', true))).toBe('billing');
+    expect(classifyGlobalLlmError(apiError('provider request failed', false))).toBe('billing');
+    const retries = new RetryError({
+      message: 'Failed after 3 attempts. Last error: provider request failed',
+      reason: 'maxRetriesExceeded',
+      errors: [apiError('provider request failed', true)],
+    });
+    expect(classifyGlobalLlmError(retries)).toBe('billing');
+    // The gateway's own wrapper keeps the SDK error as its cause.
+    expect(classifyGlobalLlmError(Object.assign(new Error('[facts] provider request failed'), { status: 429, cause: retries }))).toBe('billing');
+    // A real rate limit's body stays a rate limit.
+    const limited = new APICallError({
+      message: 'Rate limit reached for requests', url: 'https://api.openai.com/v1/chat/completions', requestBodyValues: {}, statusCode: 429,
+      responseBody: JSON.stringify({ error: { message: 'Rate limit reached for requests', type: 'requests', code: 'rate_limit_exceeded' } }), isRetryable: true,
+    });
+    expect(classifyGlobalLlmError(limited)).toBe('rate_limit');
+  });
+
   test('auth phrases: authentication_error / invalid x-api-key', () => {
     expect(classifyGlobalLlmError(new Error('{"type":"error","error":{"type":"authentication_error"}}'))).toBe('auth');
     expect(classifyGlobalLlmError(new Error('invalid x-api-key'))).toBe('auth');

@@ -83,7 +83,7 @@ export async function insertClientGrant(sql: SqlQuery, grant: ClientGrant, metad
         token_endpoint_auth_method, client_id_issued_at, scope, source_id, federated_read,
         bound_slug_prefixes, allowed_operations, bound_tools, bound_source_id, bound_brain_id,
         delegated_slug_prefixes, delegated_namespace, bound_max_concurrent, budget_usd_per_day,
-        surface, surface_set_by, token_ttl, grant_profile, grant_revision, grant_repair_reasons)
+        surface, surface_set_by, token_ttl, grant_profile, grant_revision, grant_repair_reasons, takes_holders)
       VALUES (${grant.clientId}, ${grant.clientName}, ${metadata.secretHash},
         ARRAY(SELECT jsonb_array_elements_text(${JSON.stringify(metadata.redirectUris)}::text::jsonb)),
         ARRAY(SELECT jsonb_array_elements_text(${JSON.stringify(metadata.grantTypes)}::text::jsonb)),
@@ -96,7 +96,8 @@ export async function insertClientGrant(sql: SqlQuery, grant: ClientGrant, metad
         CASE WHEN ${grant.delegatedSlugPrefixes === null} THEN NULL ELSE ARRAY(SELECT jsonb_array_elements_text(${JSON.stringify(grant.delegatedSlugPrefixes ?? [])}::text::jsonb)) END,
         ${grant.delegatedNamespace}, ${grant.boundMaxConcurrent}, ${grant.budgetUsdPerDay}, ${grant.surface}, ${grant.surfaceSetBy},
         ${grant.tokenTtlSeconds}, ${grant.profile}, ${grant.revision},
-        ARRAY(SELECT jsonb_array_elements_text(${JSON.stringify(grant.repairReasons)}::text::jsonb)))
+        ARRAY(SELECT jsonb_array_elements_text(${JSON.stringify(grant.repairReasons)}::text::jsonb)),
+        CASE WHEN ${grant.takesHolders == null} THEN NULL ELSE ARRAY(SELECT jsonb_array_elements_text(${JSON.stringify(grant.takesHolders ?? [])}::text::jsonb)) END)
       RETURNING client_id
     ) INSERT INTO oauth_grant_audit (client_id, actor, action, revision, before_grant, after_grant)
       SELECT client_id, ${actor}, 'register', ${grant.revision}, NULL, ${auditDocument(grant, null)}::text::jsonb FROM created
