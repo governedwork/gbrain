@@ -52,6 +52,7 @@ import { stampPageTrust, stampRowTrust } from '../eligibility/stamp.ts';
 import type { TrustTier } from '../trust/tier.ts';
 import { AUDIT_ROW_SOURCES } from '../facts/audit-sources.ts';
 import { parseSinceParam } from '../facts/since-parse.ts';
+import { mergeNewest, parseRecallOffset, readFactWindow, recallSourceWindow, type FactPage, type FactWindow } from '../facts/recall-page.ts';
 import { parseQuestionParam, questionRecallNotices, rankFactsByQuestion, recallHintNotice, unlinkedNamesakes, type EntityCandidate, type QuestionRecall } from '../facts/question-recall.ts';
 
 // ============================================================
@@ -285,6 +286,7 @@ const recall: Operation = {
     include_expired: { type: 'boolean', description: 'Also expired; question ranks them.' },
     supersessions: { type: 'boolean', description: 'Supersession log only.' },
     limit: { type: 'number', description: 'Per-arm max (default 50, cap 100).' },
+    offset: { type: 'number', default: 0, description: 'Skip first N facts of the ordered list; page with limit.', fullSurfaceOnly: true },
     grep: { type: 'string', description: 'Text substring.' },
     include_pending: { type: 'boolean', description: 'Pending count.' },
     return_unit: { type: 'string', enum: ['chunk', 'window', 'section', 'page', 'auto'], description: 'results[] unit (see search).' },
@@ -346,26 +348,6 @@ const recall: Operation = {
     const eligibility = await resolveReadEligibility(ctx, { minTrust: p.min_trust }); // #5575 floor + quarantine/rederive hiding
 
     type FactRows = Awaited<ReturnType<typeof ctx.engine.listFactsByEntity>>;
-    type FactRowItem = FactRows[number];
-    // Per-arm merge key: each arm's engine query ORDERs by a different column
-    // (supersessions by COALESCE(expired_at, valid_until) — #3014, entity by
-    // valid_from, the rest by
-    // created_at) — the cross-source merge must sort by the SAME key or the
-    // truncation at `limit` silently drops the wrong rows. Decorate-sort-
-    // undecorate: the key is computed once per row.
-    const mergeNewest = (lists: FactRows[], keyOf: (rec: Record<string, unknown>) => unknown): FactRows => {
-      if (lists.length === 1) return lists[0];
-      const toTime = (v: unknown): number => {
-        const t = v instanceof Date ? v.getTime() : v ? new Date(String(v)).getTime() : 0;
-        return Number.isFinite(t) ? t : 0;
-      };
-      const decorated = lists.flat().map((r: FactRowItem) => ({
-        r,
-        k: toTime(keyOf(r as unknown as Record<string, unknown>)),
-      }));
-      decorated.sort((a, b) => b.k - a.k);
-      return decorated.slice(0, limit).map(d => d.r);
-    };
     const byCreated = (rec: Record<string, unknown>) => rec.created_at ?? rec.since_date;
     // The since-arms below pass eventTime:true (COALESCE(valid_from,
     // created_at) — see FactListOpts.eventTime), so their per-source ORDER BY
@@ -389,6 +371,8 @@ const recall: Operation = {
       );
     }
     const question = parseQuestionParam(p);
+    const page: FactWindow = { offset: parseRecallOffset(p, question), limit }; // recall-page.ts: one page of the merged order
+    const sourceWindow = recallSourceWindow(factSources.length, page);
     const entityParam = typeof p.entity === 'string' && p.entity.length > 0 ? (p.entity as string) : null;
     const sessionParam = typeof p.session_id === 'string' && p.session_id.length > 0 ? (p.session_id as string) : null;
     let ranking: QuestionRecall | null = null;
@@ -397,7 +381,6 @@ const recall: Operation = {
     // LIMIT, so a hidden newest row never consumes a slot).
     const listOpts = {
       activeOnly: !includeExpired,
-      limit,
       visibility, excludePrivate,
       grep: grep ?? undefined,
       excludeAuditRows: true, eligibility,
@@ -418,7 +401,7 @@ const recall: Operation = {
         )),
         // v0.46 (#3014): matches the engine's ORDER BY COALESCE(expired_at,
         // valid_until) — ontology supersessions carry valid_until only.
-        (rec) => rec.expired_at ?? rec.valid_until ?? rec.created_at,
+        (rec) => rec.expired_at ?? rec.valid_until ?? rec.created_at, page,
       );
     } else if (since) {
       // Composed window: `since` ANDs onto `entity` and/or `session_id` in
@@ -430,34 +413,34 @@ const recall: Operation = {
       const { resolveEntitySlug } = await import('../entities/resolve.ts');
       const resolvedLists = await Promise.all(factSources.map(async (src) => {
         const entitySlug = entityParam ? ((await resolveEntitySlug(ctx.engine, src, entityParam)) ?? entityParam) : undefined;
-        const rows = await readEntityFacts(ctx, src, entitySlug, limit,
-          s => ctx.engine.listFactsSince(src, since, { ...listOpts, eventTime: true, entitySlug: s, sessionId: sessionParam ?? undefined }));
+        const rows = await readEntityFacts(ctx, src, entitySlug, sourceWindow,
+          (s, at) => ctx.engine.listFactsSince(src, since, { ...listOpts, ...at, eventTime: true, entitySlug: s, sessionId: sessionParam ?? undefined }));
         return { slug: entitySlug, rows };
       }));
       ambiguousEntity = entityParam ? await unlinkedNamesakes(ctx.engine, resolvedLists.map(l => l.rows.map(r => ({ ...r, entity_slug: l.slug ?? r.entity_slug })))) : null;
-      rows = ambiguousEntity ? [] : mergeNewest(resolvedLists.map(l => l.rows), byEventTime);
+      rows = ambiguousEntity ? [] : mergeNewest(resolvedLists.map(l => l.rows), byEventTime, page);
     } else if (entityParam) {
       const { resolveEntitySlug } = await import('../entities/resolve.ts');
       const resolvedLists = await Promise.all(factSources.map(async (src) => {
         const slug = (await resolveEntitySlug(ctx.engine, src, entityParam)) ?? entityParam;
-        return { slug, rows: await readEntityFacts(ctx, src, slug, limit, s => ctx.engine.listFactsByEntity(src, s!, { ...listOpts, sessionId: sessionParam ?? undefined })) };
+        return { slug, rows: await readEntityFacts(ctx, src, slug, sourceWindow, (s, at) => ctx.engine.listFactsByEntity(src, s!, { ...listOpts, ...at, sessionId: sessionParam ?? undefined })) };
       }));
       ambiguousEntity = await unlinkedNamesakes(ctx.engine, resolvedLists.map(l => l.rows.map(r => ({ ...r, entity_slug: l.slug }))));
-      rows = ambiguousEntity ? [] : mergeNewest(resolvedLists.map(l => l.rows), (rec) => rec.valid_from ?? rec.created_at);
+      rows = ambiguousEntity ? [] : mergeNewest(resolvedLists.map(l => l.rows), (rec) => rec.valid_from ?? rec.created_at, page);
     } else if (sessionParam) {
       rows = mergeNewest(
         await Promise.all(factSources.map(src =>
-          ctx.engine.listFactsBySession(src, sessionParam, listOpts),
+          readFactWindow(at => ctx.engine.listFactsBySession(src, sessionParam, { ...listOpts, ...at }), sourceWindow),
         )),
-        byCreated,
+        byCreated, page,
       );
     } else {
       // No filter: return recent across the granted source(s).
       rows = mergeNewest(
         await Promise.all(factSources.map(src =>
-          ctx.engine.listFactsSince(src, new Date(0), { ...listOpts, eventTime: true }),
+          readFactWindow(at => ctx.engine.listFactsSince(src, new Date(0), { ...listOpts, ...at, eventTime: true }), sourceWindow),
         )),
-        byEventTime,
+        byEventTime, page,
       );
     }
 
@@ -653,14 +636,22 @@ const recall: Operation = {
 /**
  * One source's facts about an entity, read under every slug they may be saved
  * under (the page, its identity siblings and its bare subject slug,
- * mentions/siblings.ts), newest event first, cut at `limit`.
+ * mentions/siblings.ts), newest event first, rows [offset, offset + limit) of
+ * that order. One slug reads its window in SQL. Several read each slug's first
+ * offset+limit rows and cut the window from the merge: the sort is stable, so
+ * ties keep slug order, which factEntitySlugs fixes (page, siblings by slug,
+ * subject), and every call merges the same order.
  */
 async function readEntityFacts<R extends { valid_from?: Date | string | null; created_at?: Date | string | null }>(ctx: OperationContext, src: string,
-  slug: string | undefined, limit: number, read: (slug: string | undefined) => Promise<R[]>): Promise<R[]> {
+  slug: string | undefined, window: FactWindow, read: (slug: string | undefined, page: FactPage) => Promise<R[]>): Promise<R[]> {
   const { factEntitySlugs } = await import('../mentions/siblings.ts');
   const slugs = slug ? await factEntitySlugs(ctx.engine, src, slug, { excludePrivate: ctx.remote !== false }).catch(() => [slug]) : [undefined];
   const time = (r: R) => { const v = r.valid_from ?? r.created_at; return (v instanceof Date ? v.getTime() : v ? Date.parse(String(v)) : 0) || 0; };
-  return (await Promise.all(slugs.map(read))).flat().sort((a, b) => time(b) - time(a)).slice(0, limit);
+  const one = slugs.length === 1;
+  const each: FactWindow = one ? window : { offset: 0, limit: window.offset + window.limit };
+  const from = one ? 0 : window.offset;
+  const lists = await Promise.all(slugs.map(s => readFactWindow(at => read(s, at), each)));
+  return lists.flat().sort((a, b) => time(b) - time(a)).slice(from, from + window.limit);
 }
 
 const AMBIGUOUS_ENTITY_SUGGESTION = 'These are different entities in different sources. Pass source_id to read one, or link them with entity_identity_link if they are the same.';

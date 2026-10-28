@@ -5499,6 +5499,12 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
         "type": "number",
         "description": "Per-arm max (default 50, cap 100)."
       },
+      "offset": {
+        "type": "number",
+        "default": 0,
+        "description": "Skip first N facts of the ordered list; page with limit.",
+        "fullSurfaceOnly": true
+      },
       "grep": {
         "type": "string",
         "description": "Text substring."

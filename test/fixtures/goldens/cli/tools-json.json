@@ -2,8 +2,8 @@
   "golden": {
     "exitCode": 0,
     "stderr": "",
-    "stdoutBytes": 262571,
-    "stdoutSha256": "85891d837ae087b4fd5fade1f18e88839c362ab1611bcf49511b107d04ca1faf",
+    "stdoutBytes": 262765,
+    "stdoutSha256": "f3c43c1e626e7517d9a65b9ba25d57cf53cf7a4bf3031104d018b48604167ce0",
     "toolNames": [
       "remember",
       "entity",
@@ -6486,6 +6486,7 @@
           "include_pending": "boolean?",
           "limit": "number?",
           "min_trust": "string?",
+          "offset": "number?",
           "query": "string?",
           "question": "string?",
           "return_unit": "string?",
@@ -6541,6 +6542,11 @@
                 "external_untrusted"
               ],
               "type": "string"
+            },
+            "offset": {
+              "default": 0,
+              "description": "Skip first N facts of the ordered list; page with limit.",
+              "type": "number"
             },
             "query": {
               "description": "Also search pages (results[]).",
