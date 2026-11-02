@@ -35,6 +35,7 @@ const EXEMPT = {
   'src/core/persistence/connector-google-receipts.ts': 'connector receipt rows, not page text',
   'src/core/persistence/projection-reindex.ts': 'rebuilds derived projections; page text is unchanged',
   'src/core/persistence/rename-prepare.ts': 'governedwork fork rename_page: moves the slug only; page text is unchanged',
+  'src/core/persistence/untiled-revert.ts': 'governedwork fork revert_version repair of an unreadable segmented page: refuses when the page or the version is core-marked (always_load / core_priority), so it never writes a core page',
   'src/core/persistence/noop-kernel.ts': 'decides that nothing would change; publishes nothing',
   'src/core/persistence/consumer.ts': 'dispatches to preparers; no page content of its own',
   'src/core/persistence/coordinator.ts': 'takes the ordered source lock from exclusiveSources; prepares nothing itself',

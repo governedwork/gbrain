@@ -690,9 +690,9 @@ async function prepareInlineOrSegmentedMutation(unbounded: BrainEngine, row: Wri
     () => engine.readPageSnapshot(row.slug, { ...source, includeDeleted: true }),
     () => loadActivePackForEngine(engine, { remote: row.authority.remote, sourceId: row.source_id }).catch(() => null),
   ]) as [unknown, PageSnapshot | null, Awaited<ReturnType<typeof loadActivePackForEngine>> | null];
-  // Wave B (spec 6.3): edit_page on a segmented page splices the touched segments; a declined edit takes the string path.
+  // Wave B (spec 6.3): edit_page on a segmented page splices the touched segments; a declined edit takes the string path. Fork: revert_version repairs an untiled one (untiled-revert.ts).
   const segmented = row.operation === 'edit_page' && stored && !stored.page.deleted_at && isSegmentedPage(stored.page) && stored.page.id === row.page_id
-    ? await prepareSegmentedEditMutation(engine, row, stored) : null;
+    ? await prepareSegmentedEditMutation(engine, row, stored) : row.operation === 'revert_version' && stored ? await (await import('./untiled-revert.ts')).prepareUntiledRevert(engine, row, stored) : null;
   if (segmented) return segmented;
   // Wave B: a segmented page within the single-string ceiling is compared and merged as strings.
   const snapshot = await materializedSnapshot(unbounded, stored);
