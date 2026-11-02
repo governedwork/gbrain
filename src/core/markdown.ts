@@ -6,6 +6,7 @@ import {
   RECOVERY_VERSION, type FrontmatterRecovery, type RecoveryKind,
 } from './frontmatter-recovery.ts';
 import { findLineOutsideFencedCode } from './fence-scan.ts';
+import { pathPrefixNeedle } from './path-prefix-needle.ts';
 
 export {
   recoverFrontmatter, RECOVERY_VERSION, PROTECTED_FRONTMATTER_KEYS, IDENTITY_FRONTMATTER_KEYS,
@@ -1108,8 +1109,8 @@ function inferType(filePath?: string): PageType {
  * Note on prefix shape: gbrain-base stores prefixes WITHOUT the
  * leading `/` (e.g. `people/`). For matching, we lower-case the path
  * with a leading `/` prepended (matches the original behavior) and
- * test against `'/' + prefix` so `people/` matches `/people/` inside
- * the full path.
+ * test against `pathPrefixNeedle(prefix)` so `people/` matches `/people/`
+ * inside the full path.
  */
 export function inferTypeFromPack(
   filePath: string | undefined,
@@ -1123,8 +1124,7 @@ export function inferTypeFromPack(
   const lower = ('/' + filePath).toLowerCase();
   for (const pt of pack.page_types) {
     for (const prefix of pt.path_prefixes) {
-      const needle = prefix.startsWith('/') ? prefix.toLowerCase() : '/' + prefix.toLowerCase();
-      if (lower.includes(needle)) {
+      if (lower.includes(pathPrefixNeedle(prefix))) {
         return pt.name;
       }
     }
@@ -1172,8 +1172,7 @@ export function inferTypeAndSubtypeFromPack(
   let matchedType: { name: string; subtypes?: ReadonlyArray<{ name: string; when: { path_pattern?: string; frontmatter_field?: string; frontmatter_value?: unknown } }> } | undefined;
   outer: for (const pt of pack.page_types) {
     for (const prefix of pt.path_prefixes) {
-      const needle = prefix.startsWith('/') ? prefix.toLowerCase() : '/' + prefix.toLowerCase();
-      if (lower.includes(needle)) {
+      if (lower.includes(pathPrefixNeedle(prefix))) {
         matchedType = pt;
         break outer;
       }
