@@ -33,7 +33,7 @@ import { purgeStaleCheckpoints } from '../src/core/op-checkpoint.ts';
 import { FENCE_REPAIR_ATTEMPT_OP } from '../src/core/fence-repair/attempts.ts';
 import { listFenceCandidates, runFenceCensus, summarizeFenceCensus } from '../src/core/fence-repair/census.ts';
 import {
-  FENCE_CANDIDATE_OP, FENCE_SCAN_OP, FENCE_TREND_OP, readScanRecord, readTrend, recordPublicationFenceTrend, recordSyncRunTrend,
+  FENCE_CANDIDATE_OP, FENCE_SCAN_OP, FENCE_TREND_OP, readScanRecord, readTrend, recordPublicationFenceTrend, recordSyncRunTrend, writeScanRecord,
 } from '../src/core/fence-repair/census-store.ts';
 import { isolatedPersistencePostgres } from './helpers/persistence-postgres.ts';
 import { testBackends } from './helpers/test-backends.ts';
@@ -189,6 +189,11 @@ for (const backend of backends) {
         const slugs = ['notes/dst-a', 'notes/dst-b', 'notes/dst-c', 'notes/dst-d'];
         for (const slug of slugs) await s.stored(slug, CLEAN);
         await s.census();
+        // A census starts the next pass at the real clock, and the pass reads only pages updated since: the fixed instants
+        // below were ahead of it until 2026-11-01 and behind it after, so the test passed or failed with the date it ran on.
+        // Start the pass the day before them, as a census that ended then would have left it.
+        const record = (await readScanRecord(engine, s.id, s.incarnation))!;
+        await writeScanRecord(engine, { ...record, pages: { ...record.pages, watermark: '2026-10-31T00:00:00Z' } });
         const [{ zone }] = await engine.executeRaw<{ zone: string }>(`SELECT current_setting('TimeZone') AS zone`);
         try {
           await engine.executeRaw(`SELECT set_config('TimeZone', 'America/New_York', false)`);
