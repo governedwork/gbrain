@@ -39,7 +39,6 @@ import { segmentedPageSearchable } from './searchable.ts';
 import { stableJson } from './digest.ts';
 import { pageBodyOverCeilingError } from '../page-body/page-shape.ts';
 import { assertOriginUnclaimed } from './origin-guard.ts';
-import { assertLiveGenerationTiles } from '../page-body/body-tiling.ts';
 
 const BODY_KEYS = new Set(['compiled_truth', 'timeline', 'content']);
 
@@ -175,9 +174,6 @@ export async function applySegmentedBody(tx: BrainEngine, input: SegmentedApplyI
   const flip = await tx.flipBodyGeneration({ pageId, expectedGeneration: prepared.expectedGeneration, newGeneration: prepared.newGeneration,
     stagingId: prepared.stagingId, closeOccurrences: prepared.closeOccurrences, retireChunkOccurrences: prepared.retireChunkOccurrences,
     retireInlineChunks: input.promotion, retireMaxRows: input.retireMaxRows, body: prepared.body, meta: input.meta });
-  // The generation just published must tile the body it declares. One that does not refuses here, in the write's
-  // transaction, so the page keeps its readable generation instead of every later reader failing on this one.
-  await assertLiveGenerationTiles(tx, pageId);
   if (!prepared.createRows) await tx.executeRaw('DELETE FROM content_chunks WHERE page_id=$1 AND body_generation=$2 AND NOT (chunk_index = ANY($3::int[]))',
     [pageId, prepared.newGeneration, prepared.stagedChunkIndexes]);
   const createChunks = prepared.createChunks?.slug === input.slug ? prepared.createChunks.chunks : null;

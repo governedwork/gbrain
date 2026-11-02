@@ -41,8 +41,8 @@ export async function generationBodyBytes(engine: Pick<BrainEngine, 'executeRaw'
 
 /**
  * The live generation of a segmented page read from its rows' extents only (no texts, no row metadata): the generation,
- * its body_bytes and whether its rows tile them. Null when the page is not segmented. A write checks it after its flip
- * (applySegmentedBody), and revert_version takes its repair path when it is false (page-prepare.ts).
+ * its body_bytes and whether its rows tile them. Null when the page is not segmented. revert_version takes its repair
+ * path when it is false (persistence/untiled-revert.ts).
  */
 export async function liveGenerationTiling(engine: Pick<BrainEngine, 'executeRaw'>, pageId: number):
   Promise<{ slug: string; sourceId: string; generation: number; bodyBytes: number; rows: RowSpan[]; tiles: boolean } | null> {
@@ -59,12 +59,6 @@ export async function liveGenerationTiling(engine: Pick<BrainEngine, 'executeRaw
   for (const row of rows) { if (row.byteStart !== end) { end = -1; break; } end += row.byteLen; }
   return { slug: found[0]!.slug, sourceId: found[0]!.source_id, generation: Number(found[0]!.body_generation), bodyBytes, rows,
     tiles: rows.length > 0 && end === bodyBytes };
-}
-
-/** The live generation's tiling, read again inside the write that just flipped it: throws page_body_rows_unreadable unless its rows tile its body. */
-export async function assertLiveGenerationTiles(engine: Pick<BrainEngine, 'executeRaw'>, pageId: number): Promise<void> {
-  const live = await liveGenerationTiling(engine, pageId);
-  if (live) assertRowsTile(live.rows, { slug: live.slug, sourceId: live.sourceId, total: live.bodyBytes });
 }
 
 /** The tiling check for a reader that read `rows` of `generation` (default live) through readManifest. */
