@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { resetPgliteState } from './helpers/reset-pglite.ts';
 import { runStatsCore } from '../src/core/schema-pack/stats.ts';
+import { inferTypeFromPack } from '../src/core/markdown.ts';
 import {
   __setPackLocatorForTests,
   _resetPackLocatorForTests,
@@ -75,7 +76,7 @@ function seedTinyPack(packName: string, types: Array<{ name: string; prefix: str
   const path = join(dir, 'pack.yaml');
   let body = `api_version: gbrain-schema-pack-v1\nname: ${packName}\nversion: 1.0.0\ndescription: ""\ngbrain_min_version: 0.38.0\nextends: null\nborrow_from: []\npage_types:\n`;
   for (const t of types) {
-    body += `  - name: ${t.name}\n    primitive: entity\n    path_prefixes:\n      - ${t.prefix}\n    aliases: []\n    extractable: false\n    expert_routing: false\n`;
+    body += `  - name: ${t.name}\n    primitive: entity\n    path_prefixes:\n      - ${JSON.stringify(t.prefix)}\n    aliases: []\n    extractable: false\n    expert_routing: false\n`;
   }
   body += `link_types: []\nfrontmatter_links: []\ntakes_kinds:\n  - fact\n  - take\n  - bet\n  - hunch\nenrichable_types: []\nfiling_rules: []\n`;
   writeFileSync(path, body, 'utf-8');
@@ -187,6 +188,120 @@ describe('runStatsCore — dead-prefix detection', () => {
       await seedPage('ops/tasks', { type: 'ops', sourcePath: null });
       const result = await runStatsCore(ctxOf());
       expect(result.dead_prefixes).toEqual([]);
+    });
+  });
+
+  // A prefix is live when GBrain's own type inference would match it: the
+  // lower-cased '/' + path CONTAINS '/' + prefix (case-insensitive, anywhere
+  // in the path, a leading '/' on the prefix allowed), not "slug starts with".
+  it('a prefix nested under a project (projects/x/decisions/...) is live, not dead', async () => {
+    await withEnv({ GBRAIN_HOME: tmpDir, GBRAIN_SCHEMA_PACK: 'tiny' }, async () => {
+      seedTinyPack('tiny', [
+        { name: 'decision', prefix: 'decisions/' },
+        { name: 'bet', prefix: 'bets/' },
+      ]);
+      await seedPage('projects/x/decisions/0001-a', { sourcePath: 'projects/x/decisions/0001-a.md' });
+      const result = await runStatsCore(ctxOf());
+      // decisions/ is live (inference types the page), bets/ has no page.
+      expect(result.dead_prefixes).toEqual([{ type: 'bet', prefix: 'bets/' }]);
+    });
+  });
+
+  it('matches a prefix case-insensitively, as inference does', async () => {
+    await withEnv({ GBRAIN_HOME: tmpDir, GBRAIN_SCHEMA_PACK: 'tiny' }, async () => {
+      seedTinyPack('tiny', [
+        { name: 'analysis', prefix: 'Wiki/Analysis/' },
+        { name: 'concept', prefix: 'wiki/concepts/' },
+      ]);
+      await seedPage('wiki/analysis/q3', { sourcePath: 'wiki/analysis/q3.md' });
+      await seedPage('WIKI/Concepts/Idea', { sourcePath: 'WIKI/Concepts/Idea.md' });
+      const result = await runStatsCore(ctxOf());
+      expect(result.dead_prefixes).toEqual([]);
+    });
+  });
+
+  it('a prefix with a leading slash matches a nested path, as inference does', async () => {
+    await withEnv({ GBRAIN_HOME: tmpDir, GBRAIN_SCHEMA_PACK: 'tiny' }, async () => {
+      seedTinyPack('tiny', [
+        { name: 'decision', prefix: '/decisions/' },
+        { name: 'deal', prefix: '/deals/' },
+      ]);
+      await seedPage('projects/x/decisions/0001-a', { sourcePath: 'projects/x/decisions/0001-a.md' });
+      const result = await runStatsCore(ctxOf());
+      expect(result.dead_prefixes).toEqual([{ type: 'deal', prefix: '/deals/' }]);
+    });
+  });
+
+  it("an underscore in a prefix is a literal character, not a LIKE wildcard", async () => {
+    await withEnv({ GBRAIN_HOME: tmpDir, GBRAIN_SCHEMA_PACK: 'tiny' }, async () => {
+      seedTinyPack('tiny', [
+        { name: 'snake', prefix: 'a_c/' },
+        { name: 'under', prefix: 'x_y/' },
+      ]);
+      // 'abc/page' does NOT contain '/a_c/': inference would not type it, and
+      // `_` must not stand in for 'b'.
+      await seedPage('abc/page', { sourcePath: 'abc/page.md' });
+      // A real underscore still matches.
+      await seedPage('notes/x_y/page', { sourcePath: 'notes/x_y/page.md' });
+      const result = await runStatsCore(ctxOf());
+      expect(result.dead_prefixes).toEqual([{ type: 'snake', prefix: 'a_c/' }]);
+    });
+  });
+
+  it("a percent sign in a prefix is a literal character, not a LIKE wildcard", async () => {
+    await withEnv({ GBRAIN_HOME: tmpDir, GBRAIN_SCHEMA_PACK: 'tiny' }, async () => {
+      seedTinyPack('tiny', [
+        { name: 'pct', prefix: '100%/' },
+        { name: 'lit', prefix: '5%/' },
+      ]);
+      // '1000/x' does NOT contain '/100%/': `%` must not match '0'.
+      await seedPage('1000/x', { sourcePath: '1000/x.md' });
+      // A real percent sign still matches.
+      await seedPage('rates/5%/y', { sourcePath: 'rates/5%/y.md' });
+      const result = await runStatsCore(ctxOf());
+      expect(result.dead_prefixes).toEqual([{ type: 'pct', prefix: '100%/' }]);
+    });
+  });
+
+  it('agrees with inferTypeFromPack: a prefix is dead exactly when no page path infers its type', async () => {
+    const slugs = [
+      'projects/x/decisions/0001-a',
+      'people/alice',
+      'Wiki/Analysis/Q3',
+      'abc/page',
+      'rates/5%/y',
+      'peoplex/bob',
+    ];
+    const prefixes = [
+      'decisions/', 'bets/', 'people/', '/people/', 'wiki/analysis/', 'a_c/', '100%/', '5%/', 'xpeople/', 'people', 'x/dec',
+    ];
+    await withEnv({ GBRAIN_HOME: tmpDir, GBRAIN_SCHEMA_PACK: 'tiny' }, async () => {
+      seedTinyPack('tiny', prefixes.map((prefix, i) => ({ name: `t${i}`, prefix })));
+      for (const slug of slugs) await seedPage(slug, { sourcePath: `${slug}.md` });
+      const result = await runStatsCore(ctxOf());
+      const reportedDead = new Set(result.dead_prefixes.map((d) => d.prefix));
+      for (const prefix of prefixes) {
+        // One-type pack: inference answers 't' iff this prefix alone matches the path.
+        const solo = { page_types: [{ name: 't', path_prefixes: [prefix] }] };
+        const live = slugs.some((slug) => inferTypeFromPack(`${slug}.md`, solo) === 't');
+        expect({ prefix, dead: reportedDead.has(prefix) }).toEqual({ prefix, dead: !live });
+      }
+    });
+  });
+
+  it('keeps a prefix live only for pages in scope, and ignores soft-deleted pages', async () => {
+    await withEnv({ GBRAIN_HOME: tmpDir, GBRAIN_SCHEMA_PACK: 'tiny' }, async () => {
+      seedTinyPack('tiny', [{ name: 'decision', prefix: 'decisions/' }]);
+      await seedPage('projects/x/decisions/0001-a', { sourceId: 'src-a' });
+      await seedPage('projects/y/decisions/0002-b', { sourceId: 'src-b', deleted: true });
+      await seedPage('projects/z/notes/n', { sourceId: 'src-c' });
+      const dead = [{ type: 'decision', prefix: 'decisions/' }];
+      expect((await runStatsCore(ctxOf())).dead_prefixes).toEqual([]);
+      expect((await runStatsCore(ctxOf(), { sourceId: 'src-a' })).dead_prefixes).toEqual([]);
+      expect((await runStatsCore(ctxOf(), { sourceId: 'src-b' })).dead_prefixes).toEqual(dead);
+      expect((await runStatsCore(ctxOf(), { sourceId: 'src-c' })).dead_prefixes).toEqual(dead);
+      expect((await runStatsCore(ctxOf(), { sourceIds: ['src-b', 'src-c'] })).dead_prefixes).toEqual(dead);
+      expect((await runStatsCore(ctxOf(), { sourceIds: ['src-a', 'src-c'] })).dead_prefixes).toEqual([]);
     });
   });
 
