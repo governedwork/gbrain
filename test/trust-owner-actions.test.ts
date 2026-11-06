@@ -197,6 +197,32 @@ describe('confirm_memory: the CEO-9 matrix (A4, DX-20)', () => {
     }
   }), 120_000);
 
+  test('fork: on a managed brain a remote confirmer granted only confirm_memory confirms a marked page; a grant without it is refused', async () => withEnv({ GBRAIN_HOME: home }, async () => {
+    for (const engine of engines) {
+      const b = await brain(engine);
+      const slug = 'notes/agent-marked-example';
+      await run(b.agent, 'put_page', { slug, content: page('Marked', 'Written by an agent.') });
+      expect((await pageRow(b, slug)).frontmatter.trust_tier).toBe('agent_written');
+      const ref = `p:${b.sourceId}/${slug}`;
+      // The hosted confirmer's grant: confirm_memory is the one operation it may call. A marked page's confirm on a managed
+      // brain is the journaled owner write trust_owner_page, which no rescope can name; the public operation grants it.
+      const only = await mintLegacyToken(engine, { name: `only-${b.sourceId}`, scopes: ['read', 'write', 'memory_confirm'], sourceGrant: [b.sourceId], takesHolders: ['world'], allowedOperations: ['confirm_memory'] });
+      const ctx = { ...b.confirmer, auth: { ...b.confirmer.auth!, clientId: only.id, principal: { kind: 'legacy_token', id: only.id } as Principal, allowedOperations: ['confirm_memory'] } } as unknown as OperationContext;
+      nonTty();
+      expect(await run(ctx, 'confirm_memory', { ref })).toMatchObject({ status: 'confirmed', tier: 'user_confirmed', detail: { marker_removed: true } });
+      const after = await pageRow(b, slug);
+      expect(after.trust_tier).toBe('user_confirmed');
+      expect(after.frontmatter.trust_tier).toBeUndefined();
+      // Control: the same journaled write under a grant that names neither operation is refused, nothing raised.
+      const slug2 = 'notes/agent-marked-control';
+      await run(b.agent, 'put_page', { slug: slug2, content: page('Marked 2', 'Also written by an agent.') });
+      const search = await mintLegacyToken(engine, { name: `search-${b.sourceId}`, scopes: ['read', 'write', 'memory_confirm'], sourceGrant: [b.sourceId], takesHolders: ['world'], allowedOperations: ['search'] });
+      const narrow = { ...b.confirmer, auth: { ...b.confirmer.auth!, clientId: search.id, principal: { kind: 'legacy_token', id: search.id } as Principal, allowedOperations: ['search'] } } as unknown as OperationContext;
+      expect((await failure(run(narrow, 'confirm_memory', { ref: `p:${b.sourceId}/${slug2}` }))).code).toBe('permission_denied');
+      expect((await pageRow(b, slug2)).trust_tier).toBe('agent_written');
+    }
+  }), 120_000);
+
   test('an unmanaged brain confirms a marked page through importFromContent, and a page without a marker by tier alone', async () => withEnv({ GBRAIN_HOME: home }, async () => {
     for (const engine of engines) {
       const b = await brain(engine);
