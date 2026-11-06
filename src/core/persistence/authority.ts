@@ -15,6 +15,18 @@ import { pipelined, transactionMemo } from '../page-state/transactions.ts';
 function deny(message: string): never { throw new OperationError('permission_denied', message, 'Inspect the current writer registration and source/operation grants.'); }
 function strings(value: unknown): value is string[] { return Array.isArray(value) && value.every(v => typeof v === 'string'); }
 function operationAllowed(ops: unknown, operation: string): boolean { return ops == null || strings(ops) && ops.includes(operation); }
+/**
+ * fork (governedwork): the journaled write an owner page action runs as, granted by the one remote operation that admits
+ * it. A marked page's confirm on a managed brain is `trust_owner_page` (trust/page-handlers.ts submitOwnerPage); the only
+ * remote caller is `confirm_memory` (ops/trust.ts), and `trust_owner_page` is no remote operation, so no grant can name it
+ * (`auth rescope --operations` refuses it). Without this a connection granted exactly `confirm_memory` confirms facts,
+ * takes and unmarked pages but is refused every marked page with permission_denied.
+ */
+const GRANTED_BY: Readonly<Record<string, string>> = { trust_owner_page: 'confirm_memory' };
+function operationGranted(ops: unknown, operation: string): boolean {
+  const by = GRANTED_BY[operation];
+  return operationAllowed(ops, operation) || (by !== undefined && operationAllowed(ops, by));
+}
 function prefixAllowed(prefixes: string[] | null | undefined, slug: string): boolean {
   return prefixes == null || slugUnderBoundPrefixes(prefixes, slug);
 }
@@ -136,7 +148,7 @@ export async function slugDisclosable(engine: SqlEngine, a: WriteAuthority, slug
 export async function authorizeWrite(engine: SqlEngine, a: WriteAuthority, operation: string, slug: string, lock = false): Promise<void> {
   if (a.version !== 1 || !a.principal || !a.sourceId || !a.sourceIncarnation) deny('Missing durable write authority.');
   assertSkillWriteScopes(a.scopes, operation, a.remote);
-  if (!hasScope(a.scopes, a.delegated ? 'agent' : 'write') || !operationAllowed(a.operations, operation) || !prefixAllowed(a.slugPrefixes, slug)) deny('The operation exceeds its original accepted grant.');
+  if (!hasScope(a.scopes, a.delegated ? 'agent' : 'write') || !operationGranted(a.operations, operation) || !prefixAllowed(a.slugPrefixes, slug)) deny('The operation exceeds its original accepted grant.');
   if ((a.delegated || a.restrictedNamespace) && (!a.delegatedPrefixes?.length || !matchesSlugAllowList(slug, a.delegatedPrefixes))) deny('The target exceeds the accepted delegated namespace.');
   const suffix = lock ? ' FOR SHARE' : '';
   if (a.principal.kind === 'oauth_client') {
@@ -150,7 +162,7 @@ export async function authorizeWrite(engine: SqlEngine, a: WriteAuthority, opera
     if (a.delegated) {
       if (!strings(row.bound_tools) || !row.bound_tools.some(t => t.replace(/^(?:brain_|mcp__gbrain__)/, '') === operation)) deny('The delegated tool was removed from the current grant.');
       if (!matchesSlugAllowList(slug, liveDelegation(row, a.delegatedJobId))) deny('The delegated namespace was narrowed.');
-    } else if (!operationAllowed(row.allowed_operations, operation) ||
+    } else if (!operationGranted(row.allowed_operations, operation) ||
       (row.bound_slug_prefixes != null && (!strings(row.bound_slug_prefixes) || !prefixAllowed(row.bound_slug_prefixes, slug)))) deny('The current operation or slug grant excludes this write.');
     return;
   }
@@ -161,7 +173,7 @@ export async function authorizeWrite(engine: SqlEngine, a: WriteAuthority, opera
     if (grant.permissionsMalformed) deny('The current legacy grant is malformed.');
     assertSkillWriteScopes(normalizeTokenScopes(row.scopes) ?? [], operation, a.remote);
     const liveOperations = grant.allowedOperations;
-    if (!operationAllowed(liveOperations, operation) || skillWrite(operation) && !liveOperations?.includes(operation)) deny('The current legacy operation grant excludes this write.');
+    if (!operationGranted(liveOperations, operation) || skillWrite(operation) && !liveOperations?.includes(operation)) deny('The current legacy operation grant excludes this write.');
     if (!hasScope(grant.scopes, 'write') || authSourcesFromGrant(grant).sourceId !== a.sourceId) deny('The current token no longer permits this source write.');
     return;
   }
