@@ -223,6 +223,28 @@ describe('confirm_memory: the CEO-9 matrix (A4, DX-20)', () => {
     }
   }), 120_000);
 
+  test('fork: on a managed brain the confirmer confirms a marked page in another source it reads; one it does not read stays refused', async () => withEnv({ GBRAIN_HOME: home }, async () => {
+    for (const engine of engines) {
+      const b = await brain(engine);
+      const other = await brain(engine);
+      const slug = 'notes/agents-source-example';
+      await run(other.agent, 'put_page', { slug, content: page('Elsewhere', 'Written by an agent in another source.') });
+      expect((await pageRow(other, slug)).frontmatter.trust_tier).toBe('agent_written');
+      const ref = `p:${other.sourceId}/${slug}`;
+      // The hosted confirmer: writes the brain's own source first, reads every active one, granted only confirm_memory.
+      const tok = await mintLegacyToken(engine, { name: `fed-${b.sourceId}`, scopes: ['read', 'write', 'memory_confirm'], sourceGrant: [b.sourceId, other.sourceId], takesHolders: ['world'], allowedOperations: ['confirm_memory'] });
+      const ctx = { ...b.confirmer, auth: { ...b.confirmer.auth!, clientId: tok.id, principal: { kind: 'legacy_token', id: tok.id } as Principal, sourceId: b.sourceId, allowedSources: [b.sourceId, other.sourceId], allowedOperations: ['confirm_memory'] } } as unknown as OperationContext;
+      nonTty();
+      expect(await run(ctx, 'confirm_memory', { ref })).toMatchObject({ status: 'confirmed', tier: 'user_confirmed', detail: { marker_removed: true } });
+      expect((await pageRow(other, slug)).trust_tier).toBe('user_confirmed');
+      // Control: a third source the token does not read is invisible to it, nothing raised.
+      const third = await brain(engine);
+      await run(third.agent, 'put_page', { slug, content: page('Third', 'Not readable by the confirmer.') });
+      expect((await failure(run(ctx, 'confirm_memory', { ref: `p:${third.sourceId}/${slug}` }))).code).toBe('not_found');
+      expect((await pageRow(third, slug)).trust_tier).toBe('agent_written');
+    }
+  }), 120_000);
+
   test('an unmanaged brain confirms a marked page through importFromContent, and a page without a marker by tier alone', async () => withEnv({ GBRAIN_HOME: home }, async () => {
     for (const engine of engines) {
       const b = await brain(engine);
