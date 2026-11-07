@@ -2568,6 +2568,10 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
         "type": "string",
         "required": true,
         "description": "What to confirm: f<id> (fact), t<id> (take) or p:<source>/<slug> (page)."
+      },
+      "binding": {
+        "type": "string",
+        "description": "Optional: the binding a dry run of this call answered for the preview the user approved. The confirm then applies only to that exact state, and is refused with preview_changed when the row moved since."
       }
     },
     "scope": "write",
