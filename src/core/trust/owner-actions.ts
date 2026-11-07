@@ -119,9 +119,16 @@ function notFound(ref: string, what: string): Error {
 
 interface RowTarget { table: 'facts' | 'takes'; id: number; sourceId: string; tier: TrustTier; text: string; binding: string; live: boolean }
 
+/**
+ * A row's binding covers every column that says what the row asserts or how it is qualified — not only what `recall`
+ * or `takes_list` project — so a confirm bound to a preview (`confirm_memory`'s `binding`) refuses a row edited in any
+ * of them. Left out: embeddings and their bookkeeping, fence placement and consolidation, which maintenance moves on
+ * its own and which change nothing the owner approved.
+ */
 async function readFactTarget(engine: BrainEngine, id: number): Promise<RowTarget | null> {
   const [row] = await engine.executeRaw<Record<string, unknown>>(
     `SELECT id, source_id, trust_tier, fact, entity_slug, kind, claim_metric, claim_value, claim_unit, claim_period, value, event_type, dimension, context,
+            visibility, notability, confidence, valid_from, valid_until, source, source_session, attributed_to,
             expired_at, superseded_by FROM facts WHERE id = $1`, [id]);
   if (!row) return null;
   return { table: 'facts', id, sourceId: String(row.source_id), tier: storedTrustTier(row.trust_tier), text: String(row.fact ?? ''),
@@ -130,7 +137,8 @@ async function readFactTarget(engine: BrainEngine, id: number): Promise<RowTarge
 
 async function readTakeTarget(engine: BrainEngine, id: number): Promise<RowTarget | null> {
   const [row] = await engine.executeRaw<Record<string, unknown>>(
-    `SELECT t.id, p.source_id, t.trust_tier, t.claim, t.kind, t.holder, t.active, t.superseded_by
+    `SELECT t.id, p.source_id, t.trust_tier, t.claim, t.kind, t.holder, t.weight, t.since_date, t.until_date, t.source, t.active, t.superseded_by,
+            t.resolved_at, t.resolved_outcome, t.resolved_value, t.resolved_unit, t.resolved_source, t.resolved_by
        FROM takes t JOIN pages p ON p.id = t.page_id WHERE t.id = $1`, [id]);
   if (!row) return null;
   return { table: 'takes', id, sourceId: String(row.source_id), tier: storedTrustTier(row.trust_tier), text: String(row.claim ?? ''),
