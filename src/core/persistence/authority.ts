@@ -23,6 +23,15 @@ function operationAllowed(ops: unknown, operation: string): boolean { return ops
  * takes and unmarked pages but is refused every marked page with permission_denied.
  */
 const GRANTED_BY: Readonly<Record<string, string>> = { trust_owner_page: 'confirm_memory' };
+/**
+ * fork (governedwork): an owner page action reaches the page's own source when the grant reads it. confirm_memory checks
+ * the page is visible to the connection (ops/trust.ts: a source in its read set) and the owner's confirm is not a write of
+ * the connection's content, so a confirmer whose write source is the brain's own may confirm a marked page in any source
+ * it reads (an agent's page in the agents source). Every other write keeps its one write source.
+ */
+function ownerPageReads(operation: string, readSources: readonly string[] | undefined, sourceId: string): boolean {
+  return operation === 'trust_owner_page' && !!readSources?.includes(sourceId);
+}
 function operationGranted(ops: unknown, operation: string): boolean {
   const by = GRANTED_BY[operation];
   return operationAllowed(ops, operation) || (by !== undefined && operationAllowed(ops, by));
@@ -82,7 +91,7 @@ export async function submissionAuthority(ctx: OperationContext, operation: stri
       delegatedPrefixes: ctx.allowedSlugPrefixes?.length ? [...ctx.allowedSlugPrefixes]
         : typeof ctx.subagentId === 'number' ? [`wiki/agents/${ctx.subagentId}/*`] : [] } : {}),
   };
-  if (ctx.auth?.sourceId != null && ctx.auth.sourceId !== sourceId) deny('The source is outside this writer grant.');
+  if (ctx.auth?.sourceId != null && ctx.auth.sourceId !== sourceId && !ownerPageReads(operation, ctx.auth.allowedSources, sourceId)) deny('The source is outside this writer grant.');
   if (!prefixAllowed(a.slugPrefixes, slug)) deny('The target is outside this writer grant.');
   await authorizeWrite(ctx.engine, a, operation, slug);
   if (!skillWrite(operation)) await authorizePageVisibility(ctx.engine, a, slug);
@@ -174,7 +183,8 @@ export async function authorizeWrite(engine: SqlEngine, a: WriteAuthority, opera
     assertSkillWriteScopes(normalizeTokenScopes(row.scopes) ?? [], operation, a.remote);
     const liveOperations = grant.allowedOperations;
     if (!operationGranted(liveOperations, operation) || skillWrite(operation) && !liveOperations?.includes(operation)) deny('The current legacy operation grant excludes this write.');
-    if (!hasScope(grant.scopes, 'write') || authSourcesFromGrant(grant).sourceId !== a.sourceId) deny('The current token no longer permits this source write.');
+    const live = authSourcesFromGrant(grant);
+    if (!hasScope(grant.scopes, 'write') || (live.sourceId !== a.sourceId && !ownerPageReads(operation, live.allowedSources, a.sourceId))) deny('The current token no longer permits this source write.');
     return;
   }
   if (a.principal.kind === 'local_cli' || a.principal.kind === 'local_stdio') {
