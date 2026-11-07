@@ -29,7 +29,7 @@ function message(over: Partial<GmailMessageMeta>): GmailMessageMeta {
   return {
     id: '18c2f4a9b3d21e01', threadId: '18c2f4a9b3d21e00', from: 'Alice Example <alice@example.com>',
     fromAddress: 'alice@example.com', to: ['bob@example.com'], cc: [], subject: 'Planning call',
-    dateIso, internalDateMs: Date.parse(dateIso), labelIds: [], listUnsubscribe: false,
+    dateIso, internalDateMs: Date.parse(dateIso), labelIds: [], listUnsubscribe: false, senderAuth: { spf: 'none', dkim: 'none', dmarc: 'none', dkim_domain: null },
     bodyText: 'Can we move the planning call to Thursday?', ...over,
   };
 }

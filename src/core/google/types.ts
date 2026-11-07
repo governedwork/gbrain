@@ -261,6 +261,30 @@ export interface LoopsCatchupState {
   done: boolean;
 }
 
+export type SpfVerdict = 'pass' | 'fail' | 'none' | 'neutral' | 'softfail' | 'temperror' | 'permerror';
+export type DkimVerdict = 'pass' | 'fail' | 'none' | 'neutral' | 'temperror' | 'permerror';
+export type DmarcVerdict = 'pass' | 'fail' | 'none' | 'temperror' | 'permerror';
+
+/**
+ * Gmail's own authentication verdict for one message, read from the topmost
+ * `Authentication-Results` header under authserv-id `mx.google.com`
+ * (`sender-auth.ts`). Anything unread or unreadable is `none`.
+ */
+export interface SenderAuthVerdict {
+  spf: SpfVerdict;
+  dkim: DkimVerdict;
+  dmarc: DmarcVerdict;
+  /** Lower-cased domain of a passing DKIM signature (`header.d`, else the `header.i` domain, which RFC 6376 keeps within d=), or null. */
+  dkim_domain: string | null;
+}
+
+/** An email page's `sender_auth`: the thread's newest inbound message's verdict, its id and its bare From (both null when none is inbound). */
+export interface PageSenderAuth extends SenderAuthVerdict {
+  message_id: string | null;
+  /** The From the verdict belongs to (not the page's `from:`, which is the thread's last message); null when unparseable. */
+  from: string | null;
+}
+
 export interface GmailMessageMeta {
   id: string;
   threadId: string;
@@ -282,6 +306,8 @@ export interface GmailMessageMeta {
   listId?: boolean;
   /** #5012: bare lowercased `Reply-To` addresses; absent or empty when not sent. */
   replyTo?: string[];
+  /** Gmail's authentication verdict for this message (`sender-auth.ts`). */
+  senderAuth: SenderAuthVerdict;
   /**
    * iCalendar method when the message carries a `text/calendar` part or an
    * `.ics` attachment — 'REQUEST' | 'REPLY' | 'CANCEL' | 'COUNTER' | '' when a
@@ -387,9 +413,13 @@ export const isGmailHoldKey = (key: string): boolean => !key.startsWith('contact
 
 /** Extract the bare lowercase address from "Name <a@b.c>" or "a@b.c". */
 export function bareAddress(raw: string): string {
-  const m = raw.match(/<([^>]+)>/);
-  const addr = (m ? m[1] : raw).trim().toLowerCase();
-  return addr;
+  // A display name can itself hold an `<addr>` (`"<ceo@bank.example>" <x@evil.example>`):
+  // quoted strings and comments are dropped before the angle-addr is found, and a header
+  // with more than one angle-addr outside them has no address we can name.
+  const outer = raw.replace(/"(?:[^"\\]|\\.)*"/g, ' ').replace(/\([^()]*\)/g, ' ');
+  const angles = [...outer.matchAll(/<([^<>]*)>/g)];
+  if (angles.length > 1) return '';
+  return (angles.length ? angles[0]![1]! : raw).trim().toLowerCase();
 }
 
 /** Split a To:/Cc: header into bare lowercase addresses. */

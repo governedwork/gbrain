@@ -14,6 +14,7 @@ import { createHash } from 'node:crypto';
 import { renderAttachmentInspection, threadAttachmentReceipts } from './attachment-receipts.ts';
 
 import { emailCitation } from '../output/scaffold.ts';
+import { threadSenderAuth } from './sender-auth.ts';
 import { DEFAULT_CONTACTS_DIR, type CalendarEventData, type ContactData, type GmailMessageMeta, type GmailThreadData } from './types.ts';
 
 // ── Noise + signature rules (recipes/email-to-brain.md, now code) ───────────
@@ -280,6 +281,7 @@ export function renderThreadPage(thread: GmailThreadData): RenderedPage | null {
     `participants: ${yamlList([...participants].sort())}`,
     `senders: ${yamlList([...senders].sort())}`,
     `labels: ${yamlList([...new Set(thread.messages.flatMap((m) => m.labelIds))].sort())}`,
+    `sender_auth: ${JSON.stringify(threadSenderAuth(thread))}`,
     ...(signature ? [`noise: signature-request`] : []),
     '---',
   ];
