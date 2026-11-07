@@ -2,8 +2,8 @@
   "golden": {
     "exitCode": 0,
     "stderr": "",
-    "stdoutBytes": 262765,
-    "stdoutSha256": "f3c43c1e626e7517d9a65b9ba25d57cf53cf7a4bf3031104d018b48604167ce0",
+    "stdoutBytes": 263082,
+    "stdoutSha256": "d37fee2e8625689d65d6af01ca3d0618ab996a75514c34dbcd6771bb028cc032",
     "toolNames": [
       "remember",
       "entity",
@@ -3098,11 +3098,16 @@
         "mutating": true,
         "name": "confirm_memory",
         "parameters": {
+          "binding": "string?",
           "ref": "string"
         },
         "required_scopes": [],
         "schema": {
           "properties": {
+            "binding": {
+              "description": "Optional: the binding a dry run of this call answered for the preview the user approved. The confirm then applies only to that exact state, and is refused with preview_changed when the row moved since.",
+              "type": "string"
+            },
             "ref": {
               "description": "What to confirm: f<id> (fact), t<id> (take) or p:<source>/<slug> (page).",
               "type": "string"
