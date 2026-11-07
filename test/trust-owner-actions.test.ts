@@ -245,6 +245,61 @@ describe('confirm_memory: the CEO-9 matrix (A4, DX-20)', () => {
     }
   }), 120_000);
 
+  test('fork: a binding from a dry run holds the confirm to the previewed row; an edit to any fact field, a take field or the page since is refused', async () => withEnv({ GBRAIN_HOME: home }, async () => {
+    for (const engine of engines) {
+      const b = await brain(engine);
+      nonTty();
+      const preview = async (ref: string) => {
+        const dry = await run({ ...b.confirmer, dryRun: true } as OperationContext, 'confirm_memory', { ref });
+        expect(dry).toMatchObject({ dry_run: true, ref });
+        expect(typeof dry.binding).toBe('string');
+        return dry.binding as string;
+      };
+      const edit = (sql: string, params: unknown[]) => b.engine.transaction(tx => withCoordinatedWrite(tx, [b.sourceId], () => tx.executeRaw(sql, params), TEST_WRITE_ATTRIBUTION));
+      // A binding from the dry run, the row unchanged: confirmed.
+      const kept = await agentFact(b, 'Alice prefers green tea');
+      expect(await run(b.confirmer, 'confirm_memory', { ref: `f${kept}`, binding: await preview(`f${kept}`) })).toMatchObject({ status: 'confirmed' });
+      expect(await factTier(b, kept)).toBe('user_confirmed');
+      // A fact edited after its preview, in a field recall does not answer and in one it does: refused, the tier unchanged.
+      for (const [column, value] of [['visibility', 'private'], ['notability', 'low'], ['confidence', 0.2], ['valid_until', '2030-01-01T00:00:00Z'], ['claim_value', 42], ['fact', 'Alice prefers black tea']] as const) {
+        const id = await agentFact(b, `Alice prefers tea number ${column}`);
+        const bound = await preview(`f${id}`);
+        const [was] = await b.engine.executeRaw<Record<string, unknown>>(`SELECT ${column} AS v FROM facts WHERE id = $1`, [id]);
+        await edit(`UPDATE facts SET ${column} = $2 WHERE id = $1`, [id, value]);
+        const [now] = await b.engine.executeRaw<Record<string, unknown>>(`SELECT ${column} AS v FROM facts WHERE id = $1`, [id]);
+        expect(String(now!.v), `${column} was ${String(was!.v)}`).not.toBe(String(was!.v));
+        // The edit's own trust stamp (an edit to a claim column lowers it), which the refused confirm leaves as it is.
+        const edited = await factTier(b, id);
+        expect(edited, column).not.toBe('user_confirmed');
+        const refused = await failure(run(b.confirmer, 'confirm_memory', { ref: `f${id}`, binding: bound }));
+        expect(refused.code, column).toBe('preview_changed');
+        expect(await factTier(b, id), column).toBe(edited);
+        // Control: the same edit, the call bound to no preview, confirms the row as it now is.
+        expect(await run(b.confirmer, 'confirm_memory', { ref: `f${id}` }), column).toMatchObject({ status: 'confirmed' });
+      }
+      // A take: its weight moved after the preview.
+      const slug = 'notes/take-binding-example';
+      await run(b.agent, 'put_page', { slug, content: page('Takes', 'A page that holds a take.') });
+      const take = await run(b.agent, 'takes_add', { slug, claim: 'Acme-example ships in Q3', kind: 'bet', holder: 'world', weight: 0.6 });
+      const [takeRow] = await b.engine.executeRaw<{ id: number }>('SELECT t.id FROM takes t JOIN pages p ON p.id = t.page_id WHERE p.source_id = $1 AND p.slug = $2', [b.sourceId, slug]);
+      expect(takeRow, JSON.stringify(take)).toBeDefined();
+      const takeBound = await preview(`t${takeRow!.id}`);
+      await edit('UPDATE takes SET weight = 0.1 WHERE id = $1', [takeRow!.id]);
+      expect((await failure(run(b.confirmer, 'confirm_memory', { ref: `t${takeRow!.id}`, binding: takeBound }))).code).toBe('preview_changed');
+      // A page: edited after its preview (a new revision).
+      const pslug = 'notes/page-binding-example';
+      await run(b.agent, 'put_page', { slug: pslug, content: page('Bound', 'First text.') });
+      const ref = `p:${b.sourceId}/${pslug}`;
+      const pageBound = await preview(ref);
+      await run(b.agent, 'put_page', { slug: pslug, content: page('Bound', 'Second text.'), force: true });
+      expect((await failure(run(b.confirmer, 'confirm_memory', { ref, binding: pageBound }))).code).toBe('preview_changed');
+      expect((await pageRow(b, pslug)).trust_tier).toBe('agent_written');
+      expect(await run(b.confirmer, 'confirm_memory', { ref, binding: await preview(ref) })).toMatchObject({ status: 'confirmed' });
+      // A binding that is not a string is refused before anything is read for it.
+      expect((await failure(run(b.confirmer, 'confirm_memory', { ref: `f${kept}`, binding: 7 }))).code).toBe('invalid_params');
+    }
+  }), 120_000);
+
   test('an unmanaged brain confirms a marked page through importFromContent, and a page without a marker by tier alone', async () => withEnv({ GBRAIN_HOME: home }, async () => {
     for (const engine of engines) {
       const b = await brain(engine);

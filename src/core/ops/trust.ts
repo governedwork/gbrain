@@ -29,6 +29,8 @@ const confirm_memory: Operation = {
     + 'for the user to run. Never call this on your own judgment: confirm only what the user explicitly confirmed.',
   params: {
     ref: { type: 'string', required: true, description: 'What to confirm: f<id> (fact), t<id> (take) or p:<source>/<slug> (page).' },
+    binding: { type: 'string', description: 'Optional: the binding a dry run of this call answered for the preview the user approved. '
+      + 'The confirm then applies only to that exact state, and is refused with preview_changed when the row moved since.' },
   },
   scope: 'write',
   handler: async (ctx, p) => {
@@ -47,12 +49,22 @@ const confirm_memory: Operation = {
         throw opError('not_found', `No ${ref.kind} ${preview.ref} visible to this connection.`, 'Check the ref and the source your connection may use.');
       }
     }
-    if (ctx.dryRun) return { dry_run: true, action: 'confirm_memory', ref: preview.ref, raises: preview.raises, summary: preview.summary };
+    // A caller's expected binding (a dry run's, for the preview its user approved) holds the whole confirm to that state:
+    // refused here when it already moved, and inside applyOwnerAction's write when it moves meanwhile.
+    const expected = p.binding === undefined ? null : p.binding;
+    if (expected !== null && (typeof expected !== 'string' || expected.length === 0)) {
+      throw opError('invalid_params', 'binding is the string a dry run of confirm_memory answered.', 'Run confirm_memory with dry_run: true and pass its binding.');
+    }
+    if (expected !== null && expected !== preview.binding) {
+      throw opError('preview_changed', `${preview.ref} changed after it was previewed; nothing was changed.`,
+        'Preview it again (dry_run: true) and ask the user to confirm what it shows now.');
+    }
+    if (ctx.dryRun) return { dry_run: true, action: 'confirm_memory', ref: preview.ref, raises: preview.raises, summary: preview.summary, binding: preview.binding };
     if (!preview.raises) return { action: 'confirm', ref: preview.ref, status: 'unchanged', tier: 'user_confirmed' };
     const confirmation = await requireOwnerConfirmation(ctx, { ref: preview.ref, token: preview.token, summary: preview.summary, command: preview.command });
     const principal = ctx.auth?.principal ?? currentVerifiedLocalWriter()?.principal ?? null;
     return applyOwnerAction(ctx.engine, { action: 'confirm', ref: raw }, {
-      binding: preview.binding, confirmation, by: principal, config: ctx.config, ...(ctx.remote !== false ? { ctx } : {}),
+      binding: expected ?? preview.binding, confirmation, by: principal, config: ctx.config, ...(ctx.remote !== false ? { ctx } : {}),
     });
   },
 };
