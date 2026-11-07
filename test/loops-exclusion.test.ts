@@ -63,7 +63,7 @@ function msg(spec: { from: string; to?: string[]; ageHours: number; labels?: str
     dateIso: new Date(internalDateMs).toISOString(),
     internalDateMs,
     labelIds: spec.labels ?? (spec.from === 'me@example.com' ? ['SENT'] : ['INBOX']),
-    listUnsubscribe: false,
+    listUnsubscribe: false, senderAuth: { spf: 'none', dkim: 'none', dmarc: 'none', dkim_domain: null },
     bodyText: spec.body ?? 'Can you review the plan?',
   };
 }

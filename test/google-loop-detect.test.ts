@@ -73,7 +73,7 @@ function msg(spec: MsgSpec): GmailMessageMeta {
     calendarMethod: spec.calendarMethod ?? null,
     ...(spec.autoSubmitted !== undefined ? { autoSubmitted: spec.autoSubmitted } : {}),
     labelIds: [spec.sent ? 'SENT' : 'INBOX', ...(spec.labels ?? [])],
-    listUnsubscribe: spec.listUnsub ?? false,
+    listUnsubscribe: spec.listUnsub ?? false, senderAuth: { spf: 'none', dkim: 'none', dmarc: 'none', dkim_domain: null },
     bodyText: spec.body ?? 'Can you review the plan?',
     ...(spec.headers ?? {}),
   };

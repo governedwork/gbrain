@@ -45,7 +45,7 @@ function msg(spec: MsgSpec): GmailMessageMeta {
     dateIso: '2026-08-20T10:00:00.000Z',
     internalDateMs: Date.parse('2026-08-20T10:00:00.000Z'),
     labelIds: spec.labels ?? ['INBOX'],
-    listUnsubscribe: spec.listUnsub ?? false,
+    listUnsubscribe: spec.listUnsub ?? false, senderAuth: { spf: 'none', dkim: 'none', dmarc: 'none', dkim_domain: null },
     calendarMethod: spec.calendarMethod ?? null,
     ...(spec.autoSubmitted !== undefined ? { autoSubmitted: spec.autoSubmitted } : {}),
     bodyText: spec.body ?? 'Some body text.',
