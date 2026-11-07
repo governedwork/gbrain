@@ -39,6 +39,7 @@ import {
 import { htmlToText, trimQuotedReply } from './google-render.ts';
 import { truncateUtf8 } from '../text-safe.ts';
 import { GMAIL_MIME_LIMITS, gmailPartHeader, inspectGmailAttachments, walkGmailMime, type GmailMimePart } from './attachment-receipts.ts';
+import { senderAuthFromHeaders } from './sender-auth.ts';
 
 export type FetchImpl = (url: string, init?: RequestInit) => Promise<Response>;
 
@@ -545,6 +546,7 @@ export class GmailClient extends GoogleApiClient {
         precedence: header(m, 'Precedence').trim().toLowerCase(),
         listId: header(m, 'List-Id') !== '',
         replyTo: splitAddressList(header(m, 'Reply-To')),
+        senderAuth: senderAuthFromHeaders(m.payload?.headers, bareAddress(fromRaw)),
         calendarMethod: extractCalendarMethod(m.payload),
         bodyText,
         attachmentInspection,
