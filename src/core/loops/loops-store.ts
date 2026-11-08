@@ -252,6 +252,11 @@ export interface ListLoopsOpts {
    */
   loopId?: number;
   limit?: number;
+  /**
+   * The sources a `counterparty` SLUG may match a page in (remote callers: their grant). Omitted = any source.
+   * The email arm is unaffected: a loop's correspondent address is part of the loop, inside the caller's scope.
+   */
+  counterpartySourceIds?: string[];
 }
 
 export async function listOpenLoops(
@@ -265,7 +270,8 @@ export async function listOpenLoops(
        AND ($2::text IS NULL OR status = $2)
        AND ($3::text IS NULL OR loop_type = $3)
        AND ($4::text IS NULL
-            OR (counterparty_slug = $4 AND ($6::text IS NULL OR COALESCE(counterparty_source_id, source_id) = $6))
+            OR (counterparty_slug = $4 AND ($6::text IS NULL OR COALESCE(counterparty_source_id, source_id) = $6)
+                AND ($7::text IS NULL OR COALESCE(counterparty_source_id, source_id) = ANY(string_to_array($7, ','))))
             OR counterparty_email = $4)
        AND ($5::bigint IS NULL OR id = $5::bigint)
      ORDER BY last_activity_at DESC, id DESC
@@ -277,6 +283,7 @@ export async function listOpenLoops(
       opts.counterparty ?? null,
       opts.loopId === undefined ? null : opts.loopId,
       opts.counterpartySourceId ?? null,
+      opts.counterpartySourceIds ? opts.counterpartySourceIds.join(',') : null,
     ],
   );
   return rows.map(normalizeRow);
