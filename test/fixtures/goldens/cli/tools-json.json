@@ -2,8 +2,8 @@
   "golden": {
     "exitCode": 0,
     "stderr": "",
-    "stdoutBytes": 263082,
-    "stdoutSha256": "d37fee2e8625689d65d6af01ca3d0618ab996a75514c34dbcd6771bb028cc032",
+    "stdoutBytes": 263145,
+    "stdoutSha256": "3b9d83429d0cf99311f4d091f1de8b286669379a7f8aad9a10276c5064c50121",
     "toolNames": [
       "remember",
       "entity",
@@ -7830,7 +7830,7 @@
               "type": "string"
             },
             "counterparty": {
-              "description": "Filter to one counterparty (slug or email).",
+              "description": "Filter to one counterparty (slug or email). Remote callers: a slug matches only a page inside their grant.",
               "type": "string"
             },
             "group_by": {
