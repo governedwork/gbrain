@@ -1,7 +1,8 @@
 /**
  * A fact or take read by its id (fork patch): `recall {fact_id}`,
- * `takes_list {id}`, and a contested row naming the other row of its
- * proposal (`contested.other_id`).
+ * `takes_list {id}`, and a row contested by a trust proposal naming the
+ * proposal's other row (`contested.fact_id` / `contested.take_id`) for a
+ * caller that can read it.
  *
  * A reader that was shown a fact or take (a preview before a confirm, the
  * other side of a contested pair) had no remote read of that one row: it
@@ -20,9 +21,13 @@
  *    active: false; a holder outside the token's allow-list and a take in a
  *    source the caller is not granted answer []; two takes sharing created_at
  *    are each found by id
- *  - a pending supersede proposal stamps both rows' `contested` with the
- *    other row's id, for facts and takes, and the reader reads the other
- *    side by that id; the text label is unchanged
+ *  - a pending supersede trust proposal names, on both rows' `contested`,
+ *    the other row's id (fact_id for facts, take_id for takes) and the
+ *    reader reads that side by it; the text label is unchanged; a caller
+ *    that cannot read the other row gets the label without the id: a
+ *    private fact for a remote caller, a row outside the caller's granted
+ *    sources, a take outside the holder allow-list, a row below the
+ *    min_trust floor
  *  - get_page's partial answers (body none, outline, window, auto over the
  *    inline cap) carry the page's created_at and updated_at exactly as a full
  *    read answers them, so a reader paging a large page in windows sees the
@@ -46,8 +51,8 @@ const local: DispatchOpts = { remote: false, sourceId: 'default' };
 const remote = (...sources: string[]): DispatchOpts =>
   ({ remote: true, sourceId: sources[0], auth: { scopes: ['read'], allowedSources: sources } as never });
 
-interface FactOut { fact_id: string; fact: string; contested?: { proposal_ref: string; role: string; other_id?: string } }
-interface TakeOut { id: number; claim: string; holder: string; contested?: { proposal_ref: string; role: string; other_id?: string } }
+interface FactOut { fact_id: string; fact: string; contested?: { proposal_ref: string; role: string; fact_id?: string } }
+interface TakeOut { id: number; claim: string; holder: string; contested?: { proposal_ref: string; role: string; take_id?: string } }
 
 async function call<T>(op: string, params: Record<string, unknown>, opts: DispatchOpts): Promise<T> {
   const result = await dispatchToolCall(engine, op, params, opts);
@@ -205,24 +210,74 @@ describe('takes_list id', () => {
   });
 });
 
-describe('contested names the other row', () => {
+describe('contested names the other row only to a caller that can read it', () => {
+  const close = (ref: string) => engine.executeRaw(`UPDATE trust_proposals SET status = 'accepted', decided_at = now() WHERE id = $1`, [Number(ref.slice(2))]);
+  const factLabel = async (id: number, opts: DispatchOpts = local, extra: Record<string, unknown> = {}) => (await recallById(id, opts, extra))[0]!.contested;
+  const takeLabel = async (id: number, opts: DispatchOpts = local, extra: Record<string, unknown> = {}) => (await takeById(id, opts, extra))[0]!.contested;
+
   test('a supersede_fact proposal: each side names the other, and the reader reads it by that id', async () => {
     const ref = await propose('supersede_fact', 'facts', ids.first, ids.third);
-    const [challenger] = await recallById(ids.third);
-    const [challenged] = await recallById(ids.first);
-    expect(challenger!.contested).toEqual({ proposal_ref: ref, role: 'challenger', other_id: String(ids.first) });
-    expect(challenged!.contested).toEqual({ proposal_ref: ref, role: 'challenged', other_id: String(ids.third) });
-    expect((await recallById(challenger!.contested!.other_id!)).map(f => f.fact)).toEqual(['Acme Example was founded in 2019']);
+    const challenger = await factLabel(ids.third);
+    expect(challenger).toEqual({ proposal_ref: ref, role: 'challenger', fact_id: String(ids.first) });
+    expect(await factLabel(ids.first)).toEqual({ proposal_ref: ref, role: 'challenged', fact_id: String(ids.third) });
+    expect((await recallById(challenger!.fact_id!)).map(f => f.fact)).toEqual(['Acme Example was founded in 2019']);
     // The text label still names only the proposal.
-    expect(compactTrustLabel({ ...trustFields('agent_written', null), contested: challenger!.contested as never })).toBe(`[written by an agent · legacy · contested ${ref}]`);
-    await engine.executeRaw(`UPDATE trust_proposals SET status = 'accepted', decided_at = now() WHERE id = $1`, [Number(ref.slice(2))]);
-    expect((await recallById(ids.third))[0]!.contested).toBeUndefined();
+    expect(compactTrustLabel({ ...trustFields('agent_written', null), contested: challenger as never })).toBe(`[written by an agent · legacy · contested ${ref}]`);
+    await close(ref);
+    expect(await factLabel(ids.third)).toBeUndefined();
   });
 
-  test('a supersede_take proposal: each side names the other', async () => {
+  test('the other fact private to a remote caller: the label without fact_id', async () => {
+    const ref = await propose('supersede_fact', 'facts', ids.privateFact, ids.second);
+    expect(await factLabel(ids.second, remote('default'))).toEqual({ proposal_ref: ref, role: 'challenger' });
+    expect(await factLabel(ids.second)).toEqual({ proposal_ref: ref, role: 'challenger', fact_id: String(ids.privateFact) });
+    await close(ref);
+  });
+
+  test('the other fact outside the caller\'s granted sources: the label without fact_id', async () => {
+    const ref = await propose('supersede_fact', 'facts', ids.inB, ids.second);
+    expect(await factLabel(ids.second, remote('default'))).toEqual({ proposal_ref: ref, role: 'challenger' });
+    expect(await factLabel(ids.second, remote('default', 'rb-b'))).toEqual({ proposal_ref: ref, role: 'challenger', fact_id: String(ids.inB) });
+    await close(ref);
+  });
+
+  test('the other fact below the min_trust floor: the label without fact_id', async () => {
+    const ref = await propose('supersede_fact', 'facts', ids.first, ids.confirmed);
+    expect(await factLabel(ids.confirmed, local, { min_trust: 'user_confirmed' })).toEqual({ proposal_ref: ref, role: 'challenger' });
+    expect(await factLabel(ids.confirmed)).toEqual({ proposal_ref: ref, role: 'challenger', fact_id: String(ids.first) });
+    await close(ref);
+  });
+
+  test('a supersede_take proposal: each side names the other, and the reader reads it by that id', async () => {
     const ref = await propose('supersede_take', 'takes', takes.weekly, takes.daily);
-    expect((await takeById(takes.daily))[0]!.contested).toEqual({ proposal_ref: ref, role: 'challenger', other_id: String(takes.weekly) });
-    expect((await takeById(takes.weekly))[0]!.contested).toEqual({ proposal_ref: ref, role: 'challenged', other_id: String(takes.daily) });
+    const challenger = await takeLabel(takes.daily);
+    expect(challenger).toEqual({ proposal_ref: ref, role: 'challenger', take_id: String(takes.weekly) });
+    expect(await takeLabel(takes.weekly)).toEqual({ proposal_ref: ref, role: 'challenged', take_id: String(takes.daily) });
+    expect((await takeById(Number(challenger!.take_id))).map(t => t.claim)).toEqual(['Alice Example ships weekly']);
+    await close(ref);
+  });
+
+  test('the other take outside the holder allow-list: the label without take_id', async () => {
+    const ref = await propose('supersede_take', 'takes', takes.dana, takes.seed);
+    const world: DispatchOpts = { remote: true, sourceId: 'default', takesHoldersAllowList: ['world'] };
+    expect(await takeLabel(takes.seed, world)).toEqual({ proposal_ref: ref, role: 'challenger' });
+    expect(await takeLabel(takes.seed)).toEqual({ proposal_ref: ref, role: 'challenger', take_id: String(takes.dana) });
+    await close(ref);
+  });
+
+  test('the other take outside the caller\'s granted sources: the label without take_id', async () => {
+    const ref = await propose('supersede_take', 'takes', takes.inB, takes.seed);
+    expect(await takeLabel(takes.seed, remote('default'))).toEqual({ proposal_ref: ref, role: 'challenger' });
+    expect(await takeLabel(takes.seed, remote('default', 'rb-b'))).toEqual({ proposal_ref: ref, role: 'challenger', take_id: String(takes.inB) });
+    await close(ref);
+  });
+
+  test('the other take below the min_trust floor: the label without take_id', async () => {
+    await setTier('takes', takes.seed, 'user_confirmed');
+    const ref = await propose('supersede_take', 'takes', takes.weekly, takes.seed);
+    expect(await takeLabel(takes.seed, local, { min_trust: 'user_confirmed' })).toEqual({ proposal_ref: ref, role: 'challenger' });
+    expect(await takeLabel(takes.seed)).toEqual({ proposal_ref: ref, role: 'challenger', take_id: String(takes.weekly) });
+    await close(ref);
   });
 });
 

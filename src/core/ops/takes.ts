@@ -11,6 +11,7 @@ import { MERGE_PRECONDITION_PARAMS, WRITE_REQUEST_PARAM } from '../persistence/p
 import { opError, type Operation, type OperationContext } from './contract.ts';
 import { MIN_TRUST_PARAM, resolveReadEligibility } from '../eligibility/policy.ts';
 import { stampRowTrust } from '../eligibility/stamp.ts';
+import { withContestedTakeIds } from '../takes-contested.ts';
 import { opTransport, paramUse } from './op-fix.ts';
 import {
   readPolicyOpts,
@@ -86,9 +87,11 @@ const takes_list: Operation = {
       throw opError('invalid_params', 'takes_list: id must be a positive integer (a take id as takes_list answers it).', 'Pass id as a whole number, e.g. 42, or omit it to list takes.');
     }
     const eligibility = await resolveReadEligibility(ctx, { minTrust: p.min_trust });
+    // #2200-class: honor federated/source scope (via the take's page.source_id). Per-token holder allow-list:
+    // a server-side filter for MCP-bound calls; local CLI callers leave it unset and see all holders.
+    const policy = { ...await readPolicyOpts(ctx), takesHoldersAllowList: readHolders(ctx), eligibility };
     const rows = await ctx.engine.listTakes({
-      // #2200-class: honor federated/source scope (via the take's page.source_id).
-      ...await readPolicyOpts(ctx),
+      ...policy,
       ...(typeof p.id === 'number' ? { id: p.id } : {}),
       page_slug: p.page_slug as string | undefined,
       holder: p.holder as string | undefined,
@@ -98,12 +101,9 @@ const takes_list: Operation = {
       sortBy: p.sort_by as never,
       limit: p.limit as number | undefined,
       offset: p.offset as number | undefined,
-      // Per-token allow-list — server-side filter for MCP-bound calls.
-      // Local CLI callers leave takesHoldersAllowList unset and see all holders.
-      takesHoldersAllowList: readHolders(ctx),
-      eligibility,
     });
-    return stampRowTrust(ctx.engine, 'takes', rows, r => r.id);
+    // A contested take names its proposal's other take (take_id) when this caller can read it (takes-contested.ts).
+    return withContestedTakeIds(ctx.engine, await stampRowTrust(ctx.engine, 'takes', rows, r => r.id), policy);
   },
   cliHints: { name: 'takes-list' },
 };

@@ -34,17 +34,16 @@ export interface TrustFields {
   contested?: Contested;
 }
 
-export interface Contested {
-  proposal_ref: string;
-  role: 'challenger' | 'challenged';
-  /** The id (as a string, like recall's `fact_id`) of the proposal's other row in the same table: the challenged row for a challenger, the challenger for a challenged row. */
-  other_id?: string;
-}
+/**
+ * fact_id / take_id: the other fact or take of the proposal (facts/trust-contested.ts, takes-contested.ts),
+ * set only for a caller that can read that row.
+ */
+export interface Contested { proposal_ref: string; role: 'challenger' | 'challenged'; fact_id?: string; take_id?: string }
 
-/** `tp12:challenger:345` (the contestedRefSql column) -> its Contested value; anything else -> undefined. */
+/** `tp12:challenger` (the contestedRefSql column) -> its Contested value; anything else -> undefined. */
 export function parseContested(value: unknown): Contested | undefined {
-  const m = typeof value === 'string' ? /^(tp\d+):(challenger|challenged)(?::(\d+))?$/.exec(value) : null;
-  return m ? { proposal_ref: m[1]!, role: m[2] as Contested['role'], ...(m[3] ? { other_id: m[3] } : {}) } : undefined;
+  const m = typeof value === 'string' ? /^(tp\d+):(challenger|challenged)$/.exec(value) : null;
+  return m ? { proposal_ref: m[1]!, role: m[2] as Contested['role'] } : undefined;
 }
 
 const ORIGIN_MAX = 40;

@@ -91,15 +91,12 @@ export function pageEligibleSql(alias: string, policy: ReadEligibility | undefin
 }
 
 /**
- * Plan A5: `tp<id>:challenger|challenged:<other id>` for the first pending
- * supersede proposal naming the row (as the new lower-tier row or the row it
- * would supersede), or NULL. The other id is the proposal's other row: its
- * target for the challenger, its related row for the challenged (left off
- * when the proposal names none). labels.ts `parseContested` reads it back.
+ * Plan A5: `tp<id>:challenger|challenged` for the first pending supersede
+ * proposal naming the row (as the new lower-tier row or the row it would
+ * supersede), or NULL. labels.ts `parseContested` reads it back.
  */
 export function contestedRefSql(table: Exclude<EligibilityTable, 'pages' | 'timeline_entries'>, alias: string): string {
-  return `(SELECT 'tp' || elig_tp.id::text || CASE WHEN elig_tp.related_table = '${table}' AND elig_tp.related_id = ${alias}.id
-      THEN ':challenger:' || elig_tp.target_id::text ELSE ':challenged' || COALESCE(':' || elig_tp.related_id::text, '') END
+  return `(SELECT 'tp' || elig_tp.id::text || ':' || CASE WHEN elig_tp.related_table = '${table}' AND elig_tp.related_id = ${alias}.id THEN 'challenger' ELSE 'challenged' END
     FROM trust_proposals elig_tp WHERE elig_tp.status = 'pending' AND elig_tp.action IN ('supersede_fact', 'supersede_take')
       AND ((elig_tp.target_table = '${table}' AND elig_tp.target_id = ${alias}.id) OR (elig_tp.related_table = '${table}' AND elig_tp.related_id = ${alias}.id))
     ORDER BY elig_tp.id LIMIT 1)`;

@@ -61,7 +61,7 @@ async function hit(engine: BrainEngine, needle: string) {
   const rows = (await engine.searchKeyword(needle, { limit: 20 })).filter(r => r.slug === SLUG && r.chunk_text.includes(needle));
   const stamped = await stampPageTrust(engine, rows.map(r => ({ ...r })));
   expect(stamped.length).toBeGreaterThan(0);
-  return stamped[0] as (typeof stamped)[number] & { unconfirmed?: true; contested?: { proposal_ref: string; role: string; other_id?: string } };
+  return stamped[0] as (typeof stamped)[number] & { unconfirmed?: true; contested?: { proposal_ref: string; role: string } };
 }
 
 for (const name of testBackends()) {
@@ -121,9 +121,9 @@ for (const name of testBackends()) {
          VALUES ('supersede_fact', $1, 'facts', $2, 'facts', $3, 'conflict_slot') RETURNING id`, [SOURCE, oldId, ids[1]]);
       const ref = `tp${Number(proposal!.id)}`;
       const labeled = await stampRowTrust(engine, 'facts', [{ id: ids[1]! }, { id: oldId }], r => r.id);
-      expect(labeled.map(r => r.contested)).toEqual([{ proposal_ref: ref, role: 'challenger', other_id: String(oldId) }, { proposal_ref: ref, role: 'challenged', other_id: String(ids[1]) }]);
+      expect(labeled.map(r => r.contested)).toEqual([{ proposal_ref: ref, role: 'challenger' }, { proposal_ref: ref, role: 'challenged' }]);
       const chunk = await hit(engine, 'zephyrflag');
-      expect(chunk.contested).toEqual({ proposal_ref: ref, role: 'challenger', other_id: String(oldId) });
+      expect(chunk.contested).toEqual({ proposal_ref: ref, role: 'challenger' });
 
       await engine.executeRaw(`UPDATE trust_proposals SET status = 'accepted', decided_at = now() WHERE id = $1`, [proposal!.id]);
       expect((await stampRowTrust(engine, 'facts', [{ id: ids[1]! }], r => r.id))[0]!.contested).toBeUndefined();

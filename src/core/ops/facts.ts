@@ -54,6 +54,7 @@ import { AUDIT_ROW_SOURCES } from '../facts/audit-sources.ts';
 import { parseSinceParam } from '../facts/since-parse.ts';
 import { mergeNewest, parseRecallOffset, readFactWindow, recallSourceWindow, type FactPage, type FactWindow } from '../facts/recall-page.ts';
 import { parseRecallFactId, readFactById } from '../facts/recall-fact-id.ts';
+import { withTrustContestedFacts } from '../facts/trust-contested.ts';
 import { parseQuestionParam, questionRecallNotices, rankFactsByQuestion, recallHintNotice, unlinkedNamesakes, type EntityCandidate, type QuestionRecall } from '../facts/question-recall.ts';
 
 // ============================================================
@@ -568,7 +569,7 @@ const recall: Operation = {
     const budgetPacking = recallBudgetPacking(p.budget_policy, queryText, budgetTokens, { rows, packedFacts, searchResults, packedResults }, recallResultCost(delivery));
 
     const out = {
-      facts: await withFactDateHeaders(ctx.engine, await stampRowTrust(ctx.engine, 'facts', packedFacts.map(r => ({ // #5575 A6: + trust_tier, origin, unconfirmed
+      facts: await withTrustContestedFacts(ctx.engine, await withFactDateHeaders(ctx.engine, await stampRowTrust(ctx.engine, 'facts', packedFacts.map(r => ({ // #5575 A6: + trust_tier, origin, unconfirmed
         id: r.id,
         fact: r.fact,
         kind: r.kind,
@@ -599,7 +600,7 @@ const recall: Operation = {
         fact_id: String(r.id),
         provenance: r.source, ...(r.attributed_to ? { attributed_to: r.attributed_to } : {}),
         ...(ranking ? { relevance: ranking.relevance.get(r.id) } : {}),
-      })), f => f.id)),
+      })), f => f.id)), factSources, { ...listOpts, activeOnly: true, grep: undefined }), // a contested row names its other fact only if this caller can read it
       total: packedFacts.length,
       facts_order: ranking ? 'relevance' : 'newest',
       ...(ranking?.degraded ? { facts_degraded: ranking.degraded } : {}),
