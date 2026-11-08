@@ -448,8 +448,10 @@ async function noneResult(ctx: OperationContext, page: Page, out: Record<string,
  */
 export async function readPartialBody(ctx: OperationContext, input: PartialReadInput, req: BodyRequest): Promise<Record<string, unknown>> {
   const { page, revision, tags, quarantined, trust, extras } = input;
+  // created_at / updated_at as the full read answers them (a Date serializes to its ISO string), so a windowed reader sees the same metadata.
   const base: Record<string, unknown> = {
     slug: page.slug, source_id: page.source_id, type: page.type, title: page.title, revision, tags,
+    created_at: page.created_at.toISOString(), updated_at: page.updated_at.toISOString(),
     frontmatter: page.frontmatter ?? {}, ...(page.deleted_at ? { deleted_at: page.deleted_at } : {}),
     ...(trust ?? {}), ...extras,
   };

@@ -1805,6 +1805,30 @@
           }
         ]
       },
+      "getFact": {
+        "allFilters": [
+          {
+            "paramCount": 7,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ],
+        "default": [
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ]
+      },
       "getFactsHealth": {
         "default": [
           {
@@ -5013,6 +5037,17 @@
         "default": [
           {
             "paramCount": 20,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ],
+        "id": [
+          {
+            "paramCount": 22,
             "unsafeOptions": {
               "cancelFence": false,
               "prepare": true,

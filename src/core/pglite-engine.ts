@@ -2484,6 +2484,10 @@ export class PGLiteEngine implements BrainEngine {
     return factsImpl.listFactsBySession(unscopedExecutor(this.engineSql, 'facts: unscoped on master (EO4 inventory)'), source_id, sessionId, opts);
   }
 
+  async getFact(source_id: string, id: number, opts?: FactListOpts): Promise<FactRow | null> {
+    return factsImpl.getFact(unscopedExecutor(this.engineSql, 'facts: unscoped on master (EO4 inventory)'), source_id, id, opts);
+  }
+
   async listSupersessions(
     source_id: string,
     opts?: { since?: Date; limit?: number; visibility?: ('private' | 'world')[]; eligibility?: import('./engine.ts').FactListOpts['eligibility']; excludePrivate?: boolean },

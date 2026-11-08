@@ -316,6 +316,8 @@ export interface Take {
 }
 
 export interface TakesListOpts extends PageReadPolicy {
+  /** This one take (takes.id); every other filter still applies. */
+  id?: number;
   page_id?: number;
   page_slug?: string;       // resolved via JOIN
   holder?: string;
@@ -2302,6 +2304,14 @@ export interface BrainEngine {
     sessionId: string,
     opts?: FactListOpts,
   ): Promise<FactRow[]>;
+
+  /**
+   * One fact by id within a source, or null when no row there with that id
+   * passes the same FactListOpts filters the list reads apply in SQL
+   * (activeOnly default true, visibility, excludePrivate, eligibility, ...).
+   * limit, offset, eventTime and fingerprint do not apply.
+   */
+  getFact(source_id: string, id: number, opts?: FactListOpts): Promise<FactRow | null>;
 
   /**
    * Audit log: facts that were superseded (superseded_by set), newest

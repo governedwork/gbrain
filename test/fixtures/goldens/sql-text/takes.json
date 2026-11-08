@@ -227,6 +227,37 @@
             "textSha256": "974ece0b8fa9166ba0b1462f293fc6e19c1952e1fccac100b957afd1d2ceccbb"
           }
         ],
+        "id": [
+          {
+            "lane": "pool",
+            "params": [
+              "number",
+              "null",
+              "null",
+              "null",
+              "null",
+              "null",
+              "null",
+              "null",
+              "null",
+              "boolean",
+              "boolean",
+              "null",
+              "null",
+              "null",
+              "null",
+              "null",
+              "string",
+              "string",
+              "string",
+              "string",
+              "number",
+              "number"
+            ],
+            "sql": "SELECT t.*, p.slug AS page_slug FROM takes t JOIN pages p ON p.id = t.page_id WHERE 1=1 AND t.id = $1 AND ($2::int IS NULL OR t.page_id = $3::int) AND ($4::text IS NULL OR p.slug = $5::text) AND ($6::text IS NULL OR t.holder = $7::text) AND ($8::text IS NULL OR t.kind = $9::text) AND ($10::boolean IS NULL OR t.active = $11::boolean) AND ( $12::boolean IS NULL OR ($13::boolean = true AND t.resolved_at IS NOT NULL) OR ($14::boolean = false AND t.resolved_at IS NULL) ) AND ( $15::text[] IS NULL OR t.holder = ANY($16::text[]) ) AND p.source_id = $17 ORDER BY CASE WHEN $18 = 'weight' THEN t.weight END DESC NULLS LAST, CASE WHEN $19 = 'since_date' THEN t.since_date END DESC NULLS LAST, CASE WHEN $20 = 'created_at' THEN t.created_at END DESC NULLS LAST LIMIT $21 OFFSET $22",
+            "textSha256": "21368e6b192803ec123f1e4eaa75fb99f25877a93853e40619c286f2492ca103"
+          }
+        ],
         "sourceId": [
           {
             "lane": "pool",

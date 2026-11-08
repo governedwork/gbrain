@@ -524,6 +524,28 @@ export async function listFactsBySession(
     return rows.map(rowToFact);
   }
 
+/**
+ * One fact by id within a source, under the same pre-LIMIT filters as
+ * listFactsSince (session, audit rows, grep, activeOnly with read-time TTL,
+ * unconsolidatedOnly, kinds, visibility, private provenance, eligibility),
+ * so a read by id never answers a row the caller's list reads hide.
+ */
+export async function getFact(exec: LegacyUnscopedRead, source_id: string, id: number, opts?: FactListOpts): Promise<FactRow | null> {
+  const activeOnly = opts?.activeOnly !== false;
+  const kinds = (opts?.kinds && opts.kinds.length > 0) ? opts.kinds : null;
+  const visibility = (opts?.visibility && opts.visibility.length > 0) ? opts.visibility : null;
+  const rows = (await exec.run<FactRowSqlShape>(sqlFragment`
+    SELECT * FROM facts
+    WHERE source_id = ${source_id}
+      AND id = ${id}${recallNarrowing(opts)}
+      ${activeOnly ? sqlFragment`AND expired_at IS NULL AND (valid_until IS NULL OR valid_until > now())` : sqlFragment``}
+      ${opts?.unconsolidatedOnly === true ? sqlFragment`AND consolidated_at IS NULL` : sqlFragment``}
+      ${kinds ? sqlFragment`AND kind = ANY(${kinds}::text[])` : sqlFragment``}
+      ${visibility ? sqlFragment`AND visibility = ANY(${visibility}::text[])` : sqlFragment``}${privacyClause(opts)}${eligibilityClause(opts)}
+  `)).rows;
+  return rows[0] ? rowToFact(rows[0]) : null;
+}
+
 export async function listSupersessions(
   exec: LegacyUnscopedRead,
     source_id: string,

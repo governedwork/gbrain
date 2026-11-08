@@ -2,8 +2,8 @@
   "golden": {
     "exitCode": 0,
     "stderr": "",
-    "stdoutBytes": 263145,
-    "stdoutSha256": "3b9d83429d0cf99311f4d091f1de8b286669379a7f8aad9a10276c5064c50121",
+    "stdoutBytes": 263552,
+    "stdoutSha256": "7d8c870d2823727a6e1e40a7c05a1fc878d6ce836f6b871e2c66fcafa980fa3a",
     "toolNames": [
       "remember",
       "entity",
@@ -4669,6 +4669,7 @@
         "parameters": {
           "active": "boolean?",
           "holder": "string?",
+          "id": "number?",
           "kind": "string?",
           "limit": "number?",
           "min_trust": "string?",
@@ -4687,6 +4688,10 @@
             "holder": {
               "description": "Filter to this holder (world|garry|brain|<slug>)",
               "type": "string"
+            },
+            "id": {
+              "description": "This one take (its id as takes_list answers it); the other filters still apply",
+              "type": "number"
             },
             "kind": {
               "description": "Filter to this kind (fact|take|bet|hunch)",
@@ -6486,6 +6491,7 @@
           "budget_policy": "string?",
           "budget_tokens": "number?",
           "entity": "string?",
+          "fact_id": "string?",
           "grep": "string?",
           "include_expired": "boolean?",
           "include_pending": "boolean?",
@@ -6518,6 +6524,10 @@
             },
             "entity": {
               "description": "Entity slug; its facts.",
+              "type": "string"
+            },
+            "fact_id": {
+              "description": "Read this one fact (facts[].fact_id); not with question, entity, since, session_id, supersessions or query.",
               "type": "string"
             },
             "grep": {

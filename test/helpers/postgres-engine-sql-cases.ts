@@ -119,7 +119,7 @@ export const DOMAIN_OF: Record<string, string> = {
   'getEmbeddingsByChunkIds': 'chunks', 'getChunksWithEmbeddings': 'chunks',
   // facts (incl. the ontology rows of the facts table)
   'insertFact': 'facts', 'expireFact': 'facts', 'insertFacts': 'facts', 'deleteFactsForPage': 'facts',
-  'listFactsByEntity': 'facts', 'listFactsSince': 'facts', 'listFactsKeyset': 'facts', 'listFactsBySession': 'facts', 'listSupersessions': 'facts',
+  'listFactsByEntity': 'facts', 'listFactsSince': 'facts', 'listFactsKeyset': 'facts', 'listFactsBySession': 'facts', 'getFact': 'facts', 'listSupersessions': 'facts',
   'countUnconsolidatedFacts': 'facts', 'findCandidateDuplicates': 'facts', 'consolidateFact': 'facts',
   'findTrajectory': 'facts', 'getFactsHealth': 'facts', 'migrateFactsToCanonical': 'facts',
   'mergeOntologyFact': 'facts', 'getOntology': 'facts', 'discoverOntologyDimensions': 'facts', 'findOntologyConflicts': 'facts',
@@ -633,6 +633,10 @@ export const SQL_CASES: SqlCase[] = [
     ['default', (e) => e.listFactsBySession(SRC, 's1')],
     ['allFilters', (e) => e.listFactsBySession(SRC, 's1', { activeOnly: false, unconsolidatedOnly: true, kinds: ['fact'], visibility: ['world'], excludeAuditRows: true, grep: 'acme' })],
   ]),
+  ...variants('getFact', [
+    ['default', (e) => e.getFact(SRC, 7)],
+    ['allFilters', (e) => e.getFact(SRC, 7, { sessionId: 's1', activeOnly: false, unconsolidatedOnly: true, kinds: ['fact'], visibility: ['world'], excludePrivate: true, excludeAuditRows: true, grep: 'acme' })],
+  ]),
   ...variants('listSupersessions', [
     ['default', (e) => e.listSupersessions(SRC)],
     ['since+visibility', (e) => e.listSupersessions(SRC, { since: EPOCH, visibility: ['world'] })],
@@ -685,6 +689,7 @@ export const SQL_CASES: SqlCase[] = [
     ['default', (e) => e.listTakes()],
     ['sourceId', (e) => e.listTakes({ sourceId: SRC })],
     ['sourceIds+excludePrivate', (e) => e.listTakes({ sourceIds: SRCS, excludePrivate: true, holder: 'alice-example', resolved: false, sortBy: 'weight' })],
+    ['id', (e) => e.listTakes({ id: 7, sourceId: SRC })],
   ]),
   ...variants('searchTakes', [
     ['default', (e) => e.searchTakes('acme')],

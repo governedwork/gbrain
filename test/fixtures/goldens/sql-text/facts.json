@@ -197,6 +197,35 @@
           }
         ]
       },
+      "getFact": {
+        "allFilters": [
+          {
+            "lane": "pool",
+            "params": [
+              "string",
+              "number",
+              "string",
+              "array<string>",
+              "string",
+              "array<string>",
+              "array<string>"
+            ],
+            "sql": "SELECT * FROM facts WHERE source_id = $1 AND id = $2 AND source_session = $3 AND source != ALL($4::text[]) AND fact ILIKE $5 ESCAPE '\\' AND consolidated_at IS NULL AND kind = ANY($6::text[]) AND visibility = ANY($7::text[]) AND NOT EXISTS (SELECT 1 FROM pages pp WHERE pp.source_id = facts.source_id AND pp.slug = facts.source_markdown_slug AND NOT (((COALESCE(pp.frontmatter->>'visibility', CASE WHEN (pp.type IN ('atom', 'question') OR (pp.type = 'concept' AND pp.frontmatter->>'synthesized_by' IS NOT NULL)) THEN 'private' ELSE 'world' END) <> 'private' AND NOT COALESCE(pp.frontmatter ? 'pinned_question', false)) AND NOT (CASE WHEN pp.type = 'atom' THEN EXISTS (SELECT 1 FROM pages derived_origin WHERE derived_origin.source_id = pp.source_id AND derived_origin.slug = pp.frontmatter->>'source_slug' AND derived_origin.frontmatter->>'visibility' = 'private') WHEN (pp.type IN ('atom', 'question') OR (pp.type = 'concept' AND pp.frontmatter->>'synthesized_by' IS NOT NULL)) THEN EXISTS (SELECT 1 FROM links derived_input_link JOIN pages derived_input ON derived_input.id = derived_input_link.to_page_id WHERE derived_input_link.from_page_id = pp.id AND derived_input_link.link_source = 'concept-provenance' AND derived_input_link.link_type = 'synthesized_from' AND (COALESCE(derived_input.frontmatter->>'visibility', CASE WHEN derived_input.type = 'atom' THEN 'private' ELSE 'world' END) = 'private' OR EXISTS (SELECT 1 FROM pages derived_input_origin WHERE derived_input_origin.source_id = derived_input.source_id AND derived_input_origin.slug = derived_input.frontmatter->>'source_slug' AND derived_input_origin.frontmatter->>'visibility' = 'private'))) WHEN pp.type = 'event' AND pp.frontmatter->>'captured_via' LIKE 'life-chronicle:%' THEN NOT EXISTS (SELECT 1 FROM pages chronicle_origin WHERE chronicle_origin.source_id = pp.source_id AND chronicle_origin.slug = pp.frontmatter->'event'->>'depth' AND (COALESCE(chronicle_origin.frontmatter->>'visibility', CASE WHEN (chronicle_origin.type IN ('atom', 'question') OR (chronicle_origin.type = 'concept' AND chronicle_origin.frontmatter->>'synthesized_by' IS NOT NULL)) THEN 'private' ELSE 'world' END) <> 'private' AND NOT COALESCE(chronicle_origin.frontmatter ? 'pinned_question', false)) AND NOT (CASE WHEN jsonb_typeof(chronicle_origin.frontmatter->'derived_from') IN ('array', 'string') THEN EXISTS ( SELECT 1 FROM pages declared_origin WHERE declared_origin.source_id = chronicle_origin.source_id AND declared_origin.frontmatter->>'visibility' = 'private' AND declared_origin.slug = ANY(ARRAY( SELECT regexp_replace(declared.slug, '\\.md$', '') FROM jsonb_array_elements_text( CASE WHEN jsonb_typeof(chronicle_origin.frontmatter->'derived_from') = 'array' THEN chronicle_origin.frontmatter->'derived_from' ELSE jsonb_build_array(chronicle_origin.frontmatter->'derived_from') END) AS declared(slug)))) ELSE false END)) ELSE false END) AND NOT (CASE WHEN jsonb_typeof(pp.frontmatter->'derived_from') IN ('array', 'string') THEN EXISTS ( SELECT 1 FROM pages declared_origin WHERE declared_origin.source_id = pp.source_id AND declared_origin.frontmatter->>'visibility' = 'private' AND declared_origin.slug = ANY(ARRAY( SELECT regexp_replace(declared.slug, '\\.md$', '') FROM jsonb_array_elements_text( CASE WHEN jsonb_typeof(pp.frontmatter->'derived_from') = 'array' THEN pp.frontmatter->'derived_from' ELSE jsonb_build_array(pp.frontmatter->'derived_from') END) AS declared(slug)))) ELSE false END))))",
+            "textSha256": "010feec31575beaf81377c0edfd70ddd3b8d1d9a0c9ed7c25a8ed7c23d68c97c"
+          }
+        ],
+        "default": [
+          {
+            "lane": "pool",
+            "params": [
+              "string",
+              "number"
+            ],
+            "sql": "SELECT * FROM facts WHERE source_id = $1 AND id = $2 AND expired_at IS NULL AND (valid_until IS NULL OR valid_until > now())",
+            "textSha256": "92bec1896b62d17aa25a0037530ea8ee88a37e6e3671020a7c5104c05a76277a"
+          }
+        ]
+      },
       "getFactsHealth": {
         "default": [
           {

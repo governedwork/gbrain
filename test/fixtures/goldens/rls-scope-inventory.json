@@ -1050,6 +1050,28 @@
         ],
         "flagOnScopes": []
       },
+      "getFact#allFilters": {
+        "flagOffLanes": [
+          "pool"
+        ],
+        "flagOffOpensTransaction": false,
+        "flagOn": "unscoped",
+        "flagOnLanes": [
+          "pool"
+        ],
+        "flagOnScopes": []
+      },
+      "getFact#default": {
+        "flagOffLanes": [
+          "pool"
+        ],
+        "flagOffOpensTransaction": false,
+        "flagOn": "unscoped",
+        "flagOnLanes": [
+          "pool"
+        ],
+        "flagOnScopes": []
+      },
       "getFactsHealth#default": {
         "flagOffLanes": [
           "pool"
@@ -2372,6 +2394,17 @@
         ],
         "flagOnScopes": []
       },
+      "listTakes#id": {
+        "flagOffLanes": [
+          "pool"
+        ],
+        "flagOffOpensTransaction": false,
+        "flagOn": "unscoped",
+        "flagOnLanes": [
+          "pool"
+        ],
+        "flagOnScopes": []
+      },
       "listTakes#sourceId": {
         "flagOffLanes": [
           "pool"
@@ -3659,6 +3692,7 @@
         "getEdgesByChunk": "none",
         "getEffectiveDates": "none",
         "getEmbeddingsByChunkIds": "none",
+        "getFact": "none",
         "getFactsHealth": "none",
         "getFile": "none",
         "getHealth": "via:countStalePagesForExtraction",
