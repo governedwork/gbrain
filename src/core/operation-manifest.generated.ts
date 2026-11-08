@@ -3866,6 +3866,10 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
     "description": "List takes (typed/weighted/attributed claims) filtered by holder/kind/active/etc.",
     "scope": "read",
     "params": {
+      "id": {
+        "type": "number",
+        "description": "This one take (its id as takes_list answers it); the other filters still apply"
+      },
       "page_slug": {
         "type": "string",
         "description": "Filter to this page"
@@ -5507,6 +5511,11 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
         "type": "number",
         "default": 0,
         "description": "Skip first N facts of the ordered list; page with limit.",
+        "fullSurfaceOnly": true
+      },
+      "fact_id": {
+        "type": "string",
+        "description": "Read this one fact (facts[].fact_id); not with question, entity, since, session_id, supersessions or query.",
         "fullSurfaceOnly": true
       },
       "grep": {

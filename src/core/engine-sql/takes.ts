@@ -308,7 +308,7 @@ export async function listTakes(exec: LegacyUnscopedRead, opts: TakesListOpts = 
       FROM takes t
       JOIN pages p ON p.id = t.page_id
       WHERE 1=1
-        ${opts.excludePrivate ? trustedSql(`AND ${privatePagesFilterFragment('p')}`) : sqlFragment``}
+        ${opts.excludePrivate ? trustedSql(`AND ${privatePagesFilterFragment('p')}`) : sqlFragment``}${opts.id !== undefined ? sqlFragment` AND t.id = ${opts.id}` : sqlFragment``}
         AND (${opts.page_id ?? null}::int   IS NULL OR t.page_id = ${opts.page_id ?? null}::int)
         AND (${opts.page_slug ?? null}::text IS NULL OR p.slug   = ${opts.page_slug ?? null}::text)
         AND (${opts.holder ?? null}::text   IS NULL OR t.holder  = ${opts.holder ?? null}::text)

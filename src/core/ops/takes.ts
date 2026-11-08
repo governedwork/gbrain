@@ -70,6 +70,7 @@ const takes_list: Operation = {
   description: 'List takes (typed/weighted/attributed claims) filtered by holder/kind/active/etc.',
   scope: 'read',
   params: {
+    id: { type: 'number', description: 'This one take (its id as takes_list answers it); the other filters still apply' },
     page_slug: { type: 'string', description: 'Filter to this page' },
     holder: { type: 'string', description: 'Filter to this holder (world|garry|brain|<slug>)' },
     kind: { type: 'string', description: 'Filter to this kind (fact|take|bet|hunch)' },
@@ -81,10 +82,14 @@ const takes_list: Operation = {
     min_trust: MIN_TRUST_PARAM,
   },
   handler: async (ctx, p) => {
+    if (p.id !== undefined && p.id !== null && !(typeof p.id === 'number' && Number.isSafeInteger(p.id) && p.id > 0)) {
+      throw opError('invalid_params', 'takes_list: id must be a positive integer (a take id as takes_list answers it).', 'Pass id as a whole number, e.g. 42, or omit it to list takes.');
+    }
     const eligibility = await resolveReadEligibility(ctx, { minTrust: p.min_trust });
     const rows = await ctx.engine.listTakes({
       // #2200-class: honor federated/source scope (via the take's page.source_id).
       ...await readPolicyOpts(ctx),
+      ...(typeof p.id === 'number' ? { id: p.id } : {}),
       page_slug: p.page_slug as string | undefined,
       holder: p.holder as string | undefined,
       kind: p.kind as never,

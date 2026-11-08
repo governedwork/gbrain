@@ -53,6 +53,7 @@ import type { TrustTier } from '../trust/tier.ts';
 import { AUDIT_ROW_SOURCES } from '../facts/audit-sources.ts';
 import { parseSinceParam } from '../facts/since-parse.ts';
 import { mergeNewest, parseRecallOffset, readFactWindow, recallSourceWindow, type FactPage, type FactWindow } from '../facts/recall-page.ts';
+import { parseRecallFactId, readFactById } from '../facts/recall-fact-id.ts';
 import { parseQuestionParam, questionRecallNotices, rankFactsByQuestion, recallHintNotice, unlinkedNamesakes, type EntityCandidate, type QuestionRecall } from '../facts/question-recall.ts';
 
 // ============================================================
@@ -287,6 +288,7 @@ const recall: Operation = {
     supersessions: { type: 'boolean', description: 'Supersession log only.' },
     limit: { type: 'number', description: 'Per-arm max (default 50, cap 100).' },
     offset: { type: 'number', default: 0, description: 'Skip first N facts of the ordered list; page with limit.', fullSurfaceOnly: true },
+    fact_id: { type: 'string', description: 'Read this one fact (facts[].fact_id); not with question, entity, since, session_id, supersessions or query.', fullSurfaceOnly: true },
     grep: { type: 'string', description: 'Text substring.' },
     include_pending: { type: 'boolean', description: 'Pending count.' },
     return_unit: { type: 'string', enum: ['chunk', 'window', 'section', 'page', 'auto'], description: 'results[] unit (see search).' },
@@ -358,6 +360,7 @@ const recall: Operation = {
     let rows: FactRows = [];
     let ambiguousEntity: EntityCandidate[] | null = null;
 
+    const factId = parseRecallFactId(p); // recall-fact-id.ts: one fact by id, an arm of its own
     // `since` is parsed once, up front, and a value that does not parse is
     // rejected instead of silently widening the window: a caller that asked
     // for "facts since T" must never receive every fact (or none) because
@@ -386,7 +389,9 @@ const recall: Operation = {
       excludeAuditRows: true, eligibility,
     };
 
-    if (question !== null) {
+    if (factId !== null) {
+      rows = await readFactById(ctx.engine, factSources, factId, listOpts, page);
+    } else if (question !== null) {
       ranking = await rankFactsByQuestion(ctx, { question, params: p, factSources, limit, entity: entityParam, sessionId: sessionParam, since, grep, includeExpired,
         scope: { sourceIds: factSources, remote: ctx.remote !== false, excludePrivate, minTrust: eligibility.floor, suppressFlagged: eligibility.suppressFlagged } });
       ({ rows, ambiguousEntity } = ranking);
