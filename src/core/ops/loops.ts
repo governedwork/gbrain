@@ -412,7 +412,7 @@ const open_loops: Operation = {
     status: { type: 'string', enum: ['open', 'done', 'dropped', 'stale'], description: "Default 'open', except with `id`, where any status matches." },
     id: { type: 'number', description: 'Fetch the single loop with this id (ids come from earlier open_loops results). Matches any status unless `status` is passed; the source scope still applies, and the grouped view omits `text`.' },
     loop_type: { type: 'string', enum: ['commitment_owed_by_me', 'commitment_owed_to_me', 'unanswered_inbound', 'unanswered_outbound', 'decision_pending'], description: 'Filter to one loop type.' },
-    counterparty: { type: 'string', description: 'Filter to one counterparty (slug or email).' },
+    counterparty: { type: 'string', description: 'Filter to one counterparty (slug or email). Remote callers: a slug matches only a page inside their grant.' },
     limit: { type: 'number', description: 'Grouped: max groups (default 3). Flat: max loops (default 50). The internal fetch is capped at 500 rows; `truncated: true` marks a hit.' },
     include_context: { type: 'boolean', description: 'Attach the counterparty entity card per group (trusted local only). Default true.' },
     source_id: { type: 'string', description: "Scope to one source (e.g. the google source, when the caller's transport is bound elsewhere). Remote callers must hold a grant covering it." },
@@ -474,7 +474,13 @@ const open_loops: Operation = {
         { fix: sourcesFix('Lists the sources this connection can read.') },
       );
     }
-    const loops = await listOpenLoops(ctx.engine, {
+    // A counterparty page is named only from inside the caller's grant (fork patch). Sync resolves a
+    // correspondent to a person page in ANY source (google/counterparty.ts), so a remote caller granted the mail
+    // source would otherwise learn a page's slug and source outside its grant. The grant, not the narrowed scope,
+    // decides: a page in another granted source is the caller's to read.
+    const nameable = counterpartyNameable(ctx, trusted);
+    const loops = (await listOpenLoops(ctx.engine, {
+      ...(nameable ? { counterpartySourceIds: [...nameable] } : {}),
       ...(scope.sourceIds ? { sourceIds: scope.sourceIds } : {}),
       ...(scope.sourceId ? { sourceIds: [scope.sourceId] } : {}),
       status,
@@ -482,7 +488,7 @@ const open_loops: Operation = {
       ...(p.counterparty ? { counterparty: p.counterparty as string } : {}),
       ...(loopId === undefined ? {} : { loopId }),
       limit: 500,
-    });
+    })).map((l) => withinGrant(l, nameable));
     const freshness = await googleSourceFreshness(ctx, scope);
     const noGoogleSources = freshness.sources.length === 0;
     const partialStaleSources = freshness.stale ? [] : freshness.staleSources;
@@ -624,6 +630,19 @@ function requestedLoopId(ctx: OperationContext, raw: unknown): number | undefine
   if (typeof raw === 'number' && Number.isSafeInteger(raw) && raw >= 1) return raw;
   throw invalidParam(ctx, 'open_loops', 'id', 'open_loops: id must be a whole number of 1 or more.',
     { def: open_loops.params.id, example: 42 });
+}
+
+/** The sources a remote caller may see a counterparty page named in: its grant. null = trusted local, any source. */
+function counterpartyNameable(ctx: OperationContext, trusted: boolean): ReadonlySet<string> | null {
+  if (trusted) return null;
+  const grant = sourceScopeOpts(ctx);
+  return new Set(grant.sourceIds ?? (grant.sourceId ? [grant.sourceId] : []));
+}
+
+/** A loop whose counterparty page sits outside `nameable` is shown by its email alone: slug and source withheld. */
+function withinGrant(l: OpenLoopRow, nameable: ReadonlySet<string> | null): OpenLoopRow {
+  if (!nameable || !l.counterparty_slug || nameable.has(l.counterparty_source_id ?? l.source_id)) return l;
+  return { ...l, counterparty_slug: null, counterparty_source_id: null };
 }
 
 function grantedSources(ctx: OperationContext): string[] {
