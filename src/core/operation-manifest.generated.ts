@@ -6630,7 +6630,7 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
       },
       "counterparty": {
         "type": "string",
-        "description": "Filter to one counterparty (slug or email)."
+        "description": "Filter to one counterparty (slug or email). Remote callers: a slug matches only a page inside their grant."
       },
       "limit": {
         "type": "number",
