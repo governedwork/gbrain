@@ -15,7 +15,7 @@ import { cancelWriteRequest } from '../src/core/persistence/control.ts';
 import { declarePersistenceProtocol } from '../src/core/persistence/protocol.ts';
 import { withCoordinatedWrite } from '../src/core/persistence/context.ts';
 import { TEST_WRITE_ATTRIBUTION } from './helpers/write-attribution.ts';
-import { getSharedSkill, getSharedSkillAsset, listSharedSkills } from '../src/core/shared-skills/catalog.ts';
+import { assetText, getSharedSkill, getSharedSkillAsset, listSharedSkills } from '../src/core/shared-skills/catalog.ts';
 import { getSharedSkillPolicy, setSharedSkillPolicy as approvePolicy } from '../src/core/shared-skills/policy.ts';
 import { normalizeSkillFiles } from '../src/core/shared-skills/manifest.ts';
 import type { SharedSkillPolicy, SharedSkillFileInput } from '../src/core/shared-skills/model.ts';
@@ -95,6 +95,9 @@ test('sealed revision, exact assets, CAS replay and tombstone use the real canon
   expect(readFileSync(join(f.root, asset), 'utf8')).toBe('Fixture reference');
   const downloaded = await getSharedSkillAsset(f.reader, { ...initial, path: asset });
   expect(Buffer.from(downloaded.content, 'base64').toString()).toBe('Fixture reference');
+  // Published without a media_type, the file is application/octet-stream: no text form is offered.
+  expect(downloaded.media_type).toBe('application/octet-stream');
+  expect('text' in downloaded).toBe(false);
   await disposePersistenceConsumer(f.engine);
   expect((await submitSharedSkillMutation(f.editor, 'put_skill', params)).revision).toBe(result.revision);
   await expect(submitSharedSkillMutation(f.editor, 'put_skill', { ...params, files: [prose('alpha', 'Changed')] })).rejects.toMatchObject({ code: 'idempotency_conflict' });
@@ -570,6 +573,39 @@ test.skipIf(!postgresUrl)('Postgres retention serializes delivery issuance again
   await expect(f.engine.transaction(tx => insertBatch(tx, 101))).rejects.toMatchObject({ code: '23503' });
   expect((await f.engine.executeRaw('SELECT revision FROM shared_skill_revision_leases WHERE revision=$1::uuid', [old.revision])).length).toBe(0);
 }, postgresUrl), 120_000);
+
+test('get_skill_asset returns a textual file as UTF-8 text beside the unchanged base64 content', () => fixture(async f => {
+  const md = 'skills/conventions/business-capability.md';
+  const bin = 'skills/alpha/assets/example.bin';
+  const markdown = '# Convention\n\nÅtta rader på svenska — med “citat”.\n';
+  const files: SharedSkillFileInput[] = [prose('alpha', 'Read the convention.', [md, bin]),
+    { path: md, content: markdown, file_class: 'reference', media_type: 'text/markdown' },
+    { path: bin, content: 'AAECAw==', encoding: 'base64', file_class: 'asset', media_type: 'text/plain' }];
+  await setSharedSkillPolicy(f.local, 'default', fullPolicy);
+  await put(f.editor, 'alpha', files);
+  const detail = await getSharedSkill(f.reader, { name: 'alpha' });
+  const text = await getSharedSkillAsset(f.reader, { ...detail, path: md });
+  expect(text.text).toBe(markdown);
+  expect(text.encoding).toBe('base64');
+  expect(Buffer.from(text.content, 'base64').toString('utf8')).toBe(markdown);
+  // A file labelled text whose bytes are not text (NUL bytes) keeps only its base64 content.
+  const binary = await getSharedSkillAsset(f.reader, { ...detail, path: bin });
+  expect(binary.content).toBe('AAECAw==');
+  expect('text' in binary).toBe(false);
+}), 120_000);
+
+test('assetText decodes only textual media types holding valid UTF-8', () => {
+  const b64 = (s: string | Uint8Array) => Buffer.from(s).toString('base64');
+  for (const type of ['text/markdown', 'text/plain', 'TEXT/CSV', 'application/json', 'application/ld+json', 'application/yaml', 'application/x-yaml', 'application/vnd.api+yaml']) {
+    expect(assetText(type, b64('é ok'))).toBe('é ok');
+  }
+  for (const type of ['application/octet-stream', 'image/png', 'application/pdf', 'application/javascript']) {
+    expect(assetText(type, b64('plain'))).toBeUndefined();
+  }
+  expect(assetText('text/plain', b64(new Uint8Array([0xc3, 0x28])))).toBeUndefined();
+  expect(assetText('text/plain', b64(new Uint8Array([0x61, 0x00, 0x62])))).toBeUndefined();
+  expect(assetText('text/plain', '')).toBe('');
+});
 
 test.skipIf(!postgresUrl)('Postgres parity: canonical bundle, exact immutable asset and replay', () => fixture(async f => {
   await setSharedSkillPolicy(f.local, 'default', fullPolicy);
