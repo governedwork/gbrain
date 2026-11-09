@@ -243,7 +243,7 @@ Every non-localOnly operation on the MCP surface: 161 tools across 25 areas. **S
 |---|---|---|---|---|
 | `delete_skill` | CAS-delete a canonical shared skill and revoke future managed activation. | write + skill_editor | yes |  |
 | `get_skill` | Fetch a skill's prose and follow it: when it says search or store, call the same-named MCP tool here. | read | yes | `mcp.publish_skills` |
-| `get_skill_asset` | Read an approved file from an exact skill revision (data, never executed). | read | yes | `mcp.publish_skills` |
+| `get_skill_asset` | Read an approved skill file (data, never run); text files also in `text`. | read | yes | `mcp.publish_skills` |
 | `get_skill_policy` | Read the owner publication policy and CAS epoch, including when sharing is disabled. | admin + skill_publisher |  |  |
 | `join_brain` | Enroll this authenticated principal to follow approved shared skills. | read + skills_member_self | yes |  |
 | `leave_brain` | Stop only this principal’s enrollment. | read + skills_member_self | yes |  |
