@@ -2715,7 +2715,7 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
   },
   {
     "name": "get_skill_asset",
-    "description": "Read an approved file from an exact skill revision (data, never executed).",
+    "description": "Read an approved skill file (data, never run); text files also in `text`.",
     "mutating": false,
     "idempotent": true,
     "outputRedaction": {

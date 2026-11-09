@@ -144,7 +144,7 @@ const sharedSkillMutationParams: Operation['params'] = {
   expected_revision: { type: 'string', description: 'Current revision UUID; JSON null for creation.' },
 };
 const get_skill_asset: Operation = {
-  name: 'get_skill_asset', description: 'Read an approved file from an exact skill revision (data, never executed).',
+  name: 'get_skill_asset', description: 'Read an approved skill file (data, never run); text files also in `text`.',
   mutating: false,
   idempotent: true,
   outputRedaction: { exempt: 'skill catalog files are installed instructions read verbatim; redaction would corrupt approved revisions' },
