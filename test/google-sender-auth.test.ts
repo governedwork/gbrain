@@ -197,7 +197,7 @@ describe('senderAuthFromHeaders: sender text inside Gmail\'s header cannot add a
     expect(readAuth([ar('mx.google.com; dmarc=fail header.from=example.com;dkim=pass header.d=example.com')])).toEqual(NO_SENDER_AUTH);
   });
 
-  test('a quoted string (a sender-chosen local part) makes the whole header read none', () => {
+  test('a quoted local part (`"…"@domain`, sender-chosen) makes the whole header read none; its `;` adds no result', () => {
     const injected = ar(
       'mx.google.com; spf=fail smtp.mailfrom="a; dkim=pass header.d=bank.example.org; dmarc=pass x"@example.org; dmarc=fail header.from=bank.example.org',
     );
@@ -225,6 +225,72 @@ describe('senderAuthFromHeaders: sender text inside Gmail\'s header cannot add a
     expect(readAuth([ar(
       'mx.google.com; dkim=pass (test mode) header.i=@example.com header.s=s1 header.b=Zz; spf=pass (google.com: best guess record) smtp.mailfrom=x@example.com; dmarc=pass (p=NONE sp=NONE dis=NONE) header.from=example.com',
     )])).toEqual(ALL_PASS);
+  });
+});
+
+// Gmail quotes a property value holding an RFC 2045 tspecial (e.g. `/` in a DKIM
+// `header.b`). The shape below is a real Gmail header (2026-11-10), names replaced.
+const GMAIL_AR_QUOTED =
+  'mx.google.com;\r\n' +
+  '       dkim=pass header.i=@example.com header.s=google header.b="XW/fE9NY";\r\n' +
+  '       spf=pass (google.com: domain of alice@example.com designates 209.85.220.41 as permitted sender) smtp.mailfrom=alice@example.com;\r\n' +
+  '       dmarc=pass (p=QUARANTINE sp=QUARANTINE dis=NONE) header.from=example.com;\r\n' +
+  '       dara=neutral header.i=@example.org';
+
+describe('senderAuthFromHeaders: quoted property values (RFC 8601 §2.2)', () => {
+  test("Gmail's quoted header.b reads pass, like the same header unquoted; its trailing dara is tolerated", () => {
+    expect(readAuth([ar(GMAIL_AR_QUOTED)], 'alice@example.com')).toEqual(ALL_PASS);
+    expect(readAuth([ar(GMAIL_AR_QUOTED.replace('"XW/fE9NY"', 'S2Fst0ua'))], 'alice@example.com')).toEqual(ALL_PASS);
+  });
+
+  test('a `;` or `(` inside a quoted value neither splits the header nor opens a comment', () => {
+    // Split at the inner `;`, this would read a repeated dmarc (none); as one value it is Gmail's pass.
+    const v = readAuth([ar(
+      'mx.google.com; dkim=pass header.d=example.com header.b="x; dmarc=fail header.from=example.org (y"; spf=pass smtp.mailfrom=x@example.com; dmarc=pass header.from=example.com',
+    )]);
+    expect(v).toEqual(ALL_PASS);
+  });
+
+  test('a quoted value is unescaped (RFC 5322 quoted-pair) and lower-cased like a token', () => {
+    expect(readAuth([ar(
+      'mx.google.com; dkim=pass header.d="Exa\\mple.COM" header.b="a\\"b\\\\c;d"; spf=pass; dmarc=pass header.from="example.com"',
+    )])).toEqual(ALL_PASS);
+  });
+
+  test('an unbalanced quote reads none', () => {
+    expect(readAuth([ar('mx.google.com; dkim=pass header.d=example.com header.b="XW/fE9NY; spf=pass; dmarc=pass header.from=example.com')])).toEqual(NO_SENDER_AUTH);
+    expect(readAuth([ar('mx.google.com; dkim=pass header.d=example.com header.b="a\\"; spf=pass; dmarc=pass header.from=example.com')])).toEqual(NO_SENDER_AUTH);
+    expect(readAuth([ar('mx.google.com; dkim=pass header.d=example.com header.b="a\\')])).toEqual(NO_SENDER_AUTH);
+  });
+
+  test('a quoted method result, method or `none` reads none', () => {
+    expect(readAuth([ar('mx.google.com; dkim="pass" header.d=example.com; spf=pass; dmarc=pass header.from=example.com')])).toEqual(NO_SENDER_AUTH);
+    expect(readAuth([ar('mx.google.com; dkim=pass header.d=example.com; spf=pass; dmarc="pass" header.from=example.com')])).toEqual(NO_SENDER_AUTH);
+    expect(readAuth([ar('mx.google.com; "dkim"=pass header.d=example.com')])).toEqual(NO_SENDER_AUTH);
+  });
+
+  test('a quoted string in the authserv-id segment reads none', () => {
+    expect(readAuth([ar('mx.google.com v="1"; dkim=pass header.d=example.com; spf=pass; dmarc=pass header.from=example.com')])).toEqual(NO_SENDER_AUTH);
+  });
+
+  test('a backslash outside a quoted string reads none, in a value or a comment', () => {
+    expect(readAuth([ar('mx.google.com; dkim=pass header.d=exam\\ple.com; spf=pass; dmarc=pass header.from=example.com')])).toEqual(NO_SENDER_AUTH);
+    expect(readAuth([ar('mx.google.com; dkim=pass header.d=example.com; spf=pass (a\\b); dmarc=pass header.from=example.com')])).toEqual(NO_SENDER_AUTH);
+  });
+
+  test('a quote that is not a whole property value reads none', () => {
+    const base = (prop: string) =>
+      `mx.google.com; dkim=pass header.d=example.com ${prop}; spf=pass; dmarc=pass header.from=example.com`;
+    expect(readAuth([ar(base('header.b="ab"cd'))])).toEqual(NO_SENDER_AUTH); // text glued after the quote
+    expect(readAuth([ar(base('header.b="ab""cd"'))])).toEqual(NO_SENDER_AUTH); // two quoted strings
+    expect(readAuth([ar(base('header.b=a"b"'))])).toEqual(NO_SENDER_AUTH); // a quote inside a token
+    expect(readAuth([ar(base('"ab"'))])).toEqual(NO_SENDER_AUTH); // a bare quoted word
+    expect(readAuth([ar(base('header.b= "ab"'))])).toEqual(NO_SENDER_AUTH); // a quoted word after an empty value
+    expect(readAuth([ar(base('(a "b" c) header.b=x'))])).toEqual(NO_SENDER_AUTH); // a quote inside a comment
+  });
+
+  test('a control character inside a quoted value reads none', () => {
+    expect(readAuth([ar('mx.google.com; dkim=pass header.d=example.com header.b="a\u0000b"; spf=pass; dmarc=pass header.from=example.com')])).toEqual(NO_SENDER_AUTH);
   });
 });
 

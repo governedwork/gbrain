@@ -11,12 +11,20 @@
  * Gmail's, so only the TOPMOST header under `mx.google.com` counts (Gmail
  * prepends; a copy the sender wrote sits below it) and every other copy is
  * ignored. The topmost one also carries sender-chosen text (the envelope
- * sender, the From domain), so it is read strictly: a quoted string, a
- * backslash, an unbalanced comment, a token outside the `method=result` /
- * `ptype.property=value` grammar or a repeated spf/dmarc result makes the
- * whole header read `none`, and so does a `dkim` result after `spf` or
- * `dmarc` (Gmail writes dkim first). Any doubt reads `none`, never `pass`,
- * and a malformed topmost header never falls through to a lower copy.
+ * sender, the From domain), so it is read strictly. A property value may be
+ * an RFC 2045 quoted-string where RFC 8601 §2.2 allows one (`value = token /
+ * quoted-string`): Gmail quotes a value holding a tspecial, e.g.
+ * `header.b="XW/fE9NY"`, so `ptype.property="…"` reads as the unquoted text
+ * (RFC 5322 quoted-pairs `\"` and `\\` unescaped), and a `;` or `(` inside it
+ * neither splits the header nor opens a comment. Everything else is refused:
+ * a quoted string anywhere else (a method or its result, the authserv-id, a
+ * comment, `"…"@domain`, text glued to a quote), an unbalanced quote, a
+ * backslash outside a quoted string, an unbalanced comment, a token outside
+ * the `method=result` / `ptype.property=value` grammar or a repeated
+ * spf/dmarc result makes the whole header read `none`, and so does a `dkim`
+ * result after `spf` or `dmarc` (Gmail writes dkim first). Any doubt reads
+ * `none`, never `pass`, and a malformed topmost header never falls through to
+ * a lower copy.
  *
  * `dmarc` reads `pass` only when Gmail's `header.from` is the domain of the
  * From address GBrain parsed for the same message: a DMARC pass is a verdict
@@ -60,6 +68,10 @@ const DMARC = verdicts<DmarcVerdict>(['pass', 'fail', 'none', 'temperror', 'perm
 
 const METHOD_RE = /^([a-z0-9-]+)(?:\/[0-9]+)?=([a-z0-9-]+)$/;
 const PROPERTY_RE = /^([a-z0-9-]+\.[a-z0-9_.-]+)=(\S*)$/;
+/** The text before a quoted property value: `ptype.property=` and nothing else. */
+const QUOTED_PROPERTY_RE = /^([a-z0-9-]+\.[a-z0-9_.-]+)=$/;
+/** Control characters RFC 5322 qtext and quoted-pair exclude (folding whitespace aside). */
+const QUOTED_CTL_RE = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/;
 const DOMAIN_RE = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
 
 interface ResInfo {
@@ -68,25 +80,71 @@ interface ResInfo {
   props: Map<string, string>;
 }
 
-/** Comments dropped and `;`-split; null when the text is not plainly RFC 8601 (quotes, escapes, unbalanced comments). */
-function segments(value: string): string[] | null {
-  if (/["\\]/.test(value)) return null;
-  const out: string[] = [];
-  let cur = '';
+/**
+ * A whitespace-separated word of a segment: its unquoted text and, when it ends in a
+ * quoted-string, that string's unescaped content. The lexer admits a quoted-string only
+ * right after the `=` of a word and only as the word's end; `parseResults` decides
+ * where the grammar allows it (a property value only).
+ */
+interface Word {
+  plain: string;
+  quoted: string | null;
+}
+
+/**
+ * Comments dropped and `;`-split into words; null when the text is not plainly RFC 8601:
+ * a backslash outside a quoted string, a quote inside a comment, an unbalanced quote or
+ * comment, a quote that does not follow `=` or text glued after a closing quote.
+ */
+function segments(value: string): Word[][] | null {
+  const out: Word[][] = [];
+  let words: Word[] = [];
+  let word: Word | null = null;
   let depth = 0;
-  for (const c of value) {
-    if (c === '(') depth++;
-    else if (c === ')') {
-      if (--depth < 0) return null;
-      cur += ' ';
-    } else if (depth > 0) continue;
-    else if (c === ';') {
-      out.push(cur.trim());
-      cur = '';
-    } else cur += c;
+  for (let i = 0; i < value.length; i++) {
+    const c = value[i]!;
+    if (c === '\\') return null;
+    if (depth > 0) {
+      if (c === '"') return null;
+      if (c === '(') depth++;
+      else if (c === ')') depth--;
+      continue;
+    }
+    if (c === ')') return null;
+    if (c === '(' || c === ';' || /\s/.test(c)) {
+      if (word) words.push(word);
+      word = null;
+      if (c === '(') depth = 1;
+      else if (c === ';') {
+        out.push(words);
+        words = [];
+      }
+      continue;
+    }
+    if (word && word.quoted !== null) return null;
+    if (c === '"') {
+      if (!word || !word.plain.endsWith('=')) return null;
+      let quoted = '';
+      for (i++; ; i++) {
+        if (i >= value.length) return null;
+        let d = value[i]!;
+        if (d === '"') break;
+        if (d === '\\') {
+          if (++i >= value.length) return null;
+          d = value[i]!;
+        }
+        if (QUOTED_CTL_RE.test(d)) return null;
+        quoted += d;
+      }
+      word.quoted = quoted;
+      continue;
+    }
+    word ??= { plain: '', quoted: null };
+    word.plain += c;
   }
   if (depth !== 0) return null;
-  out.push(cur.trim());
+  if (word) words.push(word);
+  out.push(words);
   return out;
 }
 
@@ -97,19 +155,22 @@ function authservId(value: string): string {
 }
 
 /** The resinfo list of a header known to be Gmail's, or null when any part of it is unreadable. */
-function parseResults(rest: string[]): ResInfo[] | null {
+function parseResults(rest: Word[][]): ResInfo[] | null {
   const results: ResInfo[] = [];
   let pastDkim = false;
-  for (const seg of rest) {
-    const tokens = seg.toLowerCase().split(/\s+/).filter(Boolean);
-    if (tokens.length === 1 && tokens[0] === 'none') continue;
-    const head = METHOD_RE.exec(tokens[0] ?? '');
+  for (const [first, ...words] of rest) {
+    // A quoted string is a property value or nothing: never a method, its result or `none`.
+    if (!first || first.quoted !== null) return null;
+    const method = first.plain.toLowerCase();
+    if (words.length === 0 && method === 'none') continue;
+    const head = METHOD_RE.exec(method);
     if (!head) return null;
     const props = new Map<string, string>();
-    for (const t of tokens.slice(1)) {
-      const p = PROPERTY_RE.exec(t);
+    for (const w of words) {
+      const plain = w.plain.toLowerCase();
+      const p = w.quoted === null ? PROPERTY_RE.exec(plain) : QUOTED_PROPERTY_RE.exec(plain);
       if (!p) return null;
-      props.set(p[1]!, p[2]!);
+      props.set(p[1]!, w.quoted === null ? p[2]! : w.quoted.toLowerCase());
     }
     if (head[1] === 'dkim' && pastDkim) return null;
     if (head[1] === 'spf' || head[1] === 'dmarc') pastDkim = true;
@@ -161,7 +222,8 @@ export function senderAuthFromHeaders(
     if (h.name.toLowerCase() !== 'authentication-results' || authservId(h.value) !== GMAIL_AUTHSERV_ID) continue;
     // The first header that is Gmail's decides, readable or not: never a lower copy.
     const segs = h.value.length <= MAX_VALUE_CHARS ? segments(h.value) : null;
-    const results = segs && parseResults(segs.slice(1));
+    // The authserv-id segment is a token (and an optional version): a quoted string there reads none.
+    const results = segs && segs[0]!.every((w) => w.quoted === null) ? parseResults(segs.slice(1)) : null;
     return results ? verdictOf(results, fromDomain) : { ...NO_SENDER_AUTH };
   }
   return { ...NO_SENDER_AUTH };
