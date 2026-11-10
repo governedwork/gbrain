@@ -449,12 +449,44 @@ export async function deletePageWithSegments(tx: BrainEngine, sourceId: string, 
   await tx.deletePage(slug, { sourceId });
   const texts = shas.length ? (await tx.executeRaw(`DELETE FROM page_segment_texts t WHERE t.source_id=$1 AND t.sha256=ANY(SELECT decode(h,'hex') FROM unnest($2::text[]) AS h)
     AND NOT EXISTS (SELECT 1 FROM page_body_manifest m WHERE m.source_id=t.source_id AND m.sha256=t.sha256) AND NOT ${stagingNeedsTextSql('t')} RETURNING 1`, [sourceId, shas])).length : 0;
-  const forms = claimTextForms(claims), carrying: string[] = [];
-  for (let at = 0; at < forms.length; at += CLAIM_FORMS_BATCH) {
-    carrying.push(...(await tx.executeRaw<{ sha: string }>(`DELETE FROM page_segment_texts d WHERE (d.source_id,d.sha256) IN (SELECT t.source_id,t.sha256
-      FROM page_segment_texts t WHERE t.source_id=$1 AND NOT EXISTS (SELECT 1 FROM page_body_manifest m WHERE m.source_id=t.source_id AND m.sha256=t.sha256) OFFSET 0)
-    AND EXISTS (SELECT 1 FROM unnest($2::text[]) AS n WHERE strpos(lower(convert_from(d.body,'UTF8')),n)>0) AND NOT ${stagingNeedsTextSql('d')}
-    RETURNING encode(d.sha256,'hex') AS sha`, [sourceId, forms.slice(at, at + CLAIM_FORMS_BATCH)])).map(r => r.sha));
-  }
+  const carrying = await deleteUnreferencedTextsCarrying(tx, sourceId, claimTextForms(claims));
   return { shas: [...shas, ...carrying], page_body_manifest: manifest, page_body_stagings: stagings, page_segment_texts: texts + carrying.length };
+}
+
+/**
+ * How much unreferenced segment text one statement of the claim sweep lowers and searches. The statement's work is
+ * these bytes times its claim forms (at most CLAIM_FORMS_BATCH), so it stays well inside the publication transaction's
+ * 5 s statement_timeout however much unreferenced text the source holds. A text is never split: a chunk holds at least
+ * one (a text is at most SEGMENT_MAX_BYTES).
+ */
+export const CLAIM_SWEEP_CHUNK_BYTES = 4 * 1024 * 1024;
+
+/**
+ * The claim sweep of deletePageWithSegments: deletes every unreferenced segment text of the source whose lowered text
+ * holds one of `forms`, unless a live staging needs it; returns the deleted shas. Per pass of CLAIM_FORMS_BATCH forms it
+ * lists the unreferenced texts (an anti-join that reads no body), then lowers each text once in a MATERIALIZED CTE and
+ * matches every form against that value, one statement per CLAIM_SWEEP_CHUNK_BYTES of text. The single statement it
+ * replaces recomputed lower(convert_from(body)) for every (text, form) pair, so 512 forms over a few MB of unreferenced
+ * text outlasted the 5 s statement budget on every attempt (SQLSTATE 57014, `write_interrupted`). The texts deleted are
+ * the same: unreferenced, holding a form, and needed by no live staging, each re-checked by the deleting statement.
+ */
+async function deleteUnreferencedTextsCarrying(tx: BrainEngine, sourceId: string, forms: readonly string[]): Promise<string[]> {
+  const carrying: string[] = [];
+  for (let at = 0; at < forms.length; at += CLAIM_FORMS_BATCH) {
+    const batch = forms.slice(at, at + CLAIM_FORMS_BATCH);
+    const unreferenced = await tx.executeRaw<{ sha: string; bytes: number }>(`SELECT encode(t.sha256,'hex') AS sha,t.byte_len AS bytes FROM page_segment_texts t
+      WHERE t.source_id=$1 AND NOT EXISTS (SELECT 1 FROM page_body_manifest m WHERE m.source_id=t.source_id AND m.sha256=t.sha256) ORDER BY t.sha256`, [sourceId]);
+    for (let from = 0; from < unreferenced.length;) {
+      let to = from + 1, bytes = Number(unreferenced[from]!.bytes);
+      while (to < unreferenced.length && bytes + Number(unreferenced[to]!.bytes) <= CLAIM_SWEEP_CHUNK_BYTES) bytes += Number(unreferenced[to++]!.bytes);
+      carrying.push(...(await tx.executeRaw<{ sha: string }>(`WITH lowered AS MATERIALIZED (SELECT t.source_id,t.sha256,lower(convert_from(t.body,'UTF8')) AS text
+          FROM page_segment_texts t WHERE t.source_id=$1 AND t.sha256=ANY(SELECT decode(h,'hex') FROM unnest($3::text[]) AS h)
+            AND NOT EXISTS (SELECT 1 FROM page_body_manifest m WHERE m.source_id=t.source_id AND m.sha256=t.sha256))
+        DELETE FROM page_segment_texts d USING lowered l WHERE d.source_id=l.source_id AND d.sha256=l.sha256
+          AND EXISTS (SELECT 1 FROM unnest($2::text[]) AS n WHERE strpos(l.text,n)>0) AND NOT ${stagingNeedsTextSql('d')}
+        RETURNING encode(d.sha256,'hex') AS sha`, [sourceId, batch, unreferenced.slice(from, to).map(row => row.sha)])).map(r => r.sha));
+      from = to;
+    }
+  }
+  return carrying;
 }
