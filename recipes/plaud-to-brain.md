@@ -1,7 +1,7 @@
 ---
 id: plaud-to-brain
 name: Plaud-to-Brain
-version: 0.2.0
+version: 0.3.0
 description: Plaud recordings become meeting pages through capture, read from Plaud's own MCP server by the agent and deduplicated by the recording's source_id.
 category: sense
 requires: []
@@ -192,6 +192,13 @@ raw_transcript_text: "..."   # the whole transcript, never truncated
 source_summary: "..."        # get_note's Markdown: a claim
 ```
 
+**The page's one definition is `recipes/plaud-to-brain/page.ts`.** `renderMeetingPage(record)` renders this record
+into the meeting page, frontmatter and body, and returns its base slug; `slugWithId(slug, id)` is the form to use when
+another page already holds that slug, and `localWhen` / `durationText` build `date`, `time` and `duration` from
+Plaud's own fields. Every runner starts from it, so a page filed by any of them is the same page: a deterministic
+runner (a scheduled job that moves the data without an agent) files exactly what it renders; an agent following this
+recipe may enrich it through meeting-ingestion's phases below, never changing its frontmatter keys or slug rules.
+
 Then run meeting-ingestion's phases (split detection, cross-recorder dedupe,
 speaker resolution, the page, claim verification, enrichment, the checklist),
 writing each page with `capture`:
@@ -211,7 +218,7 @@ a retyped or partial transcript filed as evidence is worse than none.
 capture(
   slug: "meetings/<date>-<title-slug>",
   type: "meeting",
-  content: <meeting-ingestion's Phase 5 page, with this frontmatter>,
+  content: <renderMeetingPage(record).content, as meeting-ingestion's Phase 5 enriches it>,
   request_id: <uuid derived from "plaud:<id>:meeting">
 )
 ```
