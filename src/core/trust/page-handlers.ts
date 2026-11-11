@@ -205,6 +205,11 @@ export interface PageActionResult {
   prior_tier: TrustTier;
   marker_removed?: boolean;
   version_id?: number;
+  /**
+   * Fork: the page's knowledge_revision exactly as the action left it, read inside the action's own transaction
+   * (on a managed brain, the publication's receipt revision), so a caller can tell this write from a later one.
+   */
+  revision?: string;
 }
 
 type OwnerPageIntent = {
@@ -231,22 +236,32 @@ export async function confirmPage(engine: BrainEngine, input: PageActionInput): 
   if (!state) throw opError('page_not_found', `No live page ${ref}.`, 'Check the ref; gbrain trust review lists pages waiting for you.');
   if (state.revision !== input.expectedRevision) throw changedSincePreview(ref, 'its confirmation');
   if (state.tier === 'user_confirmed' && !state.hasMarker) {
-    await engine.transaction(tx => closeProposal(tx, input.proposal, input.by));
-    return { status: 'unchanged', ref, tier: state.tier, prior_tier: state.tier };
+    const revision = await engine.transaction(async tx => {
+      await closeProposal(tx, input.proposal, input.by);
+      return revisionIn(tx, input.sourceId, input.slug);
+    });
+    return { status: 'unchanged', ref, tier: state.tier, prior_tier: state.tier, ...(revision ? { revision } : {}) };
   }
   if (!state.hasMarker) {
+    // The tier change moves no revision (the knowledge_revision trigger ignores trust_tier); read inside the tx, after it.
+    let revision: string | undefined;
     const ok = await setRowTier(engine, {
       table: 'pages', id: state.pageId, sourceId: input.sourceId, tier: 'user_confirmed', ceiling: 'user_confirmed', by: input.by,
       note: { via: input.confirmation.via, action: 'confirm' },
       expect: async tx => (await tx.readPageSnapshot(input.slug, { sourceId: input.sourceId }))?.revision === input.expectedRevision,
-      also: tx => closeProposal(tx, input.proposal, input.by),
+      also: async tx => { await closeProposal(tx, input.proposal, input.by); revision = await revisionIn(tx, input.sourceId, input.slug); },
     });
     if (!ok) throw changedSincePreview(ref, 'its confirmation');
-    return { status: 'confirmed', ref, tier: 'user_confirmed', prior_tier: state.tier, marker_removed: false };
+    return { status: 'confirmed', ref, tier: 'user_confirmed', prior_tier: state.tier, marker_removed: false, ...(revision ? { revision } : {}) };
   }
-  await publishOwnerPage(engine, input, { mode: 'confirm', expected_revision: input.expectedRevision, via: input.confirmation.via, proposal: input.proposal },
+  const revision = await publishOwnerPage(engine, input, { mode: 'confirm', expected_revision: input.expectedRevision, via: input.confirmation.via, proposal: input.proposal },
     () => markerMarkdown(engine, state.snapshot, null, 'trust confirm'), 'user_confirmed');
-  return { status: 'confirmed', ref, tier: 'user_confirmed', prior_tier: state.tier, marker_removed: true };
+  return { status: 'confirmed', ref, tier: 'user_confirmed', prior_tier: state.tier, marker_removed: true, ...(revision ? { revision } : {}) };
+}
+
+/** The page's knowledge_revision as `tx` sees it (undefined when the page is gone). */
+async function revisionIn(tx: BrainEngine, sourceId: string, slug: string): Promise<string | undefined> {
+  return (await tx.readPageSnapshot(slug, { sourceId }))?.revision;
 }
 
 /** #6550: the marker a repaired page carries: its stored tier, none at owner tiers (CEO-21 stamps none there). */
@@ -261,9 +276,9 @@ export async function repairPageMarker(engine: BrainEngine, input: PageActionInp
   if (!state) throw opError('page_not_found', `No live page ${ref}.`, 'Run gbrain trust backfill --repair-unknown-markers again to see the current candidates.');
   if (state.revision !== input.expectedRevision) throw changedSincePreview(ref, ACTION_NAMES.repair_marker);
   const marker = repairedMarker(state.tier);
-  await publishOwnerPage(engine, input, { mode: 'repair_marker', expected_revision: input.expectedRevision, via: input.confirmation.via },
+  const revision = await publishOwnerPage(engine, input, { mode: 'repair_marker', expected_revision: input.expectedRevision, via: input.confirmation.via },
     () => markerMarkdown(engine, state.snapshot, marker, 'trust marker repair'), state.tier);
-  return { status: 'repaired', ref, tier: state.tier, prior_tier: state.tier, marker };
+  return { status: 'repaired', ref, tier: state.tier, prior_tier: state.tier, marker, ...(revision ? { revision } : {}) };
 }
 
 /** The tier a version restores: its snapshot tier, `unknown` for legacy versions. */
@@ -279,26 +294,26 @@ export async function revertPageToVersion(engine: BrainEngine, input: PageAction
   if (!version) throw opError('not_found', `Version ${input.versionId} is not in the history of ${ref}.`, `List the page's versions with gbrain history ${input.slug} and pass one of their ids to --version.`);
   assertRevertableVersion(state.snapshot, version, input.slug);
   const tier = versionTier(version);
-  await publishOwnerPage(engine, input, { mode: 'revert', expected_revision: input.expectedRevision, version_id: input.versionId, via: input.confirmation.via, proposal: input.proposal },
+  const revision = await publishOwnerPage(engine, input, { mode: 'revert', expected_revision: input.expectedRevision, version_id: input.versionId, via: input.confirmation.via, proposal: input.proposal },
     async () => versionMarkdown(state.snapshot, version), tier);
-  return { status: 'reverted', ref, tier, prior_tier: state.tier, version_id: input.versionId };
+  return { status: 'reverted', ref, tier, prior_tier: state.tier, version_id: input.versionId, ...(revision ? { revision } : {}) };
 }
 
 /**
  * Publishes an owner page write at `tier`. A content rewrite by an owner-tier
  * writer restamps the page (CEO-12); user_confirmed needs the promotion
  * ceiling, and a lower restored tier lowers it (min with the prior tier).
+ * Answers the page's revision as the write left it: read in the write's own transaction, or (managed) the publication
+ * receipt's, which the coordinator reads in the publication transaction after apply.
  */
-async function publishOwnerPage(engine: BrainEngine, input: PageActionInput, intent: OwnerPageIntent, content: () => Promise<string>, tier: TrustTier): Promise<void> {
-  if (await managed(engine)) {
-    await submitOwnerPage(engine, input, intent);
-    return;
-  }
+async function publishOwnerPage(engine: BrainEngine, input: PageActionInput, intent: OwnerPageIntent, content: () => Promise<string>, tier: TrustTier): Promise<string | undefined> {
+  if (await managed(engine)) return submitOwnerPage(engine, input, intent);
   const markdown = await content();
   const { importFromContent } = await import('../import-file.ts');
   const attribution = await attributionFor(engine, input.by);
   const trust = ownerTrust(tier, intent.mode, intent.via);
-  await engine.transaction(tx => withWriteAttribution(tx, { ...attribution, trust }, () => withTrustPromotion(tx, tier, () =>
+  return engine.transaction(async tx => {
+    await withWriteAttribution(tx, { ...attribution, trust }, () => withTrustPromotion(tx, tier, () =>
     withTrustKeep(tx, FENCE_TABLES, async () => {
       if ((await tx.readPageSnapshot(input.slug, { sourceId: input.sourceId }))?.revision !== input.expectedRevision) {
         throw changedSincePreview(pageRef(input.sourceId, input.slug), ACTION_NAMES[intent.mode]);
@@ -306,11 +321,13 @@ async function publishOwnerPage(engine: BrainEngine, input: PageActionInput, int
       // forceRechunk: the trust_tier marker is hash-ephemeral, so removing it alone would read as unchanged content.
       await importFromContent(tx, input.slug, markdown, { sourceId: input.sourceId, noEmbed: true, preserveGateMarkers: intent.mode !== 'revert', forceRechunk: true, allowEmptyOverwrite: intent.mode === 'revert' });
       await closeProposal(tx, intent.proposal, input.by);
-    }))));
+    })));
+    return revisionIn(tx, input.sourceId, input.slug);
+  });
 }
 
-/** Admits the journaled owner page mutation and waits for its publication (the decide_proposal precedent). */
-async function submitOwnerPage(engine: BrainEngine, input: PageActionInput, intent: OwnerPageIntent): Promise<void> {
+/** Admits the journaled owner page mutation and waits for its publication (the decide_proposal precedent); answers the receipt's revision. */
+async function submitOwnerPage(engine: BrainEngine, input: PageActionInput, intent: OwnerPageIntent): Promise<string | undefined> {
   const { initializeLocalPersistence, requestPrincipalForContext } = await import('../persistence/page-mutations.ts');
   const { submissionAuthority } = await import('../persistence/authority.ts');
   const { admitWrite } = await import('../persistence/journal.ts');
@@ -333,7 +350,8 @@ async function submitOwnerPage(engine: BrainEngine, input: PageActionInput, inte
     pageId: snapshot?.page.id ?? null, requestId: randomUUID(), callerIntent: intent, intent, authority,
     worktreeId: binding?.worktree_id ?? null, topologyGeneration: binding?.topology_generation ?? null,
   });
-  writeResponse(await waitForWrite(engine, row, config, 30_000));
+  const receipt = writeResponse(await waitForWrite(engine, row, config, 30_000));
+  return typeof receipt.revision === 'string' ? receipt.revision : undefined;
 }
 
 /**

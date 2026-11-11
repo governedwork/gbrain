@@ -423,7 +423,8 @@ function fromDecision(action: OwnerActionName, d: TrustDecisionResult): OwnerAct
 
 function asPageResult(action: OwnerActionName, r: PageActionResult): OwnerActionResult {
   return { action, ref: r.ref, status: r.status, tier: r.tier, prior_tier: r.prior_tier,
-    detail: { ...(r.marker_removed !== undefined ? { marker_removed: r.marker_removed } : {}), ...(r.version_id !== undefined ? { version_id: r.version_id } : {}) } };
+    detail: { ...(r.marker_removed !== undefined ? { marker_removed: r.marker_removed } : {}), ...(r.version_id !== undefined ? { version_id: r.version_id } : {}),
+      ...(r.revision !== undefined ? { revision: r.revision } : {}) } };
 }
 
 /**
@@ -466,7 +467,8 @@ export async function applyOwnerAction(engine: BrainEngine, input: OwnerActionIn
       }
       if (ref?.kind === 'page') {
         const { sourceId, slug } = await resolvePageRef(engine, ref, input.source);
-        if (!preview.raises) return { action: 'confirm', ref: preview.ref, status: 'unchanged', tier: 'user_confirmed', prior_tier: 'user_confirmed' };
+        // Nothing to write: the revision is the one this call's preview read and its binding matched.
+        if (!preview.raises) return { action: 'confirm', ref: preview.ref, status: 'unchanged', tier: 'user_confirmed', prior_tier: 'user_confirmed', detail: { revision: preview.revision! } };
         return asPageResult('confirm', await confirmPage(engine, { sourceId, slug, expectedRevision: preview.revision!, confirmation, by, config: opts.config, ctx: opts.ctx }));
       }
       if (ref?.kind === 'proposal') return fromDecision('confirm', await decideTrustProposal(engine, ref.id, 'accept', decision));
