@@ -584,6 +584,7 @@ export async function checkPackUpgradeAvailable(
   try {
     const { loadActivePack, findPackSuccessors } = await import('../schema-pack/load-active.ts');
     const { loadConfigFileOnly } = await import('../config.ts');
+    const { packOrNull } = await import('../schema-pack/engine-resolution.ts');
     // Read the engine's DB-side schema_pack so a post-unify flip is visible
     // here even before the file-plane config catches up. File-only config
     // preserves tier-6 schema_pack without merging transient env/database state.
@@ -591,8 +592,7 @@ export async function checkPackUpgradeAvailable(
     try {
       dbConfig = (await engine.getConfig('schema_pack')) ?? undefined;
     } catch { /* engine.config may not exist on very old brains */ }
-    const active = await loadActivePack({ cfg: loadConfigFileOnly(), remote: false, dbConfig })
-      .catch(() => null);
+    const active = await packOrNull(loadActivePack({ cfg: loadConfigFileOnly(), remote: false, dbConfig }));
     if (!active) {
       return {
         check: { name: 'pack_upgrade_available', status: 'ok', message: 'No active pack' },

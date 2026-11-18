@@ -16,7 +16,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { BrainEngine } from '../engine.ts';
 import type { SqlEngine } from '../persistence/model.ts';
-import { opError } from '../ops/contract.ts';
+import { opError, OperationError } from '../ops/contract.ts';
+import { isMissingSchemaObject } from '../utils.ts';
 import { parseSchemaPackManifest, SchemaPackManifestError, type SchemaPackManifest } from './manifest-v1.ts';
 import { AliasCycleError, AliasDepthExceededError } from './closure.ts';
 import { isBundledPackName } from './bundled.ts';
@@ -30,6 +31,30 @@ let overlayGeneration: string | null = null;
 let boundStore: PackStore | null = null;
 let lastCheck: { store: PackStore; at: number } | null = null;
 let inFlight: { store: PackStore; done: Promise<void> } | null = null;
+/** The last check found the brain without the pack tables (its migrations have not run): no brain-resident packs. */
+let storeAbsent = false;
+
+const PACK_TABLES = ['schema_pack_heads', 'schema_pack_revisions'] as const;
+
+/**
+ * The brain's stored packs could not be read (`pack_store_unreadable`, retryable). A pack GBrain does not
+ * bundle may live there, so resolution fails rather than answer "no pack": a write must not go ahead
+ * without the vocabulary and typing of the pack the brain holds.
+ */
+export function packStoreUnreadable(cause: unknown): OperationError {
+  const reason = cause instanceof Error ? cause.message : String(cause);
+  return opError('pack_store_unreadable', `The brain's stored schema packs could not be read (${reason}).`,
+    'Retry the command. If it keeps failing, check the database connection and schema with `gbrain doctor --json`.');
+}
+
+export function isPackStoreUnreadable(err: unknown): boolean {
+  return err instanceof OperationError && err.code === 'pack_store_unreadable';
+}
+
+/** Whether the last check found this brain without the brain-resident pack tables (apply-migrations creates them). */
+export function brainResidentPackStoreAbsent(): boolean {
+  return storeAbsent;
+}
 
 /** The brain-resident manifest for `name`, if the overlay holds one. */
 export function brainResidentPack(name: string): SchemaPackManifest | null {
@@ -49,17 +74,27 @@ export function brainResidentPackSource(name: string): string | null {
 const HEADS_GENERATION_SQL = `SELECT COALESCE(md5(string_agg(name || '=' || revision::text, ',' ORDER BY name)), '') AS generation
   FROM schema_pack_heads`;
 
-/** Reload the overlay from the database when the heads changed since the last load. */
+/**
+ * Reload the overlay from the database when the heads changed since the last load. A brain without the pack
+ * tables holds no brain-resident packs (a resolution that needs one says how to create them); any other
+ * failure throws `pack_store_unreadable` and leaves the overlay and the last check as they were.
+ */
 export async function refreshBrainResidentPacks(engine: PackStore): Promise<void> {
   let generation: string;
+  let rows: Array<{ name: string; revision: string; source_id: string; manifest: unknown }> = [];
   try {
     const [row] = await engine.executeRaw<{ generation: string }>(HEADS_GENERATION_SQL);
     generation = row?.generation ?? '';
-  } catch { return; } // tables not migrated yet
-  if (generation === overlayGeneration) { lastCheck = { store: engine, at: Date.now() }; return; }
-  const rows = await engine.executeRaw<{ name: string; revision: string; source_id: string; manifest: unknown }>(
-    `SELECT h.name, h.revision::text AS revision, h.source_id, r.manifest
-      FROM schema_pack_heads h JOIN schema_pack_revisions r ON r.revision = h.revision`);
+    if (generation === overlayGeneration && !storeAbsent) { lastCheck = { store: engine, at: Date.now() }; return; }
+    rows = await engine.executeRaw<{ name: string; revision: string; source_id: string; manifest: unknown }>(
+      `SELECT h.name, h.revision::text AS revision, h.source_id, r.manifest
+        FROM schema_pack_heads h JOIN schema_pack_revisions r ON r.revision = h.revision`);
+    storeAbsent = false;
+  } catch (err) {
+    if (!isMissingSchemaObject(err, 'table', PACK_TABLES)) throw packStoreUnreadable(err);
+    generation = '';
+    storeAbsent = true;
+  }
   const changed = new Set<string>([...overlay.keys(), ...rows.map(r => r.name)]);
   overlay.clear();
   for (const row of rows) {
@@ -112,6 +147,7 @@ export function _resetBrainResidentPacksForTests(): void {
   boundStore = null;
   lastCheck = null;
   inFlight = null;
+  storeAbsent = false;
 }
 
 function manifestHash(manifest: unknown): string {
@@ -139,6 +175,10 @@ export async function putBrainPack(engine: BrainEngine,
   if (isBundledPackName(input.name)) throw opError('invalid_params', `Pack ${input.name} is bundled with GBrain and cannot be replaced.`, 'Publish under a new name that extends it.');
   if (input.manifest.name !== input.name) throw opError('invalid_params', 'The manifest name must equal the pack name.', `Set manifest.name to ${input.name}.`);
   await refreshBrainResidentPacks(engine);
+  if (storeAbsent) {
+    throw opError('migrations_pending', `This brain has no tables for stored schema packs yet, so ${input.name} was not published.`,
+      'Run `gbrain apply-migrations --yes` (it creates them), then publish again.', { reason: 'schema_behind' });
+  }
   try {
     await resolve(parseSchemaPackManifest(input.manifest, { path: `brain:${input.name}` }));
   } catch (err) {

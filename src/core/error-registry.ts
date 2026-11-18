@@ -786,6 +786,11 @@ export const CODES = {
     docs: 'docs/architecture/schema-packs.md#oversized-pack',
     suggestion: 'Re-run the mutation on the current release; if it refuses again, run `gbrain schema validate <pack>` and report the named key with `gbrain doctor --json`.',
     fix: { argv: ['gbrain', 'schema', 'active', '--json'], consent: [], actor: 'agent', requires_exclusive: false, why: 'Shows which pack is active and where it resolved; changes nothing.' } },
+  // Ours (governedwork fork): brain-resident schema packs (src/core/schema-pack/db-store.ts).
+  pack_store_unreadable: { class: 'retryable', summary: "The brain's stored schema packs could not be read, so the active pack, which may live there, was not resolved and nothing was done without it.",
+    why: 'A pack GBrain does not bundle may be stored in the brain itself. Reading it as "no pack" would let a write skip the pack\'s vocabulary and typing, so the command fails instead; it is usually a passing database failure.',
+    suggestion: 'Retry the command. If it keeps failing, check the database connection and schema with `gbrain doctor --json`.',
+    fix: { argv: ['gbrain', 'doctor', '--json'], consent: [], actor: 'agent', requires_exclusive: false, why: 'Read-only: reports the database connection and schema state.' } },
 } as const satisfies Record<string, CodeEntry>;
 
 export type RegistryCode = keyof typeof CODES;

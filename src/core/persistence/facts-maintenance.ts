@@ -16,7 +16,7 @@ import { inferenceNote } from '../facts/subject-infer-write.ts';
 import { resolveDefaultVisibility } from '../facts/visibility.ts';
 import { FACT_WITHDRAWN_MESSAGE, isFactWithdrawn, withdrawnFromDetail } from '../facts/withdrawal.ts';
 import { currentSubmissionAuthority } from '../minions/submission-authority.ts';
-import { loadActivePackForEngine } from '../schema-pack/engine-resolution.ts';
+import { loadActivePackForEngine, packOrNull } from '../schema-pack/engine-resolution.ts';
 import { authorizeStoredRequest, authorizeWrite, submissionAuthority } from './authority.ts';
 import { authorizePageVisibility } from './page-visibility.ts';
 import { initializeLocalPersistence } from './page-mutations.ts';
@@ -464,7 +464,7 @@ function sameSignature(a: FactEmbeddingSignature | null | undefined, b: FactEmbe
  */
 async function readmitRefusedFacts(engine: BrainEngine, followUp: ManagedFactsSession, refused: WriteRequest[]): Promise<WriteRequest[] | null> {
   const { sourceId, remote } = followUp.authority;
-  const activePack = (await loadActivePackForEngine(engine, { remote, sourceId }).catch(() => null))?.manifest;
+  const activePack = (await packOrNull(loadActivePackForEngine(engine, { remote, sourceId })))?.manifest;
   const privateOnly = await resolveDefaultVisibility(engine) === 'private';
   const entities: ManagedFactsEntityInput[] = [];
   for (const row of refused) {

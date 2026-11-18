@@ -50,7 +50,7 @@ import { importFromContent } from '../import-file.ts';
 import { ownerImportTrust, ownerSourceGateInput } from '../trust/channel.ts';
 import { ContentSanityBlockError } from '../content-sanity.ts';
 import { loadImportSanityConfig, type ContentRefusal, type ImportSanityConfig } from '../import-screen.ts';
-import { loadActivePackForEngine } from '../schema-pack/engine-resolution.ts';
+import { loadActivePackForEngine, packOrNull } from '../schema-pack/engine-resolution.ts';
 import { comparableFrontmatter, parseMarkdown, resolveParsedSubtype, type ParseOpts } from '../markdown.ts';
 import { isWriteTargetContained } from '../path-confine.ts';
 import { opError, type OperationContext } from '../ops/contract.ts';
@@ -254,7 +254,7 @@ export async function prepareRepairPublication(engine: BrainEngine, input: Repai
 
 /** The schema pack and content-sanity settings a repair preview and its publication both read, so their results agree. */
 export async function repairScreenConfig(engine: BrainEngine, sourceId: string): Promise<Pick<RepairPublicationInput, 'activePack' | 'sanity'> & { packIdentity: string | null }> {
-  const pack = await loadActivePackForEngine(engine, { remote: false, sourceId }).catch(() => null);
+  const pack = await packOrNull(loadActivePackForEngine(engine, { remote: false, sourceId }));
   return { ...(pack?.manifest ? { activePack: pack.manifest } : {}), sanity: await loadImportSanityConfig(engine), packIdentity: pack?.identity ?? null };
 }
 

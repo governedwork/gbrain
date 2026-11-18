@@ -67,7 +67,7 @@ import { assertTimelineNotOmitted, timelineWritePolicy } from './timeline-omissi
 import { preserveProtectedTakes } from './protected-takes.ts';
 import { isAutoLinkEnabled } from '../link-extraction.ts';
 import { prepareAutomaticLinks } from './links-preparation.ts';
-import { loadActivePackForEngine } from '../schema-pack/engine-resolution.ts';
+import { loadActivePackForEngine, packOrNull } from '../schema-pack/engine-resolution.ts';
 import { preparePageAdvisories, remoteLinkHint, pageNoopAdvisories, timelineRowsRemovedAdvisory } from './page-advisories.ts';
 import { assertKnowledgePublicationAllowed } from '../shared-skills/knowledge-guard.ts';
 import { colonSlugWindowsRefusal, isWindowsColonTarget, nativeFileTarget } from './native-file-target.ts';
@@ -623,7 +623,7 @@ export async function prepareSegmentedMetadataMutation(engine: BrainEngine, row:
   const tags = change.tags ?? snapshot.tags;
   const frontmatter = change.frontmatter ?? snapshot.page.frontmatter ?? {};
   const [, pack, storedTier] = await Promise.all([assertKnowledgePublicationAllowed(engine, row),
-    loadActivePackForEngine(engine, { remote: row.authority.remote, sourceId: row.source_id }).catch(() => null), storedPageTier(engine, row.source_id, row.slug)]);
+    packOrNull(loadActivePackForEngine(engine, { remote: row.authority.remote, sourceId: row.source_id })), storedPageTier(engine, row.source_id, row.slug)]);
   const frontmatterChanged = stableJson(frontmatter) !== stableJson(snapshot.page.frontmatter ?? {});
   const noop = !frontmatterChanged && tags.length === snapshot.tags.length && tags.every(tag => snapshot.tags.includes(tag));
   const trust = pageWriteTrust(row, frontmatter);
@@ -703,7 +703,7 @@ async function prepareInlineOrSegmentedMutation(unbounded: BrainEngine, row: Wri
   const [, stored, pack] = await pipelined(together, [
     () => assertKnowledgePublicationAllowed(engine, row),
     () => engine.readPageSnapshot(row.slug, { ...source, includeDeleted: true }),
-    () => loadActivePackForEngine(engine, { remote: row.authority.remote, sourceId: row.source_id }).catch(() => null),
+    () => packOrNull(loadActivePackForEngine(engine, { remote: row.authority.remote, sourceId: row.source_id })),
   ]) as [unknown, PageSnapshot | null, Awaited<ReturnType<typeof loadActivePackForEngine>> | null];
   // Wave B (spec 6.3): edit_page on a segmented page splices the touched segments; a declined edit takes the string path. Fork: revert_version repairs an untiled one (untiled-revert.ts).
   const segmented = row.operation === 'edit_page' && stored && !stored.page.deleted_at && isSegmentedPage(stored.page) && stored.page.id === row.page_id

@@ -23,7 +23,7 @@ export async function resolvePackPhaseGate(
   sourceId?: string,
 ): Promise<PackPhaseGate> {
   try {
-    const { engineSchemaInput } = await import('../schema-pack/engine-resolution.ts');
+    const { engineSchemaInput, packOrNull } = await import('../schema-pack/engine-resolution.ts');
     const { loadActivePack, resolveActivePackNameOnly } = await import('../schema-pack/load-active.ts');
     const input = await engineSchemaInput(engine, { remote: false, ...(sourceId ? { sourceId } : {}) });
     const resolved = await loadActivePack(input);
@@ -34,7 +34,7 @@ export async function resolvePackPhaseGate(
     };
     if (!gate.declared || (gate.source_tier !== 'db-config' && gate.source_tier !== 'per-source-db')) return gate;
     const { loadConfig } = await import('../config.ts');
-    const filePlane = await loadActivePack({ cfg: loadConfig(), remote: false }).catch(() => null);
+    const filePlane = await packOrNull(loadActivePack({ cfg: loadConfig(), remote: false }));
     if ((filePlane?.manifest.phases ?? []).includes(phase)) return gate;
     if ((await engine.getConfig(`cycle.${phase}.enabled`))?.trim() === 'true') return gate;
     return { ...gate, consent_required: true };

@@ -26,7 +26,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { GBrainConfig } from '../config.ts';
 import { gbrainPath } from '../config.ts';
-import { brainResidentPack, ensureBrainResidentPacksFresh, type PackStore } from './db-store.ts';
+import { brainResidentPack, brainResidentPackStoreAbsent, ensureBrainResidentPacksFresh, type PackStore } from './db-store.ts';
 import type { SchemaPackManifest } from './manifest-v1.ts';
 import type { DeclaredPack } from './borrow-lint-rules.ts';
 import { loadPackFromFile } from './loader.ts';
@@ -148,7 +148,12 @@ async function loadPackManifestByName(name: string, store?: PackStore): Promise<
   }
   const path = _packLocator(name);
   if (!path) {
-    throw new UnknownPackError(name);
+    const err = new UnknownPackError(name);
+    // Ours (governedwork fork): a brain whose migrations have not run has nowhere to hold the pack yet.
+    if (!isBundledPackName(name) && brainResidentPackStoreAbsent()) {
+      err.message += ' (this brain has no tables for stored schema packs yet; `gbrain apply-migrations --yes` creates them)';
+    }
+    throw err;
   }
   return loadPackFromFile(path);
 }

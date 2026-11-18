@@ -4,6 +4,7 @@ import type { BrainEngine } from '../engine.ts';
 import { OperationError } from '../ops/contract.ts';
 import { loadActivePack, loadResolvedPackByName, type LoadActivePackInput } from './load-active.ts';
 import { invalidatePackCache, type ResolvedPack } from './registry.ts';
+import { isPackStoreUnreadable } from './db-store.ts';
 
 export type EngineSchemaOptions = Omit<LoadActivePackInput, 'cfg' | 'dbConfig' | 'perSourceDb' | 'packStore'>;
 
@@ -26,6 +27,21 @@ export async function engineSchemaInput(
   // only when the resolved pack is one GBrain does not bundle (load-active.ts).
   const packStore = engine && 'executeRaw' in engine ? engine as LoadActivePackInput['packStore'] : undefined;
   return { ...options, cfg: loadConfigFileOnly(), dbConfig, perSourceDb, ...(packStore ? { packStore } : {}) };
+}
+
+/**
+ * Ours (governedwork fork): the pack `load` resolves, or null when it does not resolve (unknown, invalid,
+ * untrusted ...): the callers' "no vocabulary" contract. A brain whose stored packs cannot be read
+ * (`pack_store_unreadable`) is raised instead, never read as "no pack": the active pack may live there, and a
+ * write must not go ahead without it. Use it for every pack load whose failure would otherwise become null.
+ */
+export async function packOrNull<T>(load: Promise<T>): Promise<T | null> {
+  try {
+    return await load;
+  } catch (err) {
+    if (isPackStoreUnreadable(err)) throw err;
+    return null;
+  }
 }
 
 export async function loadActivePackForEngine(

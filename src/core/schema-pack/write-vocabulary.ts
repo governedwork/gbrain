@@ -15,7 +15,7 @@
 //     not declare 'note'.
 
 import type { BrainEngine } from '../engine.ts';
-import { loadActivePackForEngine } from './engine-resolution.ts';
+import { loadActivePackForEngine, packOrNull } from './engine-resolution.ts';
 import type { ResolvedPack } from './registry.ts';
 
 export interface WriteVocabularyContext {
@@ -30,20 +30,18 @@ export interface WriteVocabularyContext {
  * engine's DB-plane `schema_pack` key with FILE-ONLY config (the
  * `loadActivePackForLocalEngine` posture — a post-unify DB-side pack flip
  * stays visible) while still threading `remote` (fail-closed) + `sourceId`
- * from the operation context. Never throws; null = "no resolvable pack",
- * which callers MUST treat as "no vocabulary to enforce".
+ * from the operation context. null = "no resolvable pack", which callers
+ * MUST treat as "no vocabulary to enforce". Ours (governedwork fork): the one
+ * throw is `pack_store_unreadable` (packOrNull): the brain's stored packs
+ * could not be read, so the pack it may hold is not read as "no vocabulary".
  */
 export async function loadActivePackForWriteVocabulary(
   ctx: WriteVocabularyContext,
 ): Promise<ResolvedPack | null> {
-  try {
-    return await loadActivePackForEngine(ctx.engine, {
-      remote: ctx.remote === false ? false : true,
-      sourceId: ctx.sourceId,
-    });
-  } catch {
-    return null;
-  }
+  return packOrNull(loadActivePackForEngine(ctx.engine, {
+    remote: ctx.remote === false ? false : true,
+    sourceId: ctx.sourceId,
+  }));
 }
 
 export function packDeclaresPageType(pack: ResolvedPack, typeName: string): boolean {
