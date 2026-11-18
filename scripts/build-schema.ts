@@ -15,7 +15,10 @@
  *      PGLite capability rules below, with the __EMBEDDING_DIMS__ /
  *      __EMBEDDING_MODEL__ placeholders and the runtime policy hooks
  *      (applyChunkEmbeddingIndexPolicy, applyFtsLanguagePolicy) left to
- *      getPGLiteSchema(dims, model) at runtime.
+ *      getPGLiteSchema(dims, model) at runtime;
+ *   5. (ours, governedwork fork) write src/core/fork-schema-epoch.generated.ts,
+ *      the hash of the `fork: true` fragments that the blob's stamp region
+ *      adds to config (src/core/fork-schema.ts), before the hardening region.
  * Unknown statement kinds, unclassified DO blocks and rules that no longer
  * match exit non-zero.
  *
@@ -51,11 +54,13 @@ import { BELIEF_LEDGER_SCHEMA_SQL } from '../src/core/belief/schema.ts';
 import { GIT_CANONICAL_SCHEMA_SQL } from '../src/core/persistence/git-canonical-schema.ts';
 import { FUNCTION_SEARCH_PATH_HARDENING_SQL } from '../src/core/function-search-path.ts';
 import { BRAIN_PACK_SCHEMA_SQL } from '../src/core/schema-pack/brain-pack-schema.ts';
+import { forkSchemaEpoch, forkSchemaEpochSql } from '../src/core/fork-schema.ts';
 
 const REPO = resolve(import.meta.dir, '..');
 export const SCHEMA_SQL_PATH = 'src/schema.sql';
 export const EMBEDDED_PATH = 'src/core/schema-embedded.generated.ts';
 export const PGLITE_PATH = 'src/core/pglite-schema.generated.ts';
+export const FORK_EPOCH_PATH = 'src/core/fork-schema-epoch.generated.ts';
 const SEE = 'See:  docs/ENGINES.md#canonical-schema-sources';
 
 export class SchemaBuildError extends Error {}
@@ -76,11 +81,13 @@ export interface Fragment {
   postgres: string;
   /** Text spliced into the PGLite template. */
   pglite: string;
+  /** Ours (governedwork fork): a fork-owned fragment; its text feeds the fork schema epoch (src/core/fork-schema.ts). */
+  fork?: true;
 }
 
 const persistenceSql = (statements: readonly string[]) => `${statements.join(';\n')};`;
 
-export const FRAGMENTS: readonly Fragment[] = [
+const BASE_FRAGMENTS: readonly Fragment[] = [
   { source: 'src/core/page-body/schema.ts', expr: 'PAGE_GENERATION_BUMP_FN_SQL', postgres: PAGE_GENERATION_BUMP_FN_SQL, pglite: PAGE_GENERATION_BUMP_FN_SQL },
   { source: 'src/core/fts-language.ts', expr: 'FTS_INPUT_FUNCTION_SQL', postgres: FTS_INPUT_FUNCTION_SQL, pglite: FTS_INPUT_FUNCTION_SQL },
   { source: 'src/core/derived-state-maintainers.ts', expr: 'PAGE_RETRIEVALS_FORGET_FUNCTION_SQL', postgres: PAGE_RETRIEVALS_FORGET_FUNCTION_SQL, pglite: PAGE_RETRIEVALS_FORGET_FUNCTION_SQL },
@@ -123,7 +130,16 @@ export const FRAGMENTS: readonly Fragment[] = [
   { source: 'src/core/questions/schema.ts', expr: 'PINNED_QUESTIONS_SCHEMA_SQL', postgres: PINNED_QUESTIONS_SCHEMA_SQL, pglite: PINNED_QUESTIONS_SCHEMA_SQL },
   { source: 'src/core/belief/schema.ts', expr: 'BELIEF_LEDGER_SCHEMA_SQL', postgres: BELIEF_LEDGER_SCHEMA_SQL, pglite: BELIEF_LEDGER_SCHEMA_SQL },
   // Ours (governedwork fork): brain-resident schema packs.
-  { source: 'src/core/schema-pack/brain-pack-schema.ts', expr: 'BRAIN_PACK_SCHEMA_SQL', postgres: BRAIN_PACK_SCHEMA_SQL, pglite: BRAIN_PACK_SCHEMA_SQL },
+  { source: 'src/core/schema-pack/brain-pack-schema.ts', expr: 'BRAIN_PACK_SCHEMA_SQL', postgres: BRAIN_PACK_SCHEMA_SQL, pglite: BRAIN_PACK_SCHEMA_SQL, fork: true },
+];
+
+/** Ours (governedwork fork): the hash of every fork fragment's text, both engines, in FRAGMENTS order. */
+export const FORK_SCHEMA_EPOCH = forkSchemaEpoch(BASE_FRAGMENTS.filter((f) => f.fork).flatMap((f) => [f.postgres, f.pglite]));
+
+export const FRAGMENTS: readonly Fragment[] = [
+  ...BASE_FRAGMENTS,
+  // Ours (governedwork fork): stamps the fork schema epoch; its region sits after every fork fragment's region it covers.
+  { source: 'src/core/fork-schema.ts', expr: 'forkSchemaEpochSql', postgres: forkSchemaEpochSql(FORK_SCHEMA_EPOCH), pglite: forkSchemaEpochSql(FORK_SCHEMA_EPOCH) },
   // Its region must stay the last statement of src/schema.sql (regions render where their markers sit, not in this
   // array's order): a replay's CREATE OR REPLACE resets each function's search_path, so pg_temp is appended after every one (#7632).
   { source: 'src/core/function-search-path.ts', expr: 'FUNCTION_SEARCH_PATH_HARDENING_SQL', postgres: FUNCTION_SEARCH_PATH_HARDENING_SQL, pglite: FUNCTION_SEARCH_PATH_HARDENING_SQL },
@@ -614,6 +630,15 @@ export const PGLITE_SCHEMA_SQL = getPGLiteSchema();
 `;
 }
 
+/** Ours (governedwork fork): the generated epoch module `hasPendingMigrations` compares the brain's stamp with. */
+export function renderForkEpochModule(epoch: string): string {
+  return `// AUTO-GENERATED — do not edit. Run: bun run build:schema
+// Ours (governedwork fork): the hash of the fork schema fragments (src/core/fork-schema.ts).
+
+export const FORK_SCHEMA_EPOCH = '${epoch}';
+`;
+}
+
 // ---------------------------------------------------------------------------
 // Chain
 // ---------------------------------------------------------------------------
@@ -629,6 +654,7 @@ export function buildAll(schemaSqlIn = readFileSync(join(REPO, SCHEMA_SQL_PATH),
     [SCHEMA_SQL_PATH]: schemaSql,
     [EMBEDDED_PATH]: renderEmbedded(schemaSql),
     [PGLITE_PATH]: renderPgliteModule(schemaSql),
+    [FORK_EPOCH_PATH]: renderForkEpochModule(FORK_SCHEMA_EPOCH),
   };
 }
 

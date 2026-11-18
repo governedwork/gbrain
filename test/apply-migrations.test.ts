@@ -284,6 +284,33 @@ describe('resolveSchemaBehind (#1530)', () => {
     expect(behind).toBe(true);
   });
 
+  // Ours (governedwork fork): a brain at the latest version whose fork schema stamp lacks this build's epoch.
+  test('L102: at the latest version without the fork tables + autoApply → replays the schema, no longer behind', async () => {
+    let ran = false;
+    const behind = await resolveSchemaBehind({
+      schemaVer: 5,
+      latest: 5,
+      forkStale: true,
+      autoApply: true,
+      run: async () => { ran = true; return { applied: 0, current: 5 }; },
+    });
+    expect(behind).toBe(false);
+    expect(ran).toBe(true);
+  });
+
+  test('L102: at the latest version without the fork tables + interactive → stays behind, nothing run', async () => {
+    let ran = false;
+    const behind = await resolveSchemaBehind({
+      schemaVer: 5,
+      latest: 5,
+      forkStale: true,
+      autoApply: false,
+      run: async () => { ran = true; return { applied: 0, current: 5 }; },
+    });
+    expect(behind).toBe(true);
+    expect(ran).toBe(false);
+  });
+
   // The exit when the schema stays behind is pinned by behavior (#6089):
   // test/e2e/apply-migrations-schema-exit.test.ts and test/apply-migrations-schema-exit.test.ts.
 });

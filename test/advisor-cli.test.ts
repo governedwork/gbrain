@@ -32,6 +32,8 @@ import { join } from 'node:path';
 
 import { runAdvisorCli } from '../src/commands/advisor.ts';
 import { LATEST_VERSION } from '../src/core/migrate.ts';
+import { FORK_SCHEMA_EPOCH } from '../src/core/fork-schema-epoch.generated.ts';
+import { FORK_SCHEMA_EPOCH_KEY } from '../src/core/fork-schema.ts';
 import { DEFAULT_EMBEDDING_MODEL } from '../src/core/ai/defaults.ts';
 import { getRecipe } from '../src/core/ai/recipes/index.ts';
 import type { BrainEngine } from '../src/core/engine.ts';
@@ -72,6 +74,8 @@ function fakeEngine(opts: FakeEngineOpts = {}): BrainEngine {
   const engine = {
     getConfig: async (key: string): Promise<string | null> => {
       if (key === 'version') return opts.schemaVersion ?? String(LATEST_VERSION);
+      // Ours (governedwork fork): a brain this build migrated also carries its fork schema stamp.
+      if (key === FORK_SCHEMA_EPOCH_KEY) return FORK_SCHEMA_EPOCH;
       return null; // schema_pack → default resolution; everything else unset
     },
     executeRaw: async (sql: string): Promise<unknown[]> => {

@@ -1,6 +1,8 @@
 import type { BrainEngine } from './engine.ts';
 import { engineKey } from './engine-key.ts';
 import { LATEST_SCHEMA_VERSION } from './schema-migrations/latest.generated.ts';
+import { FORK_SCHEMA_EPOCH } from './fork-schema-epoch.generated.ts';
+import { FORK_SCHEMA_EPOCH_KEY, forkSchemaStamped } from './fork-schema.ts';
 
 const SCHEMA_VERSION_SEEN = Symbol('gbrain.schemaVersionSeen');
 const SCHEMA_VERSION_AT_CONNECT = Symbol('gbrain.schemaVersionAtConnect');
@@ -26,8 +28,9 @@ export function schemaVersionSeen(engine: object): number | undefined {
 /**
  * Cheap probe: does this engine have schema migrations pending?
  *
- * Reads the `version` config row in a single round-trip (no schema replay,
- * no migration apply) and compares it with the generated latest version, so
+ * Reads the `version` config row and the fork schema stamp together (no
+ * schema replay, no migration apply) and compares them with the generated
+ * latest version and fork schema epoch, so
  * it never loads the migration modules themselves (migrate.ts does; it
  * re-exports this). Used by `connectEngine` to gate `initSchema()` so
  * short-lived CLI invocations on already-migrated brains don't pay the
@@ -43,10 +46,13 @@ export function schemaVersionSeen(engine: object): number | undefined {
  */
 export async function hasPendingMigrations(engine: BrainEngine): Promise<boolean> {
   try {
-    const currentStr = await engine.getConfig('version');
+    const [currentStr, forkEpoch] = await Promise.all([engine.getConfig('version'), engine.getConfig(FORK_SCHEMA_EPOCH_KEY)]);
     const current = parseInt(currentStr || '1', 10);
     noteSchemaVersion(engine, current);
-    return current < LATEST_SCHEMA_VERSION;
+    // Ours (governedwork fork): at this build's version, a brain whose fork schema stamp lacks this build's epoch
+    // still needs the blob replay that creates the fork's tables (src/core/fork-schema.ts). A brain ahead of this
+    // build is never replayed by it.
+    return current < LATEST_SCHEMA_VERSION || (current === LATEST_SCHEMA_VERSION && !forkSchemaStamped(forkEpoch, FORK_SCHEMA_EPOCH));
   } catch {
     return true;
   }

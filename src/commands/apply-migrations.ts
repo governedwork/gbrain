@@ -463,13 +463,17 @@ function printDryRun(plan: Plan, installed: string, dbProbe: DbProbeOutcome): vo
 async function resolveSchemaBehind(opts: {
   schemaVer: number;
   latest: number;
+  /** Ours (governedwork fork): at `latest`, the brain lacks this build's fork schema (src/core/fork-schema.ts). */
+  forkStale?: boolean;
   autoApply: boolean;
   run: () => Promise<{ applied: number; current: number }>;
 }): Promise<boolean> {
   const { schemaVer, latest, autoApply, run } = opts;
-  if (schemaVer >= latest) return false;
+  const forkOnly = schemaVer >= latest && opts.forkStale === true;
+  if (schemaVer >= latest && !forkOnly) return false;
+  const state = forkOnly ? `Schema v${schemaVer} lacks this gbrain's fork tables` : `Schema version ${schemaVer} is behind latest ${latest}`;
   if (autoApply) {
-    console.error(`Schema version ${schemaVer} is behind latest ${latest}; running schema migrations...`);
+    console.error(`${state}; running schema migrations...`);
     try {
       const result = await run();
       console.error(`Applied ${result.applied} schema migration(s); now at v${result.current}.`);
@@ -480,7 +484,7 @@ async function resolveSchemaBehind(opts: {
     }
   }
   console.warn(
-    `\n⚠️  Schema version ${schemaVer} is behind latest ${latest}.\n` +
+    `\n⚠️  ${state}.\n` +
     `   Run \`gbrain apply-migrations --yes\` to apply now, or \`gbrain init --migrate-only\`.\n`,
   );
   return true;
@@ -1042,9 +1046,12 @@ async function preflightSchema(
       } else {
         const { engine: eng, version: schemaVer } = await connectAtSchemaVersion(cfg);
         dbProbe = { status: 'connected', schemaVer, latest: LATEST_VERSION };
+        // Ours (governedwork fork): hasPendingMigrations also reads the fork schema stamp (src/core/fork-schema.ts).
+        const { hasPendingMigrations } = await import('../core/migrate-pending.ts');
         schemaBehind = await resolveSchemaBehind({
           schemaVer,
           latest: LATEST_VERSION,
+          forkStale: schemaVer >= LATEST_VERSION && await hasPendingMigrations(eng),
           // --list and --dry-run are read-only surfaces: never mutate schema
           // even when combined with --yes/--non-interactive.
           autoApply: (cli.yes || cli.nonInteractive) && !cli.dryRun && !cli.list,
