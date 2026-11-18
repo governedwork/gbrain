@@ -2633,8 +2633,21 @@ DO \$rls\$ BEGIN
   END IF;
 END \$rls\$;
 
+-- Ours (governedwork fork): the request-log retention tally (upstream #6770 creates it in a numbered migration).
+CREATE TABLE IF NOT EXISTS mcp_request_log_rollup (
+  token_name TEXT PRIMARY KEY,
+  requests BIGINT NOT NULL DEFAULT 0,
+  last_used_at TIMESTAMPTZ,
+  pruned_through TIMESTAMPTZ
+);
+DO \$rls\$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles pr WHERE pg_has_role(current_user, pr.oid, 'USAGE') AND (pr.rolbypassrls OR pr.rolsuper)) THEN
+    ALTER TABLE mcp_request_log_rollup ENABLE ROW LEVEL SECURITY;
+  END IF;
+END \$rls\$;
+
 -- Ours (governedwork fork): stamps the fork schema epoch; stays after every fork fragment.
-INSERT INTO config (key, value) VALUES ('fork_schema_epoch', '90e46d26b4e88d2d')
+INSERT INTO config (key, value) VALUES ('fork_schema_epoch', 'c1742fb921397a1c')
   ON CONFLICT (key) DO UPDATE SET value = CASE
     WHEN position(',' || EXCLUDED.value || ',' IN ',' || config.value || ',') > 0 THEN config.value
     ELSE config.value || ',' || EXCLUDED.value END;
