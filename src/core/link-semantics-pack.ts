@@ -52,6 +52,7 @@ export async function primeRelationSemantics(engine: Partial<Pick<BrainEngine, '
     if (packs.every(p => p === null)) return;
     setPackRelationSemantics(packRelationSemantics(packs.map(p => p?.manifest)));
   } catch {
+    // pack-store-failure-ok: keeps the relation semantics already installed.
     // keep the semantics already installed
   }
 }

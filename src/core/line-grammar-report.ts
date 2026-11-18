@@ -101,6 +101,7 @@ export async function lineGrammarReport(engine: BrainEngine, opts: {
       declaredTypes = verbs.length ? new Set(verbs) : null;
     }
   } catch (e) {
+    // pack-store-failure-ok: a report; it prints the failure.
     return {
       state: 'diagnostics_failed',
       message: `Line-grammar diagnostics could not read the brain's grammar settings or schema pack (${(e as Error).message}); nothing about this page's typed lines is known.`,

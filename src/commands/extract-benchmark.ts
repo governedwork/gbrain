@@ -243,6 +243,7 @@ export async function runExtractBenchmark(
       remote: false,
     } as unknown as Parameters<typeof loadActivePackBestEffort>[0]);
   } catch (err) {
+    // pack-store-failure-ok: a benchmark; nothing is written.
     console.error(`Failed to load active pack: ${(err as Error).message}`);
     process.exit(2);
   }

@@ -293,7 +293,10 @@ export async function inspectCompanyBrain(options: InspectCompanyBrainOptions): 
     }
     for (const [rule, result] of lintCounts) finding(plan, result.severity, result.severity === 'error' ? 'schema_incompatible' : 'schema_warning',
       `Resolved company schema reports ${rule} (${result.count}); review the selected schema.`);
-  } catch { finding(plan, 'error', 'schema_incompatible', 'The company-brain schema could not be resolved and validated.'); pack = null; }
+  } catch {
+    // pack-store-failure-ok: a read-only inspection that reports the pack as unresolved.
+    finding(plan, 'error', 'schema_incompatible', 'The company-brain schema could not be resolved and validated.'); pack = null;
+  }
   try {
     plan.revision = await resolveCommittedRevision(options.path, options.revision);
     const entries = await inventoryCommittedRevision(plan.revision, limits);

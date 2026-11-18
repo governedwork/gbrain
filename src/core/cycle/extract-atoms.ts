@@ -191,8 +191,8 @@ async function resolveExtractableTypes(): Promise<string[]> {
     const { extractableTypesFromPack, nonExtractableTypesFromPack } = await import('../schema-pack/extractable.ts');
     const resolved = await loadActivePack({ cfg: loadConfig(), remote: false });
     packExtractable = extractableTypesFromPack(resolved.manifest); packExcluded = nonExtractableTypesFromPack(resolved.manifest);
-  } catch {
-    // Pack unavailable (test seams, bootstrap) — legacy floor only.
+  } catch (err) { // Pack unavailable (test seams, bootstrap) — legacy floor only; ours (fork): a pack-store failure is raised.
+    if ((await import('../schema-pack/db-store.ts')).isPackStoreFailure(err)) throw err;
   }
   return unionExtractableTypes(packExtractable, packExcluded);
 }

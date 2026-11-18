@@ -450,7 +450,9 @@ async function runIngest(engine: BrainEngine, args: string[], dispatch: Pick<Cli
     const { loadConfig } = await import('../core/config.ts');
     const resolved = await loadActivePack({ cfg: loadConfig(), remote: false, sourceId });
     activePack = { page_types: resolved.manifest.page_types };
-  } catch {
+  } catch (err) {
+    // Ours (governedwork fork): an unreadable pack store is not "no pack" (db-store.ts isPackStoreFailure).
+    if ((await import('../core/schema-pack/db-store.ts')).isPackStoreFailure(err)) throw err;
     activePack = undefined;
   }
 

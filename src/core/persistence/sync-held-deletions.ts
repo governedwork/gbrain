@@ -23,7 +23,7 @@ import { execFile } from '../spawn.ts';
 import { gitChildEnv } from '../git-env.ts';
 import { HARDENED_GIT_ARGS, NO_LAZY_FETCH_ENV } from '../hardened-git.ts';
 import { ghostFileBacked } from '../repair/ghost-pages.ts';
-import { loadActivePackForEngine } from '../schema-pack/engine-resolution.ts';
+import { loadActivePackForEngineOrNull } from '../schema-pack/engine-resolution.ts';
 import { fileMatchesSnapshot } from './page-prepare.ts';
 import type { ManagedSyncContext } from './sync-discovery.ts';
 import { readBlobs } from './sync-git-stream.ts';
@@ -106,7 +106,7 @@ async function proveHeldDeletions(engine: BrainEngine, level: ShadowLevel, conte
     parents.set(entry.path, { commit: found.commit, oid: await lastCommittedBlob(level.gitRoot, found.commit, entry.path) });
   }
   const blobs = await readBlobs(level.gitRoot, [...new Set([...parents.values()].flatMap(parent => parent.oid ? [parent.oid] : []))], BLOB_MAX_BYTES).catch(() => new Map<string, Buffer>());
-  const activePack = (await loadActivePackForEngine(engine, { remote: false, sourceId: level.sourceId }).catch(() => null))?.manifest;
+  const activePack = (await loadActivePackForEngineOrNull(engine, { remote: false, sourceId: level.sourceId }))?.manifest;
   const owner = { host_id: context.binding.owner_host_id ?? '', worktree_id: context.binding.worktree_id, owner_epoch: String(context.binding.owner_epoch), source_incarnation: level.incarnation };
   for (const entry of batch) {
     const parent = parents.get(entry.path);

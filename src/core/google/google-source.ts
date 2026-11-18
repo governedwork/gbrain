@@ -802,7 +802,11 @@ async function runGoogleSyncInner(engine: BrainEngine, sourceId: string, cfg: Go
       const { loadConfig } = await import('../config.ts');
       const resolved = await loadActivePack({ cfg: loadConfig(), remote: false, sourceId });
       activePack = { page_types: resolved.manifest.page_types };
-    } catch { /* legacy prefix typing */ }
+    } catch (err) {
+      // Ours (governedwork fork): an unreadable pack store is not "no pack" (db-store.ts isPackStoreFailure).
+      if ((await import('../schema-pack/db-store.ts')).isPackStoreFailure(err)) throw err;
+      /* legacy prefix typing */
+    }
   }
 
   // Scope preflight: a source configured for a service the credential's

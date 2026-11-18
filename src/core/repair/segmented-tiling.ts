@@ -44,7 +44,7 @@ import { hostIdFor } from '../persistence/identity.ts';
 import { gitChildEnv } from '../git-env.ts';
 import { loadRepairBusySet, repairBusy, repairBusyError } from '../persistence/repair-busy.ts';
 import { clearGitHold, readGitHold, recordSyncImportProvenance, requestGitHoldRetry, syncImportParserFor, type GitHoldRecord } from '../persistence/sync-holds.ts';
-import { loadActivePackForEngine } from '../schema-pack/engine-resolution.ts';
+import { loadActivePackForEngineOrNull } from '../schema-pack/engine-resolution.ts';
 import { VERSION } from '../../version.ts';
 import { unreadPageImportScreen } from '../persistence/sync-screen.ts';
 import { PAGE_BODY_FAULT_CODES } from '../persistence/sync-fault-class.ts';
@@ -241,7 +241,7 @@ async function republish(tx: BrainEngine, page: HealPage, body: { truth: string;
   // prescreens the file instead of holding it file_drift as a database-only edit. Kept metadata the file no longer imports stays guarded.
   if (body.asStored) {
     const [after] = await tx.executeRaw<{ revision: string }>('SELECT knowledge_revision::text AS revision FROM pages WHERE id=$1', [page.page_id]);
-    const pack = await loadActivePackForEngine(tx, { remote: false, sourceId: page.source_id }).catch(() => null);
+    const pack = await loadActivePackForEngineOrNull(tx, { remote: false, sourceId: page.source_id });
     await recordSyncImportProvenance(tx, { source_id: page.source_id, incarnation: page.incarnation, page_id: page.page_id, origin: page.source_path,
       raw_sha256: page.blob_sha256, blob_oid: page.blob_oid, working: false, gbrain_version: VERSION, revision: after!.revision,
       parser: syncImportParserFor(page.source_path, pack?.identity ?? null), disk_sha256: page.blob_sha256, disk_blob_oid: page.blob_oid });

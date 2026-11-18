@@ -10,7 +10,7 @@ import type { BrainEngine } from '../core/engine.ts';
 import { loadConfig } from '../core/config.ts';
 import { opError } from '../core/ops/contract.ts';
 import { engineSchemaInput } from '../core/schema-pack/engine-resolution.ts';
-import { loadActivePack, resolveActivePackNameOnly, type LoadActivePackInput } from '../core/schema-pack/load-active.ts';
+import { loadActivePack, primeBrainResidentPack, resolveActivePackNameOnly, type LoadActivePackInput } from '../core/schema-pack/load-active.ts';
 import { fetchSource } from '../core/sources-load.ts';
 import { writeCliRefusal } from '../cli/cli-error.ts';
 
@@ -25,11 +25,14 @@ const DOCS = 'docs/architecture/schema-packs.md#per-source-resolution';
 async function readDatabasePlane(withEngine: WithEngine, sourceId: string | undefined): Promise<DatabaseRead> {
   try {
     return await withEngine(async (engine) => {
-      const input = await engineSchemaInput(engine, { remote: false, sourceId });
+      const { packStore, ...input } = await engineSchemaInput(engine, { remote: false, sourceId });
+      // Ours (governedwork fork): the pack resolves after this connection closes; read the brain's pack heads now.
+      await primeBrainResidentPack({ ...input, packStore });
       const source = sourceId ? await fetchSource(engine, sourceId) : null;
       return { state: 'read' as const, input, sourceKnown: !sourceId || (source !== null && source.archived !== true) };
     });
   } catch (e) {
+    // pack-store-failure-ok: reported as the database plane being unreadable.
     return { state: 'unreadable', error: e instanceof Error ? e.message : String(e) };
   }
 }

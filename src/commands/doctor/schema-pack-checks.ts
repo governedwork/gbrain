@@ -52,6 +52,7 @@ export async function checkSchemaPackActive(engine: BrainEngine): Promise<Check>
     }
     return { name: 'schema_pack_active', status: 'ok', message: summary };
   } catch (e) {
+    // pack-store-failure-ok: doctor reports the failure.
     return {
       name: 'schema_pack_active',
       status: 'warn',

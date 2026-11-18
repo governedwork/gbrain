@@ -1132,7 +1132,11 @@ async function runGitHubSyncInner(engine: BrainEngine, sourceId: string, cfg: Gi
       const { loadConfig } = await import('./config.ts');
       const resolved = await loadActivePack({ cfg: loadConfig(), remote: false, sourceId });
       activePack = { page_types: resolved.manifest.page_types };
-    } catch { /* fall back to legacy typing */ }
+    } catch (err) {
+      // Ours (governedwork fork): an unreadable pack store is not "no pack" (db-store.ts isPackStoreFailure).
+      if ((await import('./schema-pack/db-store.ts')).isPackStoreFailure(err)) throw err;
+      /* fall back to legacy typing */
+    }
   }
 
   // Keep previous scope before this run resolves its refreshed repo list.

@@ -20,6 +20,7 @@ export async function expandEngineTypeFilters(
   try {
     pack = await loadActivePack(inputs[0]);
   } catch {
+    // pack-store-failure-ok: a read: the query runs without its type filter; nothing is written.
     return { type: undefined, types: [] };
   }
   const scalar = options.type ? expandClosure(options.type, pack.alias_graph) : undefined;

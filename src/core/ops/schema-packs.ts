@@ -42,7 +42,7 @@ async function packChainReadable(ctx: Parameters<Operation['handler']>[0], name:
   if (readable === null) return true;
   const { packResolutionNames } = await import('../schema-pack/load-active.ts');
   const { brainResidentPackSource } = await import('../schema-pack/db-store.ts');
-  return (await packResolutionNames(name)).every((n) => {
+  return (await packResolutionNames(name, ctx.engine)).every((n) => {
     const owner = brainResidentPackSource(n);
     return owner === null || readable.includes(owner);
   });
@@ -140,9 +140,6 @@ const schema_lint: Operation = {
   handler: async (ctx, p) => {
     const { runAllLintRules } = await import('../schema-pack/lint-rules.ts');
     const { loadDeclaredPackByName, loadResolvedPackByName, resolveActivePackNameOnly } = await import('../schema-pack/load-active.ts');
-    const { refreshBrainResidentPacks } = await import('../schema-pack/db-store.ts');
-    // Ours (governedwork fork): brain-resident packs resolve from the overlay; load it first.
-    await refreshBrainResidentPacks(ctx.engine);
     // Ours (governedwork fork): the pack as declared, so the borrow_from rules run over MCP too.
     let loaded;
     if (p.pack) {
@@ -166,7 +163,7 @@ const schema_lint: Operation = {
       // extends-inherited page types count as declared — parity with the active branch.
       const { UnknownPackError } = await import('../schema-pack/registry.ts');
       try {
-        loaded = await loadDeclaredPackByName(packName);
+        loaded = await loadDeclaredPackByName(packName, ctx.engine);
       } catch (err) {
         if (err instanceof UnknownPackError && err.name_ === packName) return notFound;
         throw err;
@@ -180,8 +177,8 @@ const schema_lint: Operation = {
       // each source as declared, so when the chain reaches a source the caller cannot read
       // they are skipped (borrow_checks_skipped) and only the resolved form is linted.
       loaded = await packChainReadable(ctx, activeName)
-        ? await loadDeclaredPackByName(activeName)
-        : { resolved: await loadResolvedPackByName(activeName), declared: undefined };
+        ? await loadDeclaredPackByName(activeName, ctx.engine)
+        : { resolved: await loadResolvedPackByName(activeName, ctx.engine), declared: undefined };
     }
     const { resolved, declared } = loaded;
     // File-plane only over MCP; the engine-aware --with-db opt-in is
@@ -382,7 +379,7 @@ const put_schema_pack: Operation = {
       name: String(p.name), source_id: pageMutationSource(ctx, p, 'put_schema_pack'), manifest: p.manifest as Record<string, unknown>,
       expected_revision: (p.expected_revision ?? null) as string | null, note: p.note as string | undefined,
       published_by: `${principal.kind}:${principal.id}`,
-    }, resolveLoadedPack);
+    }, (manifest) => resolveLoadedPack(manifest, ctx.engine));
   },
   cliHints: { name: 'put-schema-pack', positional: [] },
 };

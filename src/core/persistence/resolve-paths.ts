@@ -43,7 +43,7 @@ import { embeddingsDisabled } from '../embedding-disabled.ts';
 import { embeddingStateFix, type EmbeddingState } from '../embedding-state.ts';
 import { PAGE_SEARCHABLE, readPageSearchability } from '../page-searchability.ts';
 import { loadSyncEligibility, syncGit } from './sync-discovery.ts';
-import { loadActivePackForEngine } from '../schema-pack/engine-resolution.ts';
+import { loadActivePackForEngineOrNull } from '../schema-pack/engine-resolution.ts';
 import { readBlobContents } from './sync-blobs.ts';
 import { readGitHold } from './sync-holds.ts';
 import { persistenceEnabledForHealth } from './ownership.ts';
@@ -175,7 +175,7 @@ export async function resolveSourcePaths(engine: BrainEngine, sourceId: string, 
   if (pageless.length) {
     const blobOf = (p: typeof pageless[number]) => synced.get(p.gitPath) ?? atHead?.get(p.gitPath);
     const later = readBlobContents(gitRoot, pageless.map(blobOf).filter(row => row !== undefined && row.size <= 256 * 1024 && !heads.has(row.oid)) as never);
-    const pack = (await loadActivePackForEngine(engine, { remote: false, sourceId }).catch(() => null))?.manifest ?? { page_types: [] };
+    const pack = (await loadActivePackForEngineOrNull(engine, { remote: false, sourceId }))?.manifest ?? { page_types: [] };
     const rows = pageless.map(p => {
       const content = heads.get(blobOf(p)!.oid) ?? later.get(blobOf(p)!.oid);
       let fm: Record<string, unknown> = { visibility: 'private' };

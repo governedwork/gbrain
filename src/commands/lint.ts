@@ -43,7 +43,7 @@ import { maintenancePreflight, publishMaintenancePage, type MaintenanceAuthority
 import { fileMatchesSnapshot, prepareFileTarget } from '../core/persistence/page-prepare.ts';
 import { scannerSlugRootMode, scannerSourcePath } from '../core/write-through.ts';
 import { heldFileDiagnostic, writeFailureDiagnostic } from '../core/persistence/verb-errors.ts';
-import { loadActivePackForEngine } from '../core/schema-pack/engine-resolution.ts';
+import { loadActivePackForEngineOrNull } from '../core/schema-pack/engine-resolution.ts';
 import { OperationError, opError } from '../core/ops/contract.ts';
 import { readFix } from '../core/ops/op-fix.ts';
 import { ERROR_CATALOGUE } from '../core/error-catalogue.ts';
@@ -524,7 +524,9 @@ async function resolveLintContentSanity(
   if (typePack === undefined) {
     try {
       typePack = (await loadActivePack({ cfg: base, remote: false })).manifest;
-    } catch {
+    } catch (err) {
+      // Ours (governedwork fork): an unreadable pack store is not "no pack" (db-store.ts isPackStoreFailure).
+      if ((await import('../core/schema-pack/db-store.ts')).isPackStoreFailure(err)) throw err;
       typePack = null;
     }
   }
@@ -828,7 +830,7 @@ export async function runLintCore(opts: LintOpts): Promise<LintResult> {
   const pendingIssues: LintIssue[] = [];
   // The coordinator parses files with the source's active pack; the divergence check must too.
   const activePack = maintenance?.binding
-    ? (await loadActivePackForEngine(opts.engine!, { remote: false, sourceId: maintenance.writer.sourceId }).catch(() => null))?.manifest
+    ? (await loadActivePackForEngineOrNull(opts.engine!, { remote: false, sourceId: maintenance.writer.sourceId }))?.manifest
     : undefined;
 
   for (let idx = 0; idx < pages.length; idx++) {

@@ -86,6 +86,7 @@ export async function packTypeNames(engine: BrainEngine, sourceId: string | unde
     const pack = await loadActivePackForEngine(engine, { remote: true, sourceId });
     return [...new Set(pack.manifest.page_types.flatMap(t => [t.name, ...(t.aliases ?? [])]))];
   } catch {
+    // pack-store-failure-ok: a search hint; a read.
     return [];
   }
 }

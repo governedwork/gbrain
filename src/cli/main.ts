@@ -2770,8 +2770,8 @@ async function completeEngineStartup(engine: BrainEngine, opts: EngineConnectOpt
   // #5628: drop this host's markers of a retired managed epoch before any filesystem guard check. A one-shot read runs no guard check.
   if (!opts.oneShotRead) try { await (await import('../core/persistence/deactivation.ts')).cleanupRetiredManagedMarkers(engine); } catch { /* status reports pending markers */ }
 
-  // Ours: load brain-resident schema packs so every pack resolution in this process sees them (empty disk).
-  try { await (await import('../core/schema-pack/db-store.ts')).refreshBrainResidentPacks(engine); } catch { /* pack resolution reports it */ }
+  // Ours: pack resolutions in this process read brain-resident packs from this brain; binding runs no query.
+  (await import('../core/schema-pack/db-store.ts')).bindBrainResidentPackStore(engine);
 
   await (await import('./db-plane-config.ts')).mergeDbPlaneConfig(engine, config, MERGED_CONFIG_BY_ENGINE);
 

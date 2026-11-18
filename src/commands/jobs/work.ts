@@ -194,8 +194,8 @@ export async function runJobsWork({ args, engine, queue }: JobsCommandContext): 
     }
   }
 
-  // Ours (governedwork fork): see keepBrainResidentPacksFresh.
-  (await import('../../core/schema-pack/db-store.ts')).keepBrainResidentPacksFresh(engine);
+  // Ours (governedwork fork): pack resolution in jobs reads this brain's brain-resident packs (db-store.ts).
+  (await import('../../core/schema-pack/db-store.ts')).bindBrainResidentPackStore(engine);
 
   const { resolveTerminalHook, terminalHookNotifier } = await import('../../core/minions/terminal-hook.ts');
   const terminalHook = resolveTerminalHook(loadConfig());

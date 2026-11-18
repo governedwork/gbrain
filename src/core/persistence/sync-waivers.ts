@@ -12,7 +12,7 @@ import { heldDiskBytes, prepareManagedSyncMutation, type SyncIntent } from './sy
 import { heldGitPaths, readSyncImportProvenances, syncImportParserFor, recordSyncImportProvenances, syncDiskProvenance, type SyncImportProvenance, type SyncImportProvenanceBase } from './sync-holds.ts';
 import { sameParser } from './sync-prescreen.ts';
 import { isSyncReadBound, isUnreadableSyncFile } from './sync-screen.ts';
-import { loadActivePackForEngine } from '../schema-pack/engine-resolution.ts';
+import { loadActivePackForEngineOrNull } from '../schema-pack/engine-resolution.ts';
 import { sha256 } from './digest.ts';
 import { startClaimPhase } from './claim-phase.ts';
 import { inspectUnchanged, kernelPageSql, kernelPageWork, screeningRequest, type KernelPage, type NoopKernelWaiver } from './noop-kernel.ts';
@@ -283,7 +283,7 @@ export async function waivePrescreenedRun<C extends WaiverCursor & { binding: { 
   if (!run.length || !noopWaiversEnabled()) return null;
   for (let i = 0; i < run.length; i += 16) await Promise.all(run.slice(i, i + 16).map(entry => validateSyncAuthority(engine, cursor.authority, entry.slug)));
   // A cursor frozen by another binary or under another schema pack re-checks the parser fingerprint its prescreen matched.
-  const pack = input.noSchemaPack ? null : await loadActivePackForEngine(engine, { remote: false, sourceId: cursor.sourceId }).catch(() => null);
+  const pack = input.noSchemaPack ? null : await loadActivePackForEngineOrNull(engine, { remote: false, sourceId: cursor.sourceId });
   try {
     return await engine.transaction(async tx => {
       await tx.executeRaw("SELECT set_config('lock_timeout','2s',true),set_config('statement_timeout','10s',true)");
