@@ -154,7 +154,7 @@ describe('P4.6b enqueue sites', () => {
     const ctx = () => ({ engine, sourceId: SRC, state, log: () => {}, myAddresses: new Set(['a@example.com']), inFlight: new Set<string>(),
       fetchThread: async (threadId: string) => ({ threadId, account: 'a@example.com', messages: [{
         id: 'm1', threadId, from: 'Peer <peer@example.com>', fromAddress: 'peer@example.com', to: ['a@example.com'], cc: [], subject: 'Plan',
-        dateIso: new Date(Date.now() - 86_400_000).toISOString(), internalDateMs: Date.now() - 86_400_000, labelIds: ['INBOX'], listUnsubscribe: false,
+        dateIso: new Date(Date.now() - 86_400_000).toISOString(), internalDateMs: Date.now() - 86_400_000, labelIds: ['INBOX'], listUnsubscribe: false, senderAuth: { spf: 'none', dkim: 'none', dmarc: 'none', dkim_domain: null } as const,
         calendarMethod: null, bodyText: 'Can you review the plan?' }] }) });
     const r = await runLoopsCatchup(ctx());
     expect(r).toMatchObject({ enqueued: 1, skipped_reason: null });

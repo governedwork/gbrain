@@ -47,7 +47,7 @@ function msg(over: Partial<GmailMessageMeta> = {}): GmailMessageMeta {
     dateIso: new Date(ms).toISOString(),
     internalDateMs: ms,
     labelIds: [],
-    listUnsubscribe: false,
+    listUnsubscribe: false, senderAuth: { spf: 'none', dkim: 'none', dmarc: 'none', dkim_domain: null },
     bodyText: 'Sharing the roadmap draft.',
     ...over,
   };
