@@ -2625,7 +2625,9 @@ never a watch loop.
 
 Two checks gate a PR: the lander's verdict and `fork-suite` (.github/workflows/fork-suite.yml, GitHub's Linux
 runners), which runs the whole unit and serial suites, upstream's E2E corpus against PostgreSQL (`scripts/run-e2e.sh`)
-and the unit suites' PostgreSQL arms (`scripts/postgres-unit-arms.ts`). The lander's check, in two steps. Per PR:
+and the unit suites' PostgreSQL arms (`scripts/postgres-unit-arms.ts`); a unit shard whose only failures are listed
+known upstream flakes (`scripts/fork-known-flakes.txt`) re-runs them once before it reads red. The lander's check, in
+two steps. Per PR:
 `bun run typecheck`, then the test files the change names — a changed `test/*.test.ts`, and
 `test/<name>.test.ts` of each changed `src/**/<name>.ts`. Once per base: the whole unit suite (`bun run test`,
 sharded to the run's CPU budget); a red it finds holds the queue until the base is fixed. Both run with

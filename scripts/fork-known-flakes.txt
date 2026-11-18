@@ -1,0 +1,7 @@
+# Ours (governedwork fork): known upstream flakes that fork-suite's unit shards re-run once before reading red
+# (scripts/fork-retry-known-flakes.ts). One `<test file>\t<test name>` per line, the name exactly as the JUnit
+# receipt carries it. List only a test that also fails intermittently on bare upstream, with the upstream issue;
+# remove its row when upstream fixes it.
+#
+# belief-ledger probe 13: intermittent under load (2 of 20 runs on macOS), upstream garrytan/gbrain#9745.
+test/belief-ledger-coverage.test.ts	probe 13: a stalled publication stays unproven until its commit mark, then becomes visible; a later event of the page proves it

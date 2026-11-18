@@ -6,7 +6,9 @@
 # the same suite on GitHub's free Linux runners (the fork is public), with upstream's own shard scripts, and
 # `fork-suite` is the context the brains-v* ruleset requires beside `lander/verdict` (operator ruling 2026-10-19,
 # arc gbrain-bump). It also carries the tests only PostgreSQL can run: upstream's E2E corpus (scripts/run-e2e.sh) and
-# the unit suites' PostgreSQL arms (scripts/postgres-unit-arms.ts). Pinned by test/fork-suite-workflow.test.ts.
+# the unit suites' PostgreSQL arms (scripts/postgres-unit-arms.ts). A unit shard whose only failures are listed known
+# upstream flakes (scripts/fork-known-flakes.txt) re-runs them once before it reads red
+# (scripts/fork-retry-known-flakes.ts); any other failure stays red. Pinned by test/fork-suite-workflow.test.ts.
 name: fork-suite
 
 on:
@@ -43,7 +45,9 @@ jobs:
         timeout-minutes: 8
         run: bun scripts/ci-bun-install.ts --frozen-lockfile
       - name: Unit shard ${{ matrix.shard }}/12
-        run: bash scripts/test-shard.sh ${{ matrix.shard }} 12
+        env:
+          GBRAIN_TEST_RECEIPT_DIR: ${{ runner.temp }}/receipts
+        run: bash scripts/test-shard.sh ${{ matrix.shard }} 12 || bun scripts/fork-retry-known-flakes.ts "$GBRAIN_TEST_RECEIPT_DIR"
 
   serial:
     runs-on: ubuntu-24.04
