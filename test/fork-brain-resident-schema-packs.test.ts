@@ -37,13 +37,24 @@ describe('fresh-install schema', () => {
   });
 });
 
+// A second brain the process binds and then closes (the L100 disconnect test); opened here per the isolation rule R3.
+let other: PGLiteEngine;
+let otherOpen = false;
+
 beforeAll(async () => {
   engine = new PGLiteEngine();
   await engine.connect({});
   await engine.initSchema();
+  other = new PGLiteEngine();
+  await other.connect({});
+  await other.initSchema();
+  otherOpen = true;
 }, 60_000);
 
-afterAll(async () => { await engine.disconnect(); });
+afterAll(async () => {
+  await engine.disconnect();
+  if (otherOpen) await other.disconnect();
+});
 
 beforeEach(async () => {
   await resetPgliteState(engine);
@@ -345,12 +356,10 @@ describe('brain-resident schema packs', () => {
     const { UnknownPackError } = await import('../src/core/schema-pack/registry.ts');
     _resetBrainResidentPacksForTests();
     _resetPackCacheForTests();
-    const other = new PGLiteEngine();
-    await other.connect({});
-    await other.initSchema();
     // The process binds the brain it opened (CLI connect, serve, the worker), then that engine closes.
     bindBrainResidentPackStore(other);
     await other.disconnect();
+    otherOpen = false;
     let thrown: unknown = null;
     await withEnv({ GBRAIN_HOME: home, GBRAIN_SCHEMA_PACK: undefined }, async () => {
       try { await loadActivePack({ cfg: null, remote: false, dbConfig: 'pack-nobody-published' }); } catch (err) { thrown = err; }

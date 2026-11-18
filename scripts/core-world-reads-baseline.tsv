@@ -916,8 +916,8 @@ src/core/schema-migration-lock.ts	module_collection	1	stays: GBRA-467 per-engine
 src/core/schema-pack/bundled-assets.ts	fs_import	1	W7: filesystem boundary moves to the local app
 src/core/schema-pack/candidate-audit.ts	fs_import	1	W7: filesystem boundary moves to the local app
 src/core/schema-pack/candidate-audit.ts	process_env	1	W6: settings plane out of the core
-src/core/schema-pack/db-store.ts	module_collection	1	fork F2: the brain-resident schema-pack overlay, a per-process cache over schema_pack_heads refreshed by serve and the jobs worker; W6: per-engine state
-src/core/schema-pack/engine-resolution.ts	process_env	2	W6: settings plane out of the core; +1 fork F2: the brain-resident overlay refresh checks the same GBRAIN_SCHEMA_PACK tier loadActivePack reads
+src/core/schema-pack/db-store.ts	module_collection	2	fork F2: the brain-resident schema-pack overlay, a per-process cache over schema_pack_heads re-checked by the loader; +1 fork gbrain#39 (L103): a WeakSet marking store errors passed on unchanged; W6: per-engine state
+src/core/schema-pack/engine-resolution.ts	process_env	1	W6: settings plane out of the core
 src/core/schema-pack/load-active.ts	fs_import	1	W7: filesystem boundary moves to the local app
 src/core/schema-pack/load-active.ts	process_env	1	W6: settings plane out of the core
 src/core/schema-pack/loader.ts	fs_import	1	W7: filesystem boundary moves to the local app
