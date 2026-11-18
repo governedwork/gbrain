@@ -9,7 +9,7 @@
  * front door registering its clients over the owner API could never grant a holder beyond the default `world`.
  */
 
-import { expect, test } from 'bun:test';
+import { afterAll, beforeAll, expect, test } from 'bun:test';
 import express from 'express';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -23,12 +23,18 @@ import { withEnv } from './helpers/with-env.ts';
 
 const HOLDERS = ['world', 'companies/acme-example', 'people/alice-example'];
 
-test('the owner API registers and rescopes a client with its takes holders, and a token of it carries them', async () => {
+let engine: PGLiteEngine;
+let root: string;
+beforeAll(async () => {
   // The real path: macOS's /var is a symlink, and the credential delivery home refuses one.
-  const root = mkdtempSync(join(realpathSync(tmpdir()), 'gbrain-fork-takes-holders-'));
-  const engine = new PGLiteEngine();
-  try {
-    await engine.connect({}); await engine.initSchema();
+  root = mkdtempSync(join(realpathSync(tmpdir()), 'gbrain-fork-takes-holders-'));
+  engine = new PGLiteEngine();
+  await engine.connect({}); await engine.initSchema();
+}, 60_000);
+afterAll(async () => { await engine?.disconnect(); if (root) rmSync(root, { recursive: true, force: true }); });
+
+test('the owner API registers and rescopes a client with its takes holders, and a token of it carries them', async () => {
+  {
     await withEnv({ GBRAIN_HOME: root }, async () => {
       const provider = new GBrainOAuthProvider({ sql: sqlQueryForEngine(engine), transaction: (fn) => engine.transaction((tx) => fn(sqlQueryForEngine(tx))) });
       const app = express();
@@ -78,5 +84,5 @@ test('the owner API registers and rescopes a client with its takes holders, and 
         expect((await stored('plain-example'))?.takes_holders).toBeNull();
       } finally { server.closeAllConnections(); await new Promise<void>((r) => server.close(() => r())); }
     });
-  } finally { await engine.disconnect(); rmSync(root, { recursive: true, force: true }); }
+  }
 }, 60_000);

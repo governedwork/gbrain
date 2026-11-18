@@ -156,6 +156,8 @@ test/folder-holding-coverage-gst2497.test.ts
 test/folder-holding-page-gst2492.test.ts
 test/forecast-journal.test.ts
 test/forget-door-landed-gst2517.test.ts
+test/fork-confirm-binding.test.ts
+test/fork-confirmer-authority.test.ts
 test/frontmatter-reserved-keys-6454.test.ts
 test/function-search-path-upgrade-parity.test.ts
 test/g4-forget-fence-edit.test.ts
@@ -764,6 +766,7 @@ test/sync-unreadable-file-gbra130.test.ts
 test/sync-waiver-budget.test.ts
 test/sync-waiver-run-imports.test.ts
 test/take-resolution-survives-publish.test.ts
+test/takes-supersession-citation.test.ts
 test/takes-vector-lifecycle-5885.serial.test.ts
 test/terminal-failures-6650.test.ts
 test/think-remote-model.test.ts
