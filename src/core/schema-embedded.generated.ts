@@ -3809,6 +3809,14 @@ DO \$rls\$ BEGIN
 END \$rls\$;
 -- END GENERATED from src/core/schema-pack/brain-pack-schema.ts (BRAIN_PACK_SCHEMA_SQL)
 
+-- Ours (governedwork fork): stamps the fork schema epoch; stays after every fork fragment and before the hardening.
+-- BEGIN GENERATED from src/core/fork-schema.ts (forkSchemaEpochSql). Edit that file, then run: bun run build:schema
+INSERT INTO config (key, value) VALUES ('fork_schema_epoch', '90e46d26b4e88d2d')
+  ON CONFLICT (key) DO UPDATE SET value = CASE
+    WHEN position(',' || EXCLUDED.value || ',' IN ',' || config.value || ',') > 0 THEN config.value
+    ELSE config.value || ',' || EXCLUDED.value END;
+-- END GENERATED from src/core/fork-schema.ts (forkSchemaEpochSql)
+
 -- Last statement: pg_temp ends every gbrain function's pinned search_path (#7632), after any CREATE OR REPLACE above reset it.
 -- BEGIN GENERATED from src/core/function-search-path.ts (FUNCTION_SEARCH_PATH_HARDENING_SQL). Edit that file, then run: bun run build:schema
 DO \$harden\$
