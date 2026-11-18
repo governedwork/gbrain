@@ -14,6 +14,8 @@ import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import {
   EMBEDDED_PATH,
+  FORK_EPOCH_PATH,
+  FORK_SCHEMA_EPOCH,
   FRAGMENTS,
   PGLITE_DO_BLOCKS,
   PGLITE_PATH,
@@ -44,9 +46,20 @@ function buildError(fn: () => unknown): string {
 
 describe('committed outputs are exactly the generated chain', () => {
   const out = buildAll(schemaSql);
-  for (const p of [SCHEMA_SQL_PATH, EMBEDDED_PATH, PGLITE_PATH]) {
+  for (const p of [SCHEMA_SQL_PATH, EMBEDDED_PATH, PGLITE_PATH, FORK_EPOCH_PATH]) {
     test(p, () => expect(out[p]).toBe(committed(p)));
   }
+
+  // Ours (governedwork fork): the epoch hashes the fork fragments, and the blob stamps it after all of them.
+  test('the fork schema epoch covers every fork fragment and is stamped last', () => {
+    const last = FRAGMENTS[FRAGMENTS.length - 1]!;
+    expect(last.source).toBe('src/core/fork-schema.ts');
+    expect(last.postgres).toContain(`'${FORK_SCHEMA_EPOCH}'`);
+    expect(FRAGMENTS.some((f) => f.fork)).toBe(true);
+    const lastFork = Math.max(...FRAGMENTS.map((f, i) => (f.fork ? i : -1)));
+    expect(lastFork).toBeLessThan(FRAGMENTS.length - 1);
+    expect(schemaSql.lastIndexOf(`-- BEGIN GENERATED from ${last.source}`)).toBeGreaterThan(schemaSql.lastIndexOf('-- END GENERATED from src/core/schema-pack/'));
+  });
 
   test('a hand edit inside a generated region is overwritten from the fragment', () => {
     const edited = schemaSql.replace('CREATE INDEX IF NOT EXISTS idx_oauth_grant_audit_client', 'CREATE INDEX IF NOT EXISTS idx_oauth_grant_audit_hand_edit');

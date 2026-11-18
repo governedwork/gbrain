@@ -2,9 +2,12 @@
  * Ours (governedwork fork), not upstream GBrain: brain-resident schema packs.
  *
  * One canonical copy, reaching fresh installs and every upgrade through
- * scripts/build-schema.ts FRAGMENTS (the schema blob is re-applied on each
- * initSchema). The fork takes no migration number: a fork-numbered migration
- * would shadow the upstream migration that later takes the same number.
+ * scripts/build-schema.ts FRAGMENTS, as a fork fragment: the schema blob that
+ * initSchema replays creates the tables. The fork takes no migration number
+ * (a fork-numbered migration would shadow the upstream migration that later
+ * takes the same number), so a connect replays the blob when the brain's fork
+ * schema stamp differs from this build's (src/core/fork-schema.ts), including
+ * a brain an upstream binary built at the same schema version.
  *
  * schema_pack_revisions holds append-only full manifests; schema_pack_heads
  * points at the current revision per pack and names the owning source.

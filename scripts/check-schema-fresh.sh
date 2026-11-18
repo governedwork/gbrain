@@ -3,7 +3,8 @@
 #
 # Mirrors scripts/check-tool-catalog-fresh.sh, for a whole chain: runs
 # scripts/build-schema.ts into a temp dir (fragments -> src/schema.sql regions
-# -> src/core/schema-embedded.generated.ts -> src/core/pglite-schema.generated.ts)
+# -> src/core/schema-embedded.generated.ts -> src/core/pglite-schema.generated.ts
+# -> src/core/fork-schema-epoch.generated.ts)
 # and diffs every output against the committed file, naming the source that
 # should have been edited. The generator's own FAIL/Why/Fix/See errors
 # (unknown construct, stale PGLite rule, broken region) surface unchanged.
@@ -37,6 +38,7 @@ check() {
 check src/schema.sql "the TS fragment module named in the drifted region's BEGIN GENERATED banner (never the region itself)"
 check src/core/schema-embedded.generated.ts "src/schema.sql (or a TS fragment module)"
 check src/core/pglite-schema.generated.ts "src/schema.sql, a TS fragment module, or the PGLite capability rules in scripts/build-schema.ts"
+check src/core/fork-schema-epoch.generated.ts "a fork fragment module (a FRAGMENTS entry marked fork: true) or src/core/fork-schema.ts"
 
 if [ "$fail" -ne 0 ]; then exit 1; fi
-echo "✓ generated schema chain is fresh (schema.sql regions, schema-embedded, pglite-schema template)"
+echo "✓ generated schema chain is fresh (schema.sql regions, schema-embedded, pglite-schema template, fork schema epoch)"
