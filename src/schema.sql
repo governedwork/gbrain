@@ -3416,5 +3416,7 @@ END $rls$;
 -- Ours (governedwork fork): stamps the fork schema epoch; stays after every fork fragment.
 -- BEGIN GENERATED from src/core/fork-schema.ts (forkSchemaEpochSql). Edit that file, then run: bun run build:schema
 INSERT INTO config (key, value) VALUES ('fork_schema_epoch', '90e46d26b4e88d2d')
-  ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
+  ON CONFLICT (key) DO UPDATE SET value = CASE
+    WHEN position(',' || EXCLUDED.value || ',' IN ',' || config.value || ',') > 0 THEN config.value
+    ELSE config.value || ',' || EXCLUDED.value END;
 -- END GENERATED from src/core/fork-schema.ts (forkSchemaEpochSql)

@@ -115,6 +115,27 @@ describe('hasPendingMigrations', () => {
       await engine.disconnect();
     }
   }, 60000);
+
+  test('L102: the fork schema stamp keeps every build that replayed it, so builds sharing a brain do not replay each other on every connect', async () => {
+    const { tryRunPendingMigrations } = await import('../src/core/migrate.ts');
+    const { FORK_SCHEMA_EPOCH } = await import('../src/core/fork-schema-epoch.generated.ts');
+    const engine = new PGLiteEngine();
+    await withColdPglite(() => engine.connect({}));
+    try {
+      await engine.initSchema();
+      // Another fork build (a rollback target, the other side of a rolling deploy) stamped the brain last.
+      await engine.setConfig('fork_schema_epoch', 'another-build');
+      expect(await hasPendingMigrations(engine)).toBe(true);
+      expect((await tryRunPendingMigrations(engine)).status).toBe('ok');
+      expect((await engine.getConfig('fork_schema_epoch'))!.split(',').sort()).toEqual(['another-build', FORK_SCHEMA_EPOCH].sort());
+      expect(await hasPendingMigrations(engine)).toBe(false);
+      // A newer build then replays its own blob and adds its epoch: this build still finds its own and stays put.
+      await engine.setConfig('fork_schema_epoch', `${FORK_SCHEMA_EPOCH},a-newer-build`);
+      expect(await hasPendingMigrations(engine)).toBe(false);
+    } finally {
+      await engine.disconnect();
+    }
+  }, 60000);
 });
 
 // ─────────────────────────────────────────────────────────────────
