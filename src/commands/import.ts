@@ -468,13 +468,9 @@ export async function runImport(
     throw new ImportAbortError('company-brain sources require approved committed ingestion');
   }
   let importActivePack: { page_types: ReadonlyArray<{ name: string; path_prefixes: ReadonlyArray<string>; aliases?: ReadonlyArray<string> }> } | undefined;
-  try {
-    const { loadActivePackForEngine } = await import('../core/schema-pack/engine-resolution.ts');
-    const resolved = await loadActivePackForEngine(engine, { remote: false, sourceId });
-    importActivePack = { page_types: resolved.manifest.page_types };
-  } catch {
-    importActivePack = undefined;
-  }
+  // Ours (governedwork fork): null when the pack does not resolve; a pack-store failure is raised, never "no pack".
+  const resolvedImportPack = await (await import('../core/schema-pack/engine-resolution.ts')).loadActivePackForEngineOrNull(engine, { remote: false, sourceId });
+  if (resolvedImportPack) importActivePack = { page_types: resolvedImportPack.manifest.page_types };
   const bodyPolicy = await readPageBodyPolicy(engine);
 
   const workersIdx = args.indexOf('--workers');

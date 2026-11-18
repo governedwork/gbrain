@@ -52,6 +52,7 @@ export async function runReviewCandidates(
     activePackName = pack.manifest.name;
     activeTypeNames = new Set(pack.manifest.page_types.map((t) => t.name));
   } catch {
+    // pack-store-failure-ok: a read-only review of type prefixes.
     // Active pack load failure: fall through with empty active set.
   }
 

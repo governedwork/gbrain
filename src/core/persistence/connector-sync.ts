@@ -13,7 +13,7 @@ import type { Action } from '../agent-output.ts';
 import type { RegistryCode } from '../error-registry.ts';
 import { currentSubmissionAuthority } from '../minions/submission-authority.ts';
 import { sealPageTextProjection } from '../page-state/projections.ts';
-import { loadActivePackForEngine } from '../schema-pack/engine-resolution.ts';
+import { loadActivePackForEngineOrNull } from '../schema-pack/engine-resolution.ts';
 import { authorizeStoredRequest, authorizeWrite } from './authority.ts';
 import { materializeTimeline, prepareCanonicalProjections } from './canonical-projections.ts';
 import { digest, sha256 } from './digest.ts';
@@ -1143,7 +1143,7 @@ export async function prepareConnectorMutation(engine: BrainEngine, row: WriteRe
     throw connectorPublicationRefusal('invalid_params', 'The connector import path is invalid.', row,
       `The recorded source path is empty, escapes the source, or does not map to ${row.slug}.`);
   }
-  const activePack = p.noSchemaPack ? undefined : (await loadActivePackForEngine(engine, { remote: false, sourceId: row.source_id }).catch(() => null))?.manifest;
+  const activePack = p.noSchemaPack ? undefined : (await loadActivePackForEngineOrNull(engine, { remote: false, sourceId: row.source_id }))?.manifest;
   const parsed = parseMarkdown(p.content, row.slug, { activePack });
   if (parsed.slug !== row.slug) throw connectorPublicationRefusal('invalid_params', 'The connector content changes its page identity.', row,
     `The provider content's frontmatter names a slug other than ${row.slug}.`);

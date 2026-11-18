@@ -4,10 +4,9 @@ import type { BrainEngine } from '../engine.ts';
 import { OperationError } from '../ops/contract.ts';
 import { loadActivePack, loadResolvedPackByName, type LoadActivePackInput } from './load-active.ts';
 import { invalidatePackCache, type ResolvedPack } from './registry.ts';
-import { refreshBrainResidentPacks } from './db-store.ts';
-import { isBundledPackName } from './bundled.ts';
+import { isPackStoreFailure, type PackStore } from './db-store.ts';
 
-export type EngineSchemaOptions = Omit<LoadActivePackInput, 'cfg' | 'dbConfig' | 'perSourceDb'>;
+export type EngineSchemaOptions = Omit<LoadActivePackInput, 'cfg' | 'dbConfig' | 'perSourceDb' | 'packStore'>;
 
 export async function readDbSchemaPack(
   engine: Pick<BrainEngine, 'getConfig'> | null | undefined,
@@ -24,14 +23,34 @@ export async function engineSchemaInput(
   const perSourceDb = new Map<string, string>();
   const value = sourceValue?.trim();
   if (options.sourceId && value) perSourceDb.set(options.sourceId, value);
-  const cfg = loadConfigFileOnly();
-  // Ours (governedwork fork): reload the brain-resident pack overlay only when a tier names a pack GBrain does not
-  // bundle; a brain on a bundled pack (the default) pays no query for it. serve and the jobs worker keep it fresh.
-  const named = [options.perCall, ...perSourceDb.values(), options.gbrainYml, dbConfig, cfg?.schema_pack, process.env.GBRAIN_SCHEMA_PACK?.trim()];
-  if (engine && 'executeRaw' in engine && named.some(n => n && !isBundledPackName(n))) {
-    await refreshBrainResidentPacks(engine as Parameters<typeof refreshBrainResidentPacks>[0]);
+  // Ours (governedwork fork): the engine is also the store brain-resident packs resolve from; the loader reads it
+  // only when the resolved pack is one GBrain does not bundle (load-active.ts). No engine, or one that cannot be read
+  // for them, reads none: never the process's bound store, which may be another brain.
+  const packStore = engine && 'executeRaw' in engine ? engine as PackStore : null;
+  return { ...options, cfg: loadConfigFileOnly(), dbConfig, perSourceDb, packStore };
+}
+
+/**
+ * Ours (governedwork fork): the pack `load` resolves, or null when it does not resolve (unknown, invalid,
+ * untrusted ...): the callers' "no vocabulary" contract. A failure reading the brain's stored packs
+ * (`pack_store_unreadable`, or a database error passed on for its caller to classify) is raised instead, never
+ * read as "no pack": the active pack may live there, and a write must not go ahead without it. Use it for every
+ * pack load whose failure would otherwise become null.
+ */
+export async function packOrNull<T>(load: Promise<T>): Promise<T | null> {
+  try {
+    return await load;
+  } catch (err) {
+    if (isPackStoreFailure(err)) throw err;
+    return null;
   }
-  return { ...options, cfg, dbConfig, perSourceDb };
+}
+
+/** Ours (governedwork fork): `loadActivePackForEngine` under the `packOrNull` contract (null when unresolvable). */
+export async function loadActivePackForEngineOrNull(
+  ...args: Parameters<typeof loadActivePackForEngine>
+): Promise<ResolvedPack | null> {
+  return packOrNull(loadActivePackForEngine(...args));
 }
 
 export async function loadActivePackForEngine(
@@ -84,7 +103,7 @@ export async function checkApprovedSchemaForEngine(
 ): Promise<ApprovedSchemaCheck> {
   if (options.remote !== false) throw new SchemaApprovalError('Approved schema binding requires a trusted local caller.');
   invalidatePackCache(approved.name);
-  const pack = await loadResolvedPackByName(approved.name);
+  const pack = await loadResolvedPackByName(approved.name, engine);
   const actual = approvedSchemaIdentity(pack);
   if (actual.name !== approved.name || actual.identity !== approved.identity || actual.resolvedManifestHash !== approved.resolvedManifestHash) {
     throw new SchemaApprovalError('The approved schema or its inherited definitions changed; inspect the source again.');

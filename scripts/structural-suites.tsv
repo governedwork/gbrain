@@ -223,6 +223,7 @@ test/migrate.test.ts	PR #356 + #363 — session timeouts applied via startup par
 test/migrate.test.ts	PR #356 — LATEST_VERSION is max(versions), not array[-1]	2	readFileSync,source-surface-helper
 test/migrate.test.ts	PR #356 — apply-migrations pre-flight schema-version warning	1	readFileSync,source-surface-helper
 test/migrate.test.ts	PR #356 — non-transactional DDL runs via reserved connection	1	readFileSync,source-surface-helper
+test/migrate.test.ts	hasPendingMigrations	5	source-surface-helper
 test/migrate.test.ts	migrate runner v67 — typed-claim columns materialized on PGLite	3	readFileSync
 test/migrate.test.ts	migrate v14 — pages_updated_at_index (handler-based, engine-aware)	2	readFileSync,source-surface-helper
 test/migrate.test.ts	migrate v20 — sources_table_additive	6	readFileSync
