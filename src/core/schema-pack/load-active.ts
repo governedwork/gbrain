@@ -64,9 +64,10 @@ export interface LoadActivePackInput {
   dbConfig?: string;
   /**
    * Ours (governedwork fork): the brain whose brain-resident packs this resolution reads (engineSchemaInput sets
-   * it to the engine); without one, the bound store (db-store.ts bindBrainResidentPackStore).
+   * it to the engine); omitted, the bound store (db-store.ts bindBrainResidentPackStore); null, none (an engine
+   * that cannot be read for them).
    */
-  packStore?: PackStore;
+  packStore?: PackStore | null;
 }
 
 /**
@@ -142,11 +143,11 @@ function defaultPackLocator(name: string): string | null {
  * Ours (governedwork fork): a pack GBrain does not bundle may live in the brain, which shadows the disk; re-check
  * the brain's heads before it is read (stat-TTL gated, one check at a time). A bundled pack never reads them.
  */
-async function freshFor(name: string, store?: PackStore): Promise<void> {
+async function freshFor(name: string, store?: PackStore | null): Promise<void> {
   if (!isBundledPackName(name)) await ensureBrainResidentPacksFresh(store);
 }
 
-async function loadPackManifestByName(name: string, store?: PackStore): Promise<SchemaPackManifest> {
+async function loadPackManifestByName(name: string, store?: PackStore | null): Promise<SchemaPackManifest> {
   await freshFor(name, store);
   const resident = isBundledPackName(name) ? null : brainResidentPack(name);
   if (resident) return resident;
@@ -205,7 +206,7 @@ export async function primeBrainResidentPack(input: LoadActivePackInput): Promis
  * MERGED manifest, matching validate/use/active (#4373; CLI `schema lint
  * <name>` resolves by name via loadResolvedPackByName, #4501).
  */
-export async function resolveLoadedPack(manifest: SchemaPackManifest, store?: PackStore): Promise<ResolvedPack> {
+export async function resolveLoadedPack(manifest: SchemaPackManifest, store?: PackStore | null): Promise<ResolvedPack> {
   // Ours (governedwork fork): resolvePack's identity fast path compares only this pack's
   // own bytes, so a cached entry whose parent or borrow source changed on disk would come
   // back stale. tryCachedPack runs the stat-TTL dependency check loadActivePack relies on
@@ -228,7 +229,7 @@ export async function resolveLoadedPack(manifest: SchemaPackManifest, store?: Pa
  * (UnknownPackError, ExtendsChainTooDeepError, AliasCycleError,
  * SchemaPackManifestError).
  */
-export async function loadResolvedPackByName(name: string, store?: PackStore): Promise<ResolvedPack> {
+export async function loadResolvedPackByName(name: string, store?: PackStore | null): Promise<ResolvedPack> {
   return await resolveLoadedPack(await loadPackManifestByName(name, store), store);
 }
 
@@ -237,14 +238,14 @@ export async function loadResolvedPackByName(name: string, store?: PackStore): P
  * resolves it through — what the borrow_from lint rules need
  * (LintOpts.declared): the resolved manifest hides every borrow outcome.
  */
-export function declaredPack(manifest: SchemaPackManifest, store?: PackStore): DeclaredPack {
+export function declaredPack(manifest: SchemaPackManifest, store?: PackStore | null): DeclaredPack {
   return { manifest, loadByName: (name) => loadPackManifestByName(name, store), resolve: (m) => resolveLoadedPack(m, store) };
 }
 
 /** Ours (governedwork fork): `loadResolvedPackByName`, plus the pack as declared. */
 export async function loadDeclaredPackByName(
   name: string,
-  store?: PackStore,
+  store?: PackStore | null,
 ): Promise<{ resolved: ResolvedPack; declared: DeclaredPack }> {
   const manifest = await loadPackManifestByName(name, store);
   return { resolved: await resolveLoadedPack(manifest, store), declared: declaredPack(manifest, store) };
@@ -267,7 +268,7 @@ export async function loadActivePackDeclared(
  * so a caller can be authorized for all of them before any is resolved. A pack
  * that does not load ends its branch (resolution fails on it, reading nothing).
  */
-export async function packResolutionNames(root: string, store?: PackStore): Promise<string[]> {
+export async function packResolutionNames(root: string, store?: PackStore | null): Promise<string[]> {
   const seen = new Set<string>();
   const pending = [root];
   while (pending.length > 0) {

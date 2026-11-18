@@ -26,6 +26,8 @@ import { ExtendsChainTooDeepError, invalidatePackCache, resolveStatTtlMs, Unknow
 
 /** The database a brain-resident pack lookup reads: an engine, or a transaction's. */
 export type PackStore = Pick<SqlEngine, 'executeRaw'>;
+/** A store a process binds: an engine, which says when it disconnects. */
+type BindableStore = PackStore & Partial<Pick<BrainEngine, 'registerBeforeDisconnect'>>;
 
 /** A stored pack: its manifest, or why this build cannot read it (a manifest it rejects, e.g. one a newer build wrote). */
 type OverlayEntry = { source_id: string; manifest: SchemaPackManifest } | { source_id: string; unreadable: OperationError };
@@ -143,21 +145,24 @@ export async function refreshBrainResidentPacks(engine: PackStore): Promise<void
  * brain (the CLI's connect, serve, the jobs worker). Binding runs no query.
  * Returns a function that restores the previous binding.
  */
-export function bindBrainResidentPackStore(store: PackStore | null): () => void {
+export function bindBrainResidentPackStore(store: BindableStore | null): () => void {
   const previous = boundStore;
   boundStore = store;
   lastCheck = null;
-  return () => { if (boundStore === store) { boundStore = previous; lastCheck = null; } };
+  // An engine that disconnects stops being the store its process resolves packs from: a later engine (the next
+  // brain a process opens, graduation's target) must not be read through a closed one.
+  const unhook = store?.registerBeforeDisconnect?.(async () => { if (boundStore === store) { boundStore = null; lastCheck = null; } });
+  return () => { unhook?.(); if (boundStore === store) { boundStore = previous; lastCheck = null; } };
 }
 
 /**
- * Re-check the heads of `store` (else the bound store) unless that store was
+ * Re-check the heads of `store` (omitted: the bound store; null: none) unless that store was
  * checked within the pack stat-TTL (GBRAIN_PACK_STAT_TTL_MS, default 1s), the
  * window a file-backed pack edited by another process takes to show.
  * Concurrent lookups share one check. With no store, the overlay stands.
  */
 export async function ensureBrainResidentPacksFresh(store?: PackStore | null): Promise<void> {
-  const target = store ?? boundStore;
+  const target = store === undefined ? boundStore : store;
   if (!target) return;
   const key = viewedEngine(target);
   if (lastCheck?.key === key && performance.now() - lastCheck.at < resolveStatTtlMs()) return;

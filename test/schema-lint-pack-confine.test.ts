@@ -46,9 +46,10 @@ function validManifest(name: string): string {
 }
 
 // No engine needed: the `pack` branch of schema_lint never touches ctx.engine.
+// Ours (governedwork fork): a pack GBrain does not bundle is looked up in the brain first; this brain stores none.
 function ctxOf(overrides: Partial<OperationContext> = {}): OperationContext {
   return {
-    engine: { getConfig: async () => null } as any,
+    engine: { getConfig: async () => null, executeRaw: async () => [] } as any,
     config: {} as any,
     logger: console as any,
     dryRun: false,

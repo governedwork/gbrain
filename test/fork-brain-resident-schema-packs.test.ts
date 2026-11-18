@@ -312,6 +312,38 @@ describe('brain-resident schema packs', () => {
     }
   });
 
+  test('L100: a bound engine that disconnects is no longer read: a later resolution misses the pack, not the store', async () => {
+    const { UnknownPackError } = await import('../src/core/schema-pack/registry.ts');
+    _resetBrainResidentPacksForTests();
+    _resetPackCacheForTests();
+    const other = new PGLiteEngine();
+    await other.connect({});
+    await other.initSchema();
+    // The process binds the brain it opened (CLI connect, serve, the worker), then that engine closes.
+    bindBrainResidentPackStore(other);
+    await other.disconnect();
+    let thrown: unknown = null;
+    await withEnv({ GBRAIN_HOME: home, GBRAIN_SCHEMA_PACK: undefined }, async () => {
+      try { await loadActivePack({ cfg: null, remote: false, dbConfig: 'pack-nobody-published' }); } catch (err) { thrown = err; }
+    });
+    expect(thrown).toBeInstanceOf(UnknownPackError);
+    _resetBrainResidentPacksForTests();
+  });
+
+  test('L100: an engine that cannot be read for stored packs reads none, never the process\'s bound store', async () => {
+    const { loadActivePackForEngineOrNull } = await import('../src/core/schema-pack/engine-resolution.ts');
+    _resetBrainResidentPacksForTests();
+    _resetPackCacheForTests();
+    let boundReads = 0;
+    bindBrainResidentPackStore({ executeRaw: async () => { boundReads++; throw new Error('another brain'); } } as never);
+    const configOnly = { getConfig: async (key: string) => (key === 'schema_pack' ? 'pack-nobody-published' : null) } as never;
+    await withEnv({ GBRAIN_HOME: home, GBRAIN_SCHEMA_PACK: undefined }, async () => {
+      expect(await loadActivePackForEngineOrNull(configOnly, { remote: false })).toBeNull();
+    });
+    expect(boundReads).toBe(0);
+    _resetBrainResidentPacksForTests();
+  });
+
   test('L100: write preparations reading through their own view of one engine share its heads re-check within the stat-TTL', async () => {
     const { ensureBrainResidentPacksFresh } = await import('../src/core/schema-pack/db-store.ts');
     const { registerEngineView } = await import('../src/core/persistence/switches.ts');

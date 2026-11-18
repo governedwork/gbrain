@@ -4,7 +4,7 @@ import type { BrainEngine } from '../engine.ts';
 import { OperationError } from '../ops/contract.ts';
 import { loadActivePack, loadResolvedPackByName, type LoadActivePackInput } from './load-active.ts';
 import { invalidatePackCache, type ResolvedPack } from './registry.ts';
-import { isPackStoreFailure } from './db-store.ts';
+import { isPackStoreFailure, type PackStore } from './db-store.ts';
 
 export type EngineSchemaOptions = Omit<LoadActivePackInput, 'cfg' | 'dbConfig' | 'perSourceDb' | 'packStore'>;
 
@@ -24,9 +24,10 @@ export async function engineSchemaInput(
   const value = sourceValue?.trim();
   if (options.sourceId && value) perSourceDb.set(options.sourceId, value);
   // Ours (governedwork fork): the engine is also the store brain-resident packs resolve from; the loader reads it
-  // only when the resolved pack is one GBrain does not bundle (load-active.ts).
-  const packStore = engine && 'executeRaw' in engine ? engine as LoadActivePackInput['packStore'] : undefined;
-  return { ...options, cfg: loadConfigFileOnly(), dbConfig, perSourceDb, ...(packStore ? { packStore } : {}) };
+  // only when the resolved pack is one GBrain does not bundle (load-active.ts). An engine that cannot be read for
+  // them reads none, never the process's bound store (another brain's).
+  const packStore = engine ? ('executeRaw' in engine ? engine as PackStore : null) : undefined;
+  return { ...options, cfg: loadConfigFileOnly(), dbConfig, perSourceDb, ...(packStore !== undefined ? { packStore } : {}) };
 }
 
 /**
