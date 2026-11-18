@@ -69,7 +69,8 @@ const confirm_memory: Operation = {
         'Preview it again (dry_run: true) and ask the user to confirm what it shows now.');
     }
     if (ctx.dryRun) return { dry_run: true, action: 'confirm_memory', ref: preview.ref, raises: preview.raises, summary: preview.summary, binding: preview.binding };
-    if (!preview.raises) return { action: 'confirm', ref: preview.ref, status: 'unchanged', tier: 'user_confirmed' };
+    // governedwork fork (F15): an unchanged page answers the revision its preview read (nothing is written).
+    if (!preview.raises) return { action: 'confirm', ref: preview.ref, status: 'unchanged', tier: 'user_confirmed', ...(ref.kind === 'page' && preview.revision ? { detail: { revision: preview.revision } } : {}) };
     const confirmation = await requireOwnerConfirmation(ctx, { ref: preview.ref, token: preview.token, summary: preview.summary, command: preview.command });
     const principal = ctx.auth?.principal ?? currentVerifiedLocalWriter()?.principal ?? null;
     return applyOwnerAction(ctx.engine, { action: 'confirm', ref: raw }, {
