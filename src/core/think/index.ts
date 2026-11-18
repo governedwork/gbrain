@@ -38,8 +38,9 @@ import { hasAnthropicKey } from '../ai/anthropic-key.ts';
 import { resolveThinkWindow, trajectoryPointsInWindow } from './temporal-window.ts';
 import { resolveThinkTemporalContext } from './temporal-context.ts';
 import { resolveExcludePrivatePages, worldOnlyFacts } from '../search/private-visibility.ts';
-import { deliverEvidence, effectivePlan, resolveEvidencePlan, EVIDENCE_BLOCK_CHAR_CAP, THINK_RETURN_UNIT_CONFIG_KEY, type DeliveryMeta } from '../search/evidence-delivery.ts';
+import { deliverEvidence, effectivePlan, resolveEvidencePlan, DEFAULT_REMOTE_BUDGET_MAX, EVIDENCE_BLOCK_CHAR_CAP, THINK_RETURN_UNIT_CONFIG_KEY, type DeliveryMeta } from '../search/evidence-delivery.ts';
 import { evidenceTitlesEnabled } from '../search/evidence-date.ts';
+import { DEFAULT_WHOLE_PAGES_BUDGET, deliveredReports, excerptReports, readWholePages, type EvidencePageReport } from './whole-pages.ts'; // ours (governedwork fork)
 import { startThinkDecide, thinkAbstainResult, type ThinkAbstention } from './decide.ts';
 import { classifyIntent } from './intent.ts';
 import { deriveTrust, type TaintRef } from '../trust/taint.ts';
@@ -157,6 +158,15 @@ export interface RunThinkOpts {
    * question date. Invalid or future values throw ReferenceDateError.
    */
   referenceDate?: string;
+  /**
+   * Per-call evidence delivery, as `query`/`search` take it (validated by
+   * resolveEvidencePlan); unset keeps the `think.return_unit` config path.
+   */
+  returnUnit?: unknown;
+  returnWindow?: unknown;
+  tokenBudget?: unknown;
+  /** Pages to read in full, first, within their own budget (whole-pages.ts); reported in `evidence_pages`. */
+  wholePages?: string[];
 }
 
 
@@ -233,6 +243,13 @@ export interface ThinkResult {
   evidence_truncated?: boolean;
   /** GBRA-504: the outside-guest notes that reached the prompt; `answer` then ends with the fixed guest line gbrain appends. */
   guest_evidence?: Array<{ source_id: string; slug: string; guest: GuestStamp }>;
+  /**
+   * Ours (governedwork fork). Which pages: what each page in the prompt was — whole, an excerpt, a
+   * delivered unit, or not shown (whole-pages.ts). About the inspected evidence
+   * only: a page the gather never found is not listed, so `whole` never means
+   * "all the brain has".
+   */
+  evidence_pages?: EvidencePageReport[];
   /** Gathered pages with the revision retrieved, for retrieval-feedback recording; the op layer strips it. */
   feedback_evidence?: Array<{ source_id: string; slug: string; content_hash: string | null }>;
   /** #5575 I2: every page, take and trajectory fact placed in the synthesis prompt; `persistSynthesis` taints from them. The op layer strips it. */
@@ -570,33 +587,69 @@ function stampCitationSources(citations: ParsedCitation[], pages: SearchResult[]
   for (const c of citations) c.source_id = sourceOfSlug.get(c.page_slug) ?? null;
 }
 
-async function renderThinkPages(engine: BrainEngine, opts: RunThinkOpts, pages: SearchResult[], timeZone: string, warnings: string[]): Promise<{ pagesBlock: string; evidenceTruncated: boolean; evidenceDelivery?: DeliveryMeta }> {
+async function renderThinkPages(engine: BrainEngine, opts: RunThinkOpts, pages: SearchResult[], timeZone: string, warnings: string[]): Promise<{ pagesBlock: string; evidenceTruncated: boolean; evidenceDelivery?: DeliveryMeta; evidencePages: EvidencePageReport[] }> {
+  const scope = {
+    ...(opts.allowedSources !== undefined && opts.allowedSources.length > 0 ? { sourceIds: opts.allowedSources } : opts.sourceId !== undefined ? { sourceId: opts.sourceId } : {}),
+    excludePrivate: opts.excludePrivate ?? await resolveExcludePrivatePages(engine, opts.remote),
+    requireSafeChunks: opts.remote !== false,
+  };
+  // Ours (governedwork fork): whole_pages, read first, rendered first and verbatim, out of the gathered rows below.
+  // They are trust-stamped as the gather's pages are (and lose the fence rows held from the caller), so the renderer
+  // labels and quotes them the same way.
+  const wholeRows: SearchResult[] = [];
+  const reports: EvidencePageReport[] = [];
+  if (opts.wholePages && opts.wholePages.length > 0) {
+    const asked = typeof opts.tokenBudget === 'number' && Number.isFinite(opts.tokenBudget) && opts.tokenBudget > 0 ? Math.floor(opts.tokenBudget) : DEFAULT_WHOLE_PAGES_BUDGET;
+    const wholeBudget = opts.remote === false ? asked : Math.min(asked, DEFAULT_REMOTE_BUDGET_MAX);
+    const { blocks, missing } = await readWholePages(engine, opts.wholePages, scope, wholeBudget, { hideHeld: worldOnlyFacts(opts.remote) });
+    blocks.forEach((b, i) => { wholeRows.push(b.row); reports.push({ ...b.report, rank: i + 1 }); });
+    reports.push(...missing);
+  }
+  const wholeCut = reports.some(r => r.shown_as === 'whole_page' && !r.whole);
+  const wholeKeys = new Set(wholeRows.map(r => `${r.source_id ?? 'default'}:${r.slug}`));
+  const rest = wholeKeys.size > 0 ? pages.filter(p => !wholeKeys.has(`${p.source_id ?? 'default'}:${p.slug}`)) : pages;
+  const isWhole = new Set<SearchResult>(wholeRows);
+
   const [plan, budget, titles] = await Promise.all([
     resolveEvidencePlan(engine, {
-      remote: opts.remote, returnUnit: undefined, returnWindow: undefined, budget: undefined,
+      remote: opts.remote, returnUnit: opts.returnUnit, returnWindow: opts.returnWindow, budget: opts.tokenBudget,
       snippetChars: undefined, snippetCap: 0, configKey: THINK_RETURN_UNIT_CONFIG_KEY, op: 'think',
     }),
     readThinkPagesBudget(engine, warnings), // #5461
     evidenceTitlesEnabled(engine), // GBRA-205
   ]);
-  const excerptLen = pagesBlockExcerptLen(pages.length, undefined, budget);
-  const applied = effectivePlan(plan, pages);
+  const excerptLen = pagesBlockExcerptLen(rest.length, undefined, budget);
+  const applied = effectivePlan(plan, rest);
   if (!applied) {
-    const rendered = renderPagesBlockDetailed(pages, excerptLen, opts.question, { timeZone, titles });
-    return { pagesBlock: rendered.text, evidenceTruncated: rendered.truncated };
+    const rows = [...wholeRows, ...rest];
+    const rendered = isWhole.size > 0
+      ? renderPagesBlockDetailed(rows, excerptLen, opts.question, { verbatim: r => isWhole.has(r), verbatimLen: EVIDENCE_BLOCK_CHAR_CAP, timeZone, titles })
+      : renderPagesBlockDetailed(rows, excerptLen, opts.question, { timeZone, titles });
+    return {
+      pagesBlock: rendered.text, evidenceTruncated: rendered.truncated || wholeCut,
+      evidencePages: [...reports, ...excerptReports(rest, excerptLen, wholeRows.length + 1)],
+    };
   }
-  const delivered = await deliverEvidence(engine, pages, applied, {
-    ...(opts.allowedSources !== undefined && opts.allowedSources.length > 0 ? { sourceIds: opts.allowedSources } : opts.sourceId !== undefined ? { sourceId: opts.sourceId } : {}),
-    excludePrivate: opts.excludePrivate ?? await resolveExcludePrivatePages(engine, opts.remote),
-    requireSafeChunks: opts.remote !== false,
-  });
+  const delivered = await deliverEvidence(engine, rest, applied, scope);
   // GST-2900: delivery re-reads page text from the database, so the held fence rows are dropped again (GST-2891).
   const results = worldOnlyFacts(opts.remote) ? await dropHeldFenceRows(engine, delivered.results) : delivered.results;
-  const rendered = applied.unit === 'auto'
-    ? renderPagesBlockDetailed(results, excerptLen, opts.question,
-      { verbatim: r => r.delivered?.reason !== 'not_conversation' && r.delivered?.reason !== 'conversation_over_budget', verbatimLen: EVIDENCE_BLOCK_CHAR_CAP, timeZone, titles })
-    : renderPagesBlockDetailed(results, EVIDENCE_BLOCK_CHAR_CAP, opts.question, { verbatim: true, timeZone, titles });
-  return { pagesBlock: rendered.text, evidenceTruncated: rendered.truncated, evidenceDelivery: delivered.delivery };
+  const verbatimRest = (r: SearchResult & { delivered?: { reason?: string } }) =>
+    applied.unit !== 'auto' || (r.delivered?.reason !== 'not_conversation' && r.delivered?.reason !== 'conversation_over_budget');
+  const rows: SearchResult[] = [...wholeRows, ...results];
+  const rendered = applied.unit === 'auto' || isWhole.size > 0
+    ? renderPagesBlockDetailed(rows, excerptLen, opts.question,
+      { verbatim: r => isWhole.has(r) || verbatimRest(r), verbatimLen: EVIDENCE_BLOCK_CHAR_CAP, timeZone, titles })
+    : renderPagesBlockDetailed(rows, EVIDENCE_BLOCK_CHAR_CAP, opts.question, { verbatim: true, timeZone, titles });
+  const restReports = deliveredReports(rest, results, delivered.delivery, wholeRows.length + 1, EVIDENCE_BLOCK_CHAR_CAP)
+    .map((rep, i) => {
+      const r = results[i];
+      // auto renders a non-conversation row as the usual excerpt, never whole.
+      return r && !verbatimRest(r) ? { ...rep, whole: false, shown_as: 'excerpt' as const, chars_shown: Math.min(excerptLen, String(r.chunk_text ?? '').length) } : rep;
+    });
+  return {
+    pagesBlock: rendered.text, evidenceTruncated: rendered.truncated || wholeCut, evidenceDelivery: delivered.delivery,
+    evidencePages: [...reports, ...restReports],
+  };
 }
 
 /**
@@ -694,7 +747,7 @@ export async function runThink(
   // budget-aware — 600 chars is the FLOOR (a big gather never collapses each
   // page below it) and a small gather spreads the block budget into much
   // larger, often complete, per-page windows.
-  const { pagesBlock, evidenceTruncated, evidenceDelivery } = await renderThinkPages(engine, opts, gather.pages, temporal.timeZone, warnings);
+  const { pagesBlock, evidenceTruncated, evidenceDelivery, evidencePages } = await renderThinkPages(engine, opts, gather.pages, temporal.timeZone, warnings);
   const takesForPrompt = gather.takes.map(takesHitToTakeForPrompt);
   const { rendered: takesBlock, sanitizedCount } = renderTakesBlock(takesForPrompt);
   if (sanitizedCount > 0) {
@@ -920,7 +973,7 @@ export async function runThink(
         taint_refs: [...gather.pages.map(pg => ({ table: 'pages' as const, sourceId: pg.source_id ?? 'default', slug: pg.slug })),
           ...gather.takes.map(t => ({ table: 'takes' as const, id: t.take_id }))],
         usage: null,         // [E2] no LLM ran — no accounting
-        ...windowMeta,
+        ...windowMeta, evidence_pages: evidencePages,
         diagnostics: {
           pagesFromHybrid: gather.diagnostics.pagesFromHybrid,
           takesFromKeyword: gather.diagnostics.takesFromKeyword,
@@ -1054,7 +1107,7 @@ export async function runThink(
     // ANDs the not-JSON/sentinel flag with a content check (catches valid-but-empty JSON).
     synthesisOk: synthesisOk && response.answer.trim().length > 0,
     synthesis_status: synthesisStatus,
-    evidence_truncated: evidenceTruncated,
+    evidence_truncated: evidenceTruncated, evidence_pages: evidencePages,
     feedback_evidence: gather.pages.map(pg => ({ source_id: pg.source_id ?? 'default', slug: pg.slug, content_hash: pg.content_hash ?? null })),
     taint_refs: [...gather.pages.map(pg => ({ table: 'pages' as const, sourceId: pg.source_id ?? 'default', slug: pg.slug })),
       ...gather.takes.map(t => ({ table: 'takes' as const, id: t.take_id })), ...trajectoryFactIds.map(id => ({ table: 'facts' as const, id }))],
