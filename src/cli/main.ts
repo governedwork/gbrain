@@ -39,6 +39,7 @@ import { cliOps } from './op-manifest.ts';
 import { openRequestConfigSnapshot, withoutRequestConfigSnapshot } from '../core/config-snapshot.ts';
 import { resolveSourceIdEngineFree } from '../core/source-resolver.ts';
 import { installCliRoutingFor } from './fix-routing-provider.ts';
+import { shapeOutput, withoutOutputFormat } from '../core/ops/output-format.ts'; // ours (governedwork fork)
 import type { Operation, OperationContext } from '../core/operations.ts';
 import { currentCliWriteWait } from '../core/persistence/write-wait.ts';
 import { isScopeErrorCode } from '../core/error-catalogue.ts';
@@ -750,7 +751,8 @@ async function runSharedOperation(command: string, subArgs: string[], cliOpts: C
       return;
     }
     const paged = op.name === 'get_page' && await (await import('./page-render.ts')).finishAsOfRead(async p => normalizeLocalResult(enforcedReadOf ? await enforcedReadOf(p) : await op.handler(ctx, p)) as Record<string, any>, result as Record<string, any>, params, writeStdoutFinal); // GBRA-217
-    const output = paged ? '' : require('./guest-lines.ts').withGuestLines(op.name, result, params, formatResult(op.name, result, params));
+    const shaped = paged ? null : await shapeOutput(op, result, params); // ours: --format text|hook (ops/output-format.ts)
+    const output = paged ? '' : shaped !== null ? `${shaped}\n` : require('./guest-lines.ts').withGuestLines(op.name, result, params, formatResult(op.name, result, params));
     // Awaited delivery (#3423): queued stdout writes past 64KiB lose their
     // tail to a slow pipe reader when the exit grace lapses — see
     // writeStdoutFinal.
@@ -833,7 +835,8 @@ async function runThinClientRouted(
 
   try {
     const { callRemoteTool, unpackToolResult } = await import('../core/mcp-client.ts');
-    const raw = await timeCliPhase('remote', () => callRemoteTool(cfg, op.name, params, {
+    // Ours: --format is shaped here from the JSON answer (withoutOutputFormat), so any host version serves it.
+    const raw = await timeCliPhase('remote', () => callRemoteTool(cfg, op.name, withoutOutputFormat(params), {
       timeoutMs,
       signal: sigintController.signal,
       ...(op.mutating ? { writeWaitMs: currentCliWriteWait().waitMs } : {}), ...(cliOpts.room !== undefined ? { meta: { room: cliOpts.room } } : {}),
@@ -856,7 +859,8 @@ async function runThinClientRouted(
     hintAmbientNarrowing(op, params, result, ambientScope);
     const skew = (await import('../core/search/evidence-delivery.ts')).deliveryVersionSkewWarning(op.name, params, envelopeMeta?.retrieval as Record<string, unknown> | undefined, result);
     if (skew) process.stderr.write(skew + '\n');
-    const output = require('./guest-lines.ts').withGuestLines(op.name, result, params, formatResult(op.name, result, params));
+    const shaped = await shapeOutput(op, result, params);
+    const output = shaped !== null ? `${shaped}\n` : require('./guest-lines.ts').withGuestLines(op.name, result, params, formatResult(op.name, result, params));
     // Awaited delivery (#3423) — same contract as the local-engine path.
     if (output) await writeStdoutFinal(output);
     if (stampText) process.stderr.write(stampText);
@@ -1550,17 +1554,7 @@ export function formatResult(
     case 'volunteer_context': {
       const r = result as any;
       // Stats mode (the feedback loop).
-      if (r && r.approximate === true && Array.isArray(r.by_arm)) {
-        const lines = [
-          `volunteered-context precision — last ${r.days} day(s) (${r.note})`,
-          `total: ${r.total_volunteered} volunteered, ${r.total_used} used`,
-        ];
-        for (const a of r.by_arm) {
-          lines.push(`  ${a.match_arm}/${a.channel}: ${a.used}/${a.volunteered} used (precision ${a.precision})`);
-        }
-        if (!r.by_arm.length) lines.push('  (no volunteer events in the window)');
-        return lines.join('\n') + '\n';
-      }
+      if (r && r.approximate === true && Array.isArray(r.by_arm)) return require('../core/context/volunteer.ts').formatVolunteerStats(r) + '\n';
       const pages = (r?.pages ?? []) as any[];
       if (!pages.length) return 'Nothing volunteered (no entity cleared the confidence gate).\n';
       const { formatVolunteeredPage } = require('../core/context/volunteer.ts');

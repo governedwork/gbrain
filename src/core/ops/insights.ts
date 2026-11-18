@@ -15,6 +15,8 @@ import type { ProbeReport } from '../eval-contradictions/types.ts';
 import { proactiveEligibility } from '../eligibility/registry.ts';
 import { activationSuppressionNotice, suppressionSummary } from '../eligibility/activation.ts';
 import type { Operation } from './contract.ts';
+import type { VolunteeredPage, VolunteerUsageStats } from '../context/volunteer.ts';
+import { OUTPUT_FORMAT_PARAMS } from './output-format.ts'; // ours (governedwork fork)
 import { opError } from './contract.ts';
 import { invalidParam, paramUse } from './op-fix.ts';
 import { federatedSearchScope, sourceScopeOpts, readPolicyOpts } from './context.ts';
@@ -62,7 +64,12 @@ const volunteer_context: Operation = {
       description:
         'Confidence gate 0..1 (default 0.7 — slug-suffix matches need an explicit lower gate).',
     },
-    session_id: { type: 'string', description: 'Optional caller session id, logged for attribution.' },
+    session_id: {
+      type: 'string',
+      description:
+        'Optional caller session id, logged for attribution. Pages already volunteered to this session ' +
+        'in the last 12 hours are not volunteered again.',
+    },
     turn: { type: 'number', description: 'Optional caller turn number, logged for attribution.' },
     stats: {
       type: 'boolean',
@@ -72,6 +79,15 @@ const volunteer_context: Operation = {
     },
     days: { type: 'number', description: 'Stats window in days (default 30; stats mode only).' },
     source_ids: SOURCE_IDS_PARAM,
+    ...OUTPUT_FORMAT_PARAMS, // ours (governedwork fork)
+  },
+  // Ours (governedwork fork): format text|hook — the hook lane's volunteered-pages block (stats mode: the summary).
+  renderText: async () => {
+    const [{ formatVolunteerStats }, { renderVolunteeredBlock }] = await Promise.all([import('../context/volunteer.ts'), import('../context/turn-context.ts')]);
+    return (result, fits) => {
+      const r = result as { pages?: VolunteeredPage[] } & Partial<VolunteerUsageStats>;
+      return r.approximate === true ? formatVolunteerStats(r as VolunteerUsageStats) : renderVolunteeredBlock(r.pages ?? [], fits);
+    };
   },
   handler: async (ctx, p) => {
     const { parseWindow, volunteerContext, volunteerUsageStats } = await import('../context/volunteer.ts');
@@ -96,6 +112,10 @@ const volunteer_context: Operation = {
       );
     }
     const turns = parseWindow(p.window);
+    const { SESSION_ID_MAX_LEN, sessionVolunteeredSlugs } = await import('../context/volunteer-events.ts');
+    // Trust-boundary clamp (remote MCP callers): cap session_id length so a
+    // read-scoped token can't bank unbounded TEXT per request.
+    const sessionId = typeof p.session_id === 'string' && p.session_id ? p.session_id.slice(0, SESSION_ID_MAX_LEN) : null;
     const { loadConfig: loadCfgForArms } = await import('../config.ts');
     const { lexicalArmsEnabled } = await import('../context/reflex.ts');
     const { resolveExcludePrivatePages } = await import('../search/private-visibility.ts');
@@ -103,6 +123,8 @@ const volunteer_context: Operation = {
     const pages = await volunteerContext(ctx.engine, turns, {
       sourceIds,
       priorContext: typeof p.prior_context === 'string' ? p.prior_context : undefined,
+      // Ours (governedwork fork): per-session dedupe — a per-prompt hook volunteers a page once per session.
+      ...(sessionId ? { excludeSlugs: await sessionVolunteeredSlugs(ctx.engine, sessionId, sourceIds) } : {}),
       maxPages: typeof p.max_pages === 'number' ? p.max_pages : undefined,
       minConfidence: typeof p.min_confidence === 'number' ? p.min_confidence : undefined,
       // v0.46.15+ kill switch for the lexical recall arms (weak-alias +
@@ -122,12 +144,9 @@ const volunteer_context: Operation = {
     // volunteer-events sink (drained at exit). Never fails the op.
     if (pages.length) {
       try {
-        const { logVolunteerEventsFireAndForget, volunteerEventRowsFrom, SESSION_ID_MAX_LEN } = await import('../context/volunteer-events.ts');
-        // Trust-boundary clamps (remote MCP callers): cap session_id length so
-        // a read-scoped token can't bank unbounded TEXT per request, and only
-        // log integer turns — a non-integer would throw inside the single
+        const { logVolunteerEventsFireAndForget, volunteerEventRowsFrom } = await import('../context/volunteer-events.ts');
+        // Only log integer turns — a non-integer would throw inside the single
         // multi-row INSERT and silently drop the whole batch.
-        const sessionId = typeof p.session_id === 'string' ? p.session_id.slice(0, SESSION_ID_MAX_LEN) : null;
         const turn =
           typeof p.turn === 'number' && Number.isInteger(p.turn) && Math.abs(p.turn) <= 2_147_483_647
             ? p.turn

@@ -350,6 +350,19 @@ export interface VolunteerUsageStats {
   by_arm: VolunteerArmStats[];
 }
 
+/** Ours (governedwork fork): the precision summary as text — `gbrain volunteer-context --stats` and `format: text`. */
+export function formatVolunteerStats(r: VolunteerUsageStats): string {
+  const lines = [
+    `volunteered-context precision — last ${r.days} day(s) (${r.note})`,
+    `total: ${r.total_volunteered} volunteered, ${r.total_used} used`,
+  ];
+  for (const a of r.by_arm) {
+    lines.push(`  ${a.match_arm}/${a.channel}: ${a.used}/${a.volunteered} used (precision ${a.precision})`);
+  }
+  if (!r.by_arm.length) lines.push('  (no volunteer events in the window)');
+  return lines.join('\n');
+}
+
 export const VOLUNTEER_STATS_NOTE =
   'approximate: "used" = pages.last_retrieved_at > volunteered_at. The 5-min ' +
   'last-retrieved throttle causes false negatives; unrelated reads of the same ' +
