@@ -6,8 +6,9 @@
  * segmented version's body, streamed from the version's own generation (whose rows must tile its recorded body_bytes),
  * one segment batch at a time. The page takes the version's title, type, frontmatter and tags, as a revert does.
  *
- * Nothing is re-projected: the write versions the page (a reference to the unreadable generation, kept as history),
- * flips the generation, sets the tags and reseals. Facts, takes, links and timeline rows stay as they are, so a fact,
+ * Nothing is re-projected: the write flips the generation, sets the tags and reseals. It stores no version of the
+ * unreadable generation: no reader could read one, and every remote get_versions of the page would fail on it (fork,
+ * ledger L152). Facts, takes, links and timeline rows stay as they are, so a fact,
  * take or timeline row the version's fences do not show stays in the database, as the database-canonical record.
  * Refused: a version of the unreadable generation itself, an inline version, a core-marked page or version, a page with
  * a canonical file (its file is the repair: sync or import it), and an external_untrusted writer under the write gate.
@@ -122,8 +123,6 @@ export async function prepareUntiledRevert(engine: BrainEngine, row: WriteReques
   try {
     return { observedRevision: stored.revision, noop: false, ...await pageDatabaseOnlyPublication(engine, row, undefined), ...(trust ? { trust } : {}),
       apply: async tx => {
-        // The version records the unreadable generation as it is (O(1): a reference), before the flip retires it.
-        await tx.createVersion(row.slug, { sourceId: row.source_id });
         applied = await applySegmentedBody(tx, { slug: row.slug, sourceId: row.source_id, pageId, prepared, promotion: false, retireMaxRows: policy.flipRetireMaxRows,
           meta: { title, type, frontmatter: frontmatter as JsonObject, page_kind: shape.pageKind as PageKind } });
         for (const tag of stored.tags) if (!tags.includes(tag)) await tx.removeTag(row.slug, tag, { sourceId: row.source_id });
