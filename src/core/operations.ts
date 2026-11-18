@@ -56,6 +56,7 @@ export {
 // contractual — docs/TOOL_CATALOG.md is generated from it).
 
 import { pagesOperations } from './ops/pages.ts';
+import { pageRenameOperations } from './ops/page-rename.ts'; // ours (governedwork fork)
 import { persistenceOperations } from './ops/persistence.ts';
 import { searchOperations } from './ops/search.ts';
 import { searchExactOperations } from './ops/search-exact.ts';
@@ -151,7 +152,7 @@ export const operations: Operation[] = [
   ...verbOperations,
   // Page CRUD (get_page, put_page, delete_page, list_pages + the v0.26.5
   // destructive-guard ops restore_page, purge_deleted_pages) — ops/pages.ts
-  ...pagesOperations, ...findPagesOperations, ...pageEditOperations, ...pageAppendOperations, ...pageBatchOperations, ...pageUploadOperations,
+  ...pagesOperations, ...pageRenameOperations, ...findPagesOperations, ...pageEditOperations, ...pageAppendOperations, ...pageBatchOperations, ...pageUploadOperations,
   ...persistenceOperations,
   // Search (search, query) — ops/search.ts; search_exact — ops/search-exact.ts
   ...searchOperations, ...searchExactOperations,

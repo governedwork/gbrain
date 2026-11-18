@@ -125,6 +125,13 @@ export const PAGE_OPS: Record<string, Case> = {
   extraction_review: { who: LOCAL, run: op('extraction_review', (_f, slug) => ({ action: 'distinct', slugs: [slug], of: OTHER })) },
   entity_identity_link: { who: LOCAL, run: op('entity_identity_link', (_f, slug) => ({ entity_id: 'acme-example', slug, source_id: SRC })) },
   delete_page: { who: REMOTE, replaces: true, run: op('delete_page', async (f, slug) => ({ slug, expected_revision: await f.revision(slug) })) },
+  // Ours (governedwork fork): rename_page moves the segmented page and a local rename moves it back for the next binding.
+  rename_page: { who: REMOTE, run: async (f, slug, who) => {
+    const moved = slug + '-renamed-' + who;
+    const out = await f.call(who, 'rename_page', { slug, new_slug: moved, expected_revision: await f.revision(slug), request_id: randomUUID() });
+    if (!out.isError) await f.call('local', 'rename_page', { slug: moved, new_slug: slug, expected_revision: await f.revision(moved), request_id: randomUUID() });
+    return out;
+  } },
   restore_page: { who: REMOTE, replaces: true, run: async (f, slug, who) => {
     await f.call('local', 'delete_page', { slug, expected_revision: await f.revision(slug) });
     return f.call(who, 'restore_page', { slug, expected_revision: await f.revision(slug) });

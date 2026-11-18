@@ -13,6 +13,7 @@ op	storage_register	coordinator	submitPageMutation through the storage door (tru
 op	storage_update	coordinator	submitPageMutation through the storage door bound to expected_revision (trusted local only); on a hosted shelf the change commits before it is indexed.
 op	delete_page	coordinator	submitPageMutation soft delete or trusted-local purge.
 op	restore_page	coordinator	submitPageMutation restores a recorded version.
+op	rename_page	coordinator	submitPageMutation admits a journaled rename; prepareRenameMutation moves the row with updateSlug inside publication under both page keys.
 op	purge_deleted_pages	coordinator	purgeDeletedPagesCoordinated purges each expired tombstone through delete_page purge.
 op	promote_guest_note	coordinator	Writes the owner page through submitPageMutation put_page and records the link in guest_promotions; the guest note is never changed.
 op	capture	coordinator	submitPageMutation admits a journaled page mutation.

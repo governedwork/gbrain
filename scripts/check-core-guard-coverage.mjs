@@ -35,6 +35,7 @@ const EXEMPT = {
   'src/core/persistence/connector-sync.ts': 'connector-owned pages; core marking is owner-written frontmatter the connector never sets',
   'src/core/persistence/connector-google-receipts.ts': 'connector receipt rows, not page text',
   'src/core/persistence/projection-reindex.ts': 'rebuilds derived projections; page text is unchanged',
+  'src/core/persistence/rename-prepare.ts': 'governedwork fork rename_page: moves the slug only; page text is unchanged',
   'src/core/persistence/change-reason.ts': 'wraps the PreparedMutation preparePageMutation returned (service.ts) in place: the core guard, exclusiveSources and every other field are the guarded object\'s own',
   'src/core/persistence/import-deferral.ts': 'withSupersedes wraps the PreparedMutation preparePageMutation returned (service.ts) in place: it only adds the supersedes trailer and the outcome field to a held blind put_page; the core guard, exclusiveSources and every other field are the guarded object\'s own',
   'src/core/persistence/valid-time-advisory.ts': 'wraps the PreparedMutation withChangeReason returned (service.ts) in place: its apply only adds the read-only valid_time advisory to the outcome after the guarded apply; the core guard, exclusiveSources and every other field are the guarded object\'s own',
