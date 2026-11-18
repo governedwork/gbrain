@@ -6602,7 +6602,7 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
     "mutating": false,
     "idempotent": true,
     "outputRedaction": "retrieval",
-    "description": "The open-loop engine's killer output: who is waiting on you, what you promised, and the context needed to respond. Grouped by counterparty (default, ranked; each group shows at most 5 loops, the rest counted in loops_omitted) or flat. Loops that name no counterparty are never ranked as a person: they come back in no_counterparty (null when none). Loops come from the deterministic Gmail thread-state detector and the LLM commitment extractor. Remote callers get redacted evidence (no verbatim quotes); trusted local callers also get quotes, Gmail deep links, entity-card context, and a pre-rendered text digest. Carries google-source freshness (stale flag) and completeness: when it is \"partial\", some mail in the window is held after repeated import failures; present the answer as partial and name the held items and their retry command. The grouped view also returns withheld_noise (null when none): open reply-owed loops from senders whose mail the detector now treats as automated, with a per-sender preview_command for closing them.",
+    "description": "The open-loop engine's killer output: who is waiting on you, what you promised, and the context needed to respond. Grouped by counterparty (default, ranked; each group shows at most 5 loops, the rest counted in loops_omitted) or flat. Loops that name no counterparty are never ranked as a person: they come back in no_counterparty (null when none). Loops come from the deterministic Gmail thread-state detector and the LLM commitment extractor. Remote callers get redacted evidence (no verbatim quotes); trusted local callers also get quotes, Gmail deep links, entity-card context, and a pre-rendered text digest. Carries google-source freshness (stale flag) and completeness: when it is \"partial\", some mail in the window is held after repeated import failures; present the answer as partial and name the held items and their retry command. The grouped view also returns withheld_noise (null when none): open reply-owed loops from senders whose mail the detector now treats as automated, with a per-sender preview_command for closing them. Every loop carries sender_class (from the counterparty address only: person, unknown, or a machine class no_reply/sign_in/receipt/alert/machine). A reply-owed loop from a machine sender carries label \"machine_mail\": it stays open but is not reply owed, so the grouped view lists it in machine_mail (null when none) instead of groups, and reply_owed_count excludes it. When the label cannot be computed, machine_mail_notice says why and every loop is returned as before with sender_class null.",
     "params": {
       "group_by": {
         "type": "string",
@@ -6660,6 +6660,15 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
       "as_of": {
         "type": "string",
         "description": "Reference time (ISO 8601) for due-date proximity, loop age and rendered ages. Default: now. Pin it to reproduce a ranking."
+      },
+      "machine_mail": {
+        "type": "string",
+        "enum": [
+          "separate",
+          "inline",
+          "only"
+        ],
+        "description": "Machine-mail loops: 'separate' (default; grouped view lists them in machine_mail), 'inline' (left in their counterparty groups, labelled), or 'only' (just them). Senders are classed by address; loops.person_senders and loops.machine_senders in brain config override the built-in rules."
       }
     },
     "scope": "read",
