@@ -52,6 +52,7 @@ import { WRITE_GATE_SCHEMA_SQL } from '../src/core/write-gate-schema.ts';
 import { BELIEF_LEDGER_SCHEMA_SQL } from '../src/core/belief/schema.ts';
 import { BRAIN_PACK_SCHEMA_SQL } from '../src/core/schema-pack/brain-pack-schema.ts';
 import { MCP_REQUEST_LOG_ROLLUP_SCHEMA_SQL } from '../src/core/mcp-request-log-rollup-schema.ts';
+import { PAGE_VERSION_PRUNES_SCHEMA_SQL } from '../src/core/page-state/version-prune-schema.ts';
 import { forkSchemaEpoch, forkSchemaEpochSql } from '../src/core/fork-schema.ts';
 
 const REPO = resolve(import.meta.dir, '..');
@@ -128,6 +129,8 @@ const BASE_FRAGMENTS: readonly Fragment[] = [
   { source: 'src/core/schema-pack/brain-pack-schema.ts', expr: 'BRAIN_PACK_SCHEMA_SQL', postgres: BRAIN_PACK_SCHEMA_SQL, pglite: BRAIN_PACK_SCHEMA_SQL, fork: true },
   // Ours (governedwork fork): the request-log retention tally (upstream #6770 creates it in a numbered migration).
   { source: 'src/core/mcp-request-log-rollup-schema.ts', expr: 'MCP_REQUEST_LOG_ROLLUP_SCHEMA_SQL', postgres: MCP_REQUEST_LOG_ROLLUP_SCHEMA_SQL, pglite: MCP_REQUEST_LOG_ROLLUP_SCHEMA_SQL, fork: true },
+  // Ours (governedwork fork): the record of version history an owner pruned (prune_page_versions).
+  { source: 'src/core/page-state/version-prune-schema.ts', expr: 'PAGE_VERSION_PRUNES_SCHEMA_SQL', postgres: PAGE_VERSION_PRUNES_SCHEMA_SQL, pglite: PAGE_VERSION_PRUNES_SCHEMA_SQL, fork: true },
 ];
 
 /** Ours (governedwork fork): the hash of every fork fragment's text, both engines, in FRAGMENTS order. */

@@ -949,14 +949,14 @@
         {
           "category": "meta",
           "elapsed_ms": "<volatile>",
-          "message": "1313 column(s) verified against live schema",
+          "message": "1316 column(s) verified against live schema",
           "name": "schema_columns",
           "status": "ok"
         },
         {
           "category": "meta",
           "elapsed_ms": "<volatile>",
-          "message": "All 155 table(s) the applied migrations create exist.",
+          "message": "All 156 table(s) the applied migrations create exist.",
           "name": "schema_missing_tables",
           "status": "ok"
         },
