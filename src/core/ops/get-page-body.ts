@@ -499,6 +499,8 @@ export async function readPartialBody(ctx: OperationContext, input: PartialReadI
   const wrap = (text: string) => envelopeText(neutralize && text ? neutralizeToolCalls(text) : text, quarantined, trust, input.quote ? page.slug : null);
   const base: Record<string, unknown> = {
     slug: page.slug, source_id: page.source_id, type: page.type, revision, ...quotedPageMeta({ slug: page.slug, title: page.title, frontmatter: page.frontmatter ?? {} }, input.quote === true, tags),
+    // Fork: created_at / updated_at as a whole read answers them, so a windowed reader sees the same metadata.
+    created_at: page.created_at.toISOString(), updated_at: page.updated_at.toISOString(),
     ...(page.deleted_at ? { deleted_at: page.deleted_at } : {}),
     ...(trust ?? {}), ...extras, ...(input.quote ? { quoted: 'transcript' } : {}),
   };

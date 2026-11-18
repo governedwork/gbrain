@@ -334,6 +334,7 @@ export interface Take {
 }
 
 export interface TakesListOpts extends PageReadPolicy {
+  id?: number; // fork: this one take (takes.id); every other filter still applies
   page_id?: number;
   page_slug?: string;       // resolved via JOIN
   holder?: string;
@@ -718,7 +719,7 @@ export interface FactListOpts {
 }
 
 /** FactListOpts plus the entity (and the page the fact sits on) listFactsSince and listFactsKeyset narrow to before LIMIT. */
-export type RecallFactReadOpts = FactListOpts & { entitySlug?: string; sourceMarkdownSlug?: string };
+export type RecallFactReadOpts = FactListOpts & { entitySlug?: string; sourceMarkdownSlug?: string; /** Fork: this one fact (recall fact_id). */ factId?: number };
 
 /** Per-source operational health snapshot consumed by `gbrain doctor`. */
 export interface FactsHealth {

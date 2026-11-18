@@ -8,8 +8,9 @@
  *    responses of a segmented copy equal the inline copy's, for a local and a
  *    remote caller, apart from the segmented-only fields (body_storage,
  *    size.body_bytes / body_lines / tail_*), the chunk count (the segmented
- *    chunker cuts per segment, spec 4.1), the revision and the cursor's page
- *    id and revision. Coordinates are projected bytes on both.
+ *    chunker cuts per segment, spec 4.1), the revision, the page's
+ *    created_at / updated_at (two pages written at different times) and the
+ *    cursor's page id and revision. Coordinates are projected bytes on both.
  * 2. Fails when: a segmented window, line number, outline entry (line range,
  *    byte range, dates, the leading entry) or markdown byte differs from the
  *    whole-document cut, or a cursor walk skips or repeats bytes.
@@ -43,10 +44,12 @@ function content(): string {
   return `---\ntitle: Parity example\ntype: note\ntags: [log]\n---\n${truth.join('\n')}\n\n<!-- timeline -->\n\n${timeline}\n`;
 }
 
-/** The response without what only a segmented page reports, its revision, and the cursor's page id and revision. */
+/** The response without what only a segmented page reports, its revision, its write times, and the cursor's page id and revision. */
 function comparable(r: Record<string, any>): Record<string, any> {
   const out = JSON.parse(JSON.stringify(r)) as Record<string, any>;
   delete out.revision;
+  delete out.created_at;
+  delete out.updated_at;
   delete out.body_storage;
   delete out.chunks;
   if (out.edit_target) delete out.edit_target.revision;

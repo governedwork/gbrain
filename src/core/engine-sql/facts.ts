@@ -79,7 +79,7 @@ function grepPattern(opts: FactListOpts | undefined): string | null {
  */
 function recallNarrowing(opts: RecallFactReadOpts | undefined) {
   const grep = grepPattern(opts);
-  return sqlFragment`${opts?.entitySlug != null ? sqlFragment` AND entity_slug = ${opts.entitySlug}` : sqlFragment``}${
+  return sqlFragment`${opts?.factId != null ? sqlFragment` AND id = ${opts.factId}` : sqlFragment``}${opts?.entitySlug != null ? sqlFragment` AND entity_slug = ${opts.entitySlug}` : sqlFragment``}${
     opts?.sourceMarkdownSlug != null ? sqlFragment` AND source_markdown_slug = ${opts.sourceMarkdownSlug}` : sqlFragment``}${
     opts?.sessionId ? sqlFragment` AND source_session = ${opts.sessionId}` : sqlFragment``}${
     opts?.excludeAuditRows ? sqlFragment` AND source != ALL(${AUDIT_ROW_SOURCES}::text[])` : sqlFragment``}${

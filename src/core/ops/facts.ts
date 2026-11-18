@@ -57,6 +57,7 @@ import type { TrustTier } from '../trust/tier.ts';
 import { AUDIT_ROW_SOURCES } from '../facts/audit-sources.ts';
 import { parseSinceParam } from '../facts/since-parse.ts';
 import { mergeNewest, parseRecallOffset, readRecallPage, type FactRead } from '../facts/recall-page.ts';
+import { parseRecallFactId, readFactById, withTrustContestedFacts } from '../facts/recall-fact-id.ts';
 import { callerSessionKey } from '../access/member-facts.ts';
 import { groupFactsByEntity, parseQuestionParam, questionRecallNotices, rankFactsByQuestion, recallHintNotice, unlinkedNamesakes, type EntityCandidate, type QuestionRecall } from '../facts/question-recall.ts';
 
@@ -315,6 +316,7 @@ const recall: Operation = {
     supersessions: { type: 'boolean', description: 'Supersession log only.', fullSurfaceOnly: true },
     limit: { type: 'number', description: 'Per-arm max (default 50, cap 100).', fullSurfaceOnly: true },
     offset: { type: 'number', description: 'Skip first N facts of the collapsed newest-first list; page with limit.', fullSurfaceOnly: true },
+    fact_id: { type: 'string', description: 'Read this one fact (facts[].fact_id); not with question, entity, since, session_id, supersessions, query or offset.', fullSurfaceOnly: true },
     grep: { type: 'string', description: 'Text substring.', fullSurfaceOnly: true },
     include_pending: { type: 'boolean', description: 'Pending count.', fullSurfaceOnly: true },
     return_unit: { type: 'string', enum: ['chunk', 'window', 'section', 'page', 'auto'], description: 'results[] unit (see search).', fullSurfaceOnly: true },
@@ -399,6 +401,7 @@ const recall: Operation = {
       );
     }
     const question = parseQuestionParam(p);
+    const factId = parseRecallFactId(p); // fork: recall-fact-id.ts, one fact by id under the list reads' own filters
     const offset = parseRecallOffset(p, question); let pager: { reads: FactRead<FactRows[number]>[]; key: (rec: Record<string, unknown>) => unknown } | null = null; // fork: recall-page.ts
     const entityParam = typeof p.entity === 'string' && p.entity.length > 0 ? (p.entity as string) : null;
     const sessionParam = typeof p.session_id === 'string' && p.session_id.length > 0 ? (p.session_id as string) : null;
@@ -414,7 +417,9 @@ const recall: Operation = {
       excludeAuditRows: true, eligibility,
     };
 
-    if (question !== null && !readsNoSource) {
+    if (factId !== null) {
+      rows = await readFactById(ctx.engine, factSources, factId, listOpts);
+    } else if (question !== null && !readsNoSource) {
       ranking = await rankFactsByQuestion(ctx, { question, params: p, factSources, limit, entity: entityParam, sessionId: sessionParam, since, grep, includeExpired,
         scope: { sourceIds: factSources, worldOnly, excludePrivate, minTrust: eligibility.floor, suppressFlagged: eligibility.suppressFlagged } });
       ({ rows, ambiguousEntity } = ranking);
@@ -576,7 +581,7 @@ const recall: Operation = {
 
     let observedUnavailable = false;
     const out = {
-      facts: await withDecideContested(ctx.engine, await withFactDateHeaders(ctx.engine, await stampRowTrust(ctx.engine, 'facts', packedFacts.map(r => ({ // #5575 A6 trust labels; GBRA-216 dp contested
+      facts: await withTrustContestedFacts(ctx.engine, await withDecideContested(ctx.engine, await withFactDateHeaders(ctx.engine, await stampRowTrust(ctx.engine, 'facts', packedFacts.map(r => ({ // #5575 A6 trust labels; GBRA-216 dp contested
         id: r.id,
         fact: r.fact,
         kind: r.kind,
@@ -608,7 +613,7 @@ const recall: Operation = {
         provenance: r.source, ...(r.attributed_to ? { attributed_to: r.attributed_to } : {}), ...(r.quoted ? { quoted: r.quoted } : {}), ...recallClaimColumns(r),
         ...(r.entity_slugs ? { entity_slugs: r.entity_slugs } : {}), ...(r.collapsed_count ? { collapsed_count: r.collapsed_count } : {}),
         ...(ranking ? { relevance: ranking.relevance.get(r.id), ...(ranking.weighting ? { rank_score: ranking.weighting.rank.get(r.id), confidence_factor: ranking.weighting.factor.get(r.id) } : {}) } : {}),
-      })), f => f.id), { excludePrivate, minTrust: eligibility.floor, suppressFlagged: eligibility.suppressFlagged }, () => { observedUnavailable = true; }), { remote: ctx.remote !== false, excludePrivate, eligibility }, contested),
+      })), f => f.id), { excludePrivate, minTrust: eligibility.floor, suppressFlagged: eligibility.suppressFlagged }, () => { observedUnavailable = true; }), { remote: ctx.remote !== false, excludePrivate, eligibility }, contested), factSources, listOpts), // fork: tp other fact, only if this caller reads it
       total: packedFacts.length,
       facts_order: ranking ? 'relevance' : 'newest',
       ...(quoted.withheld ? { facts_degraded: { reason: 'saved_facts_withheld' } } : ranking?.degraded || contested.degraded || observedUnavailable

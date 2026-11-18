@@ -37,8 +37,12 @@ export interface TrustFields {
   guest?: GuestStamp;
 }
 
-/** fact_id: the other fact of a decide proposal (dp<id>, facts/contested-claims.ts). */
-export interface Contested { proposal_ref: string; role: 'challenger' | 'challenged'; fact_id?: string }
+/**
+ * fact_id: the other fact of a decide proposal (dp<id>, facts/contested-claims.ts) or, fork, of a supersede_fact trust
+ * proposal (tp<id>, facts/recall-fact-id.ts); take_id (fork): the other take of a supersede_take one (takes-contested.ts).
+ * Each is set only for a caller that can read that row.
+ */
+export interface Contested { proposal_ref: string; role: 'challenger' | 'challenged'; fact_id?: string; take_id?: string }
 
 /** `tp12:challenger` (the contestedRefSql column) -> its Contested value; anything else -> undefined. */
 export function parseContested(value: unknown): Contested | undefined {
