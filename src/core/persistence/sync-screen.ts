@@ -27,7 +27,7 @@ import { completeFenceLocation, FENCE_VERSION, type ReceiptFenceLocation } from 
 import { fenceFileLine } from '../fence-repair/hold-fix.ts';
 import { slugConflictHoldMessage } from '../import-file.ts';
 import { isImageFilePath, isMultimodalEnabled, resolveSlugForPath } from '../sync.ts';
-import { loadActivePackForEngine } from '../schema-pack/engine-resolution.ts';
+import { loadActivePackForEngineOrNull } from '../schema-pack/engine-resolution.ts';
 import { VERSION } from '../../version.ts';
 import { sha256 } from './digest.ts';
 import { readPageBodyPolicy, type PageBodyPolicy } from '../page-body/limits.ts';
@@ -54,7 +54,7 @@ export interface SyncScreenRun { policy: SyncHoldPolicy; sanity: ImportSanityCon
 export async function loadSyncScreenRun(engine: BrainEngine, sourceId: string, processingOptions: SyncProcessingOptions | undefined, remote: boolean): Promise<SyncScreenRun | null> {
   const policy = await readSyncHoldPolicy(engine);
   if (policy.mode === 'fail') return null;
-  const activePack = processingOptions?.noSchemaPack ? undefined : (await loadActivePackForEngine(engine, { remote, sourceId }).catch(() => null))?.manifest;
+  const activePack = processingOptions?.noSchemaPack ? undefined : (await loadActivePackForEngineOrNull(engine, { remote, sourceId }))?.manifest;
   let normalize: Promise<boolean> | undefined;
   return { policy, sanity: await loadImportSanityConfig(engine), activePack, normalize: () => normalize ??= fencesNormalizeEnabled(engine) };
 }

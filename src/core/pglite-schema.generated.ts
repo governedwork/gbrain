@@ -2633,6 +2633,12 @@ DO \$rls\$ BEGIN
   END IF;
 END \$rls\$;
 
+-- Ours (governedwork fork): stamps the fork schema epoch; stays after every fork fragment.
+INSERT INTO config (key, value) VALUES ('fork_schema_epoch', '90e46d26b4e88d2d')
+  ON CONFLICT (key) DO UPDATE SET value = CASE
+    WHEN position(',' || EXCLUDED.value || ',' IN ',' || config.value || ',') > 0 THEN config.value
+    ELSE config.value || ',' || EXCLUDED.value END;
+
 `;
 
 export function getPGLiteSchema(

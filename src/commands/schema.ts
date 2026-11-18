@@ -59,6 +59,8 @@ import { bundledPackPath } from '../core/schema-pack/bundled-assets.ts';
 import { gbrainPath, loadConfig, configPath, toEngineConfig, isThinClient, type GBrainConfig } from '../core/config.ts';
 import { opError } from '../core/ops/contract.ts';
 import { readDbSchemaPack } from '../core/schema-pack/best-effort.ts';
+import { primeBrainResidentPack } from '../core/schema-pack/load-active.ts';
+import { bindBrainResidentPackStore, isPackStoreFailure } from '../core/schema-pack/db-store.ts';
 import { sanitizeTypeForDisplay } from '../core/schema-pack/type-usage.ts';
 import { yamlScalar } from '../core/frontmatter-inference.ts';
 import { ROUTERS, SCHEMA_SUBCOMMANDS, subcommandHelpRequested } from '../cli/subcommands.ts';
@@ -200,8 +202,15 @@ Resolution chain (7-tier, tier 1 trust-gated):
 async function readDbSchemaPackConfig(cfg: GBrainConfig | null): Promise<string | undefined> {
   if (!cfg) return undefined;
   try {
-    return await withConnectedEngine((engine) => readDbSchemaPack(engine));
-  } catch {
+    return await withConnectedEngine(async (engine) => {
+      const dbConfig = await readDbSchemaPack(engine);
+      // Ours (governedwork fork): the caller resolves after this connection closes; read the brain's pack heads now.
+      await primeBrainResidentPack({ cfg, remote: false, dbConfig, packStore: engine });
+      return dbConfig;
+    });
+  } catch (err) {
+    // Ours (governedwork fork): the brain answered but its stored packs could not be read; the pack it names may live there.
+    if (isPackStoreFailure(err)) throw err;
     return undefined;
   }
 }
@@ -488,11 +497,12 @@ async function withConnectedEngine<T>(fn: (engine: import('../core/engine.ts').B
   const connectConfig = toEngineConfig(cfg);
   const engine = await createEngine(connectConfig);
   await engine.connect(connectConfig);
+  // Ours (governedwork fork): brain-resident packs resolve like disk packs in every schema subcommand.
+  const unbind = bindBrainResidentPackStore(engine);
   try {
-    // Ours (governedwork fork): brain-resident packs resolve like disk packs in every schema subcommand.
-    await (await import('../core/schema-pack/db-store.ts')).refreshBrainResidentPacks(engine);
     return await fn(engine);
   } finally {
+    unbind();
     await engine.disconnect();
   }
 }
@@ -807,6 +817,7 @@ async function runLintCmd(args: string[]): Promise<void> {
           pack = loaded.resolved.manifest;
           declared = loaded.declared;
         } catch (e) {
+          // pack-store-failure-ok: a CLI read that prints the error.
           const msg = e instanceof Error ? e.message : String(e);
           console.error(`warn: could not resolve extends chain for pack \`${name}\` (${msg}); linting raw manifest only`);
           pack = raw;

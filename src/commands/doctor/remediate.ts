@@ -162,9 +162,12 @@ export async function pendingMigrationsNotice(engine: BrainEngine): Promise<Noti
   try { if (resolveBrainId(getCliOptions().brain) !== 'host') return null; } catch { return null; }
   if (!(await hasPendingMigrations(engine))) return null;
   const current = await engine.getConfig('version').catch(() => null);
+  // Ours (governedwork fork): at the expected version, what is pending is the fork's own schema (src/core/fork-schema.ts).
+  const state = current === String(LATEST_VERSION) ? `brain at v${current}, without this gbrain's fork tables`
+    : `brain at v${current ?? 'unknown'}, this gbrain expects v${LATEST_VERSION}`;
   return {
     code: 'migrations_pending', kind: 'safety',
-    why: `Schema migrations are pending (brain at v${current ?? 'unknown'}, this gbrain expects v${LATEST_VERSION}). `
+    why: `Schema migrations are pending (${state}). `
       + 'The plan was computed without applying them; `doctor --remediate` applies them after consent, before any step runs.',
     fix: { argv: ['gbrain', 'apply-migrations', '--yes'], consent: [], actor: 'agent', requires_exclusive: true,
       why: 'Applies the pending schema migrations (the same ones every command applies on connect).',

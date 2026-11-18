@@ -372,6 +372,8 @@ class CalibrationProfilePhase extends BaseCyclePhase {
         );
       }
     } catch (err) {
+      // Ours (governedwork fork): an unreadable pack store is not "no pack" (db-store.ts isPackStoreFailure).
+      if ((await import('../schema-pack/db-store.ts')).isPackStoreFailure(err)) throw err;
       // Pack resolution failed (e.g. registry not initialized, manifest
       // malformed). Don't crash calibration — log a warning and write the
       // empty {} scorecard. Matches the v0.36.1.0 baseline behavior so

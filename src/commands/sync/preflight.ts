@@ -327,7 +327,9 @@ async function resolveSyncRepo(engine: BrainEngine, opts: SyncOpts): Promise<{ d
       sourceId: opts.sourceId,
     });
     syncActivePack = { page_types: resolved.manifest.page_types };
-  } catch {
+  } catch (err) {
+    // Ours (governedwork fork): an unreadable pack store is not "no pack" (db-store.ts isPackStoreFailure).
+    if ((await import('../../core/schema-pack/db-store.ts')).isPackStoreFailure(err)) throw err;
     syncActivePack = undefined;
   }
 

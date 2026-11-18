@@ -2671,6 +2671,14 @@ Reasons: `host_mismatch`, `transfer_in_progress`, `clone_in_progress`, `binding_
 
 More: [docs/guides/troubleshooting.md#owner-unavailable](../../docs/guides/troubleshooting.md#owner-unavailable)
 
+### pack_store_unreadable
+
+<a id="pack_store_unreadable"></a>
+
+| Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
+|---|---|---|---|---|---|---|
+| The brain's stored schema packs could not be read, so the active pack, which may live there, was not resolved and nothing was done without it. | A pack GBrain does not bundle may be stored in the brain itself. Reading it as "no pack" would let a write skip the pack's vocabulary and typing, so the command fails instead; it is usually a passing database failure. | Retry the command. If it keeps failing, check the database connection and schema with `gbrain doctor --json`. Run: gbrain doctor --json | agent | `repeat the read that failed` | 1 | yes |
+
 ### page_body_rows_unreadable
 
 <a id="page_body_rows_unreadable"></a>

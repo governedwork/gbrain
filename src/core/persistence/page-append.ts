@@ -33,7 +33,7 @@ import { parseMarkdown, serializePageToMarkdown, timelineSentinelKind } from '..
 import { buildContentFlagMarker, CONTENT_FLAG_KEY, isQuarantined } from '../quarantine.ts';
 import { sizeStateField } from '../page-embedding-budget.ts';
 import { assertKnowledgePublicationAllowed } from '../shared-skills/knowledge-guard.ts';
-import { loadActivePackForEngine } from '../schema-pack/engine-resolution.ts';
+import { loadActivePackForEngineOrNull } from '../schema-pack/engine-resolution.ts';
 import { contentRefusalError, loadImportSanityConfig } from '../import-screen.ts';
 import { assessWriteGate, DEFAULT_WRITE_GATE_CONFIG, frontmatterText, stripManagedFenceRows, writeGateApplies, writeGateDetail } from '../write-gate.ts';
 import { applyTrustAllowRules } from '../trust/allow-rules.ts';
@@ -302,7 +302,7 @@ export async function prepareSegmentedSpliceMutation(engine: BrainEngine, row: W
   const frontmatter: Record<string, unknown> = { ...(stored.page.frontmatter ?? {}) };
   if (frontmatter.always_load !== undefined || frontmatter.core_priority !== undefined) return null;
   const [, pack, storedTier] = await Promise.all([assertKnowledgePublicationAllowed(engine, row),
-    loadActivePackForEngine(engine, { remote: row.authority.remote, sourceId: row.source_id }).catch(() => null), storedPageTier(engine, row.source_id, row.slug)]);
+    loadActivePackForEngineOrNull(engine, { remote: row.authority.remote, sourceId: row.source_id }), storedPageTier(engine, row.source_id, row.slug)]);
   const trust = pageWriteTrust(row, frontmatter);
   const gateTrust = pageGateTrust(row, trust, storedTier);
   const gateConfig = (await loadImportSanityConfig(engine)).writeGate ?? DEFAULT_WRITE_GATE_CONFIG;

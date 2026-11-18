@@ -23,7 +23,7 @@ export async function resolvePackPhaseGate(
   sourceId?: string,
 ): Promise<PackPhaseGate> {
   try {
-    const { engineSchemaInput } = await import('../schema-pack/engine-resolution.ts');
+    const { engineSchemaInput, packOrNull } = await import('../schema-pack/engine-resolution.ts');
     const { loadActivePack, resolveActivePackNameOnly } = await import('../schema-pack/load-active.ts');
     const input = await engineSchemaInput(engine, { remote: false, ...(sourceId ? { sourceId } : {}) });
     const resolved = await loadActivePack(input);
@@ -34,11 +34,12 @@ export async function resolvePackPhaseGate(
     };
     if (!gate.declared || (gate.source_tier !== 'db-config' && gate.source_tier !== 'per-source-db')) return gate;
     const { loadConfig } = await import('../config.ts');
-    const filePlane = await loadActivePack({ cfg: loadConfig(), remote: false }).catch(() => null);
+    const filePlane = await packOrNull(loadActivePack({ cfg: loadConfig(), remote: false }));
     if ((filePlane?.manifest.phases ?? []).includes(phase)) return gate;
     if ((await engine.getConfig(`cycle.${phase}.enabled`))?.trim() === 'true') return gate;
     return { ...gate, consent_required: true };
   } catch {
+    // pack-store-failure-ok: fails closed: the phase is skipped, so nothing runs without the pack.
     return { declared: false, reason: 'pack_resolution_failed' };
   }
 }
@@ -58,6 +59,8 @@ export async function packGateSkip(engine: BrainEngine, phase: CyclePhase, sourc
     duration_ms: 0,
     summary: gate.consent_required
       ? `${phase}: the active pack ${gate.resolved_pack} (from ${gate.source_tier}) declares this paid phase, which did not run before; run \`gbrain config set cycle.${phase}.enabled true\` to let the cycle run it`
+      // Ours (governedwork fork): a pack that did not resolve is not a pack that left the phase out.
+      : gate.reason === 'pack_resolution_failed' ? `${phase}: the active pack could not be resolved, so the phase did not run; \`gbrain schema active\` shows why`
       : NOT_DECLARED[phase] ?? `${phase}: active pack does not declare this phase`,
     details: {
       reason: gate.consent_required ? 'consent_required' : gate.reason ?? 'not_in_active_pack',
