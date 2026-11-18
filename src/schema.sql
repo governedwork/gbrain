@@ -3776,6 +3776,35 @@ CREATE TABLE IF NOT EXISTS sync_notifier_sources (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Ours (governedwork fork): brain-resident schema packs. After every upstream table (v319 at 0.60.737) and
+-- before the search_path hardening, which must stay the last statement.
+-- BEGIN GENERATED from src/core/schema-pack/brain-pack-schema.ts (BRAIN_PACK_SCHEMA_SQL). Edit that file, then run: bun run build:schema
+CREATE TABLE IF NOT EXISTS schema_pack_revisions (
+  revision uuid PRIMARY KEY,
+  name text NOT NULL,
+  source_id text NOT NULL,
+  manifest jsonb NOT NULL,
+  manifest_hash text NOT NULL,
+  parent_revision uuid,
+  published_by text NOT NULL,
+  published_at timestamptz NOT NULL DEFAULT now(),
+  note text
+);
+CREATE INDEX IF NOT EXISTS schema_pack_revisions_name_idx ON schema_pack_revisions(name, published_at);
+CREATE TABLE IF NOT EXISTS schema_pack_heads (
+  name text PRIMARY KEY,
+  revision uuid NOT NULL REFERENCES schema_pack_revisions(revision),
+  source_id text NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+DO $rls$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles r WHERE pg_has_role(current_user, r.oid, 'USAGE') AND (r.rolbypassrls OR r.rolsuper)) THEN
+    ALTER TABLE schema_pack_revisions ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE schema_pack_heads ENABLE ROW LEVEL SECURITY;
+  END IF;
+END $rls$;
+-- END GENERATED from src/core/schema-pack/brain-pack-schema.ts (BRAIN_PACK_SCHEMA_SQL)
+
 -- Last statement: pg_temp ends every gbrain function's pinned search_path (#7632), after any CREATE OR REPLACE above reset it.
 -- BEGIN GENERATED from src/core/function-search-path.ts (FUNCTION_SEARCH_PATH_HARDENING_SQL). Edit that file, then run: bun run build:schema
 DO $harden$

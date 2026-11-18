@@ -289,6 +289,9 @@ async function serveBrain(
   (await import('../core/wakeshift/drain.ts')).startWakeDrain(engine);
   // #7082: a keyword statement that timed out is re-run in the background so its skip ends once the cache is warm.
   (await import('../core/postgres-engine/keyword-timeout-cache.ts')).setKeywordTimeoutReruns(true);
+  // Ours (governedwork fork): brain-resident schema packs published by another
+  // process show here within the pack stat-TTL, as file-backed packs do.
+  (await import('../core/schema-pack/db-store.ts')).keepBrainResidentPacksFresh(engine);
 
   // MEMORY_VERBS v1: tool-surface mode. stdio: GBRAIN_SURFACE > --surface >
   // config `mcp_surface` > 'full'; --http ignores GBRAIN_SURFACE (an HTTP
