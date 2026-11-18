@@ -94,6 +94,8 @@ interface WaitingResult {
   no_counterparty?: { loop_count: number } | null;
   /** #5012: open reply-owed loops the automated-mail rule would not have opened; null when none. */
   withheld_noise?: { loop_count: number; sender_count: number; senders: Array<{ email: string; open_loops: number; preview_command: string }> } | null;
+  /** Fork: reply-owed loops from machine senders, labelled and listed apart; null when none. */
+  machine_mail?: { loop_count: number; group_count: number } | null;
   count: number;
   stale: boolean;
   sources: Array<{ id: string; last_sync_at: string | null; stale: boolean }>;
@@ -168,7 +170,7 @@ export async function runWaiting(engine: BrainEngine, args: string[]): Promise<v
       + noise.senders.map((x) => `  ${x.preview_command}   (${x.open_loops})`).join('\n') + '\n'
       + (noise.sender_count > noise.senders.length ? `  … and ${noise.sender_count - noise.senders.length} more sender(s)\n` : ''));
   }
-  if (result.groups.length > 0 || result.no_counterparty) {
+  if (result.groups.length > 0 || result.no_counterparty || result.machine_mail) {
     process.stdout.write(
       `\n(close: gbrain loops done <id> · mute a sender: gbrain loops mute sender <email> · details: gbrain loops list)\n`,
     );
@@ -320,7 +322,8 @@ export async function runLoops(engine: BrainEngine, args: string[]): Promise<voi
     }
     for (const l of result.loops) {
       const due = l.due_at ? `  due ${String(l.due_at).slice(0, 10)}` : '';
-      process.stdout.write(`#${String(l.id).padEnd(5)} [${String(l.loop_type)}]${due}  ${String(l.summary)}\n`);
+      const machine = l.label === 'machine_mail' ? '  (machine mail, no reply owed)' : '';
+      process.stdout.write(`#${String(l.id).padEnd(5)} [${String(l.loop_type)}]${due}  ${String(l.summary)}${machine}\n`);
     }
     return;
   }
