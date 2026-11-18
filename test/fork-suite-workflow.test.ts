@@ -10,8 +10,9 @@
  *     re-runs those tests once before it reads red; any other failure stays red.
  */
 import { describe, expect, test } from 'bun:test';
+import { ARM_SHARDS } from '../scripts/postgres-unit-arms.ts';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -68,6 +69,9 @@ describe('fork-suite PostgreSQL lanes (ledger 111)', () => {
     expect(step).toBeDefined();
     expect(String(step!.env.GBRAIN_ARM_DATABASE_URLS ?? '')).toMatch(/postgres(ql)?:\/\//);
     expect(String(step!.env.GBRAIN_TEST_ALLOW_DATABASE_URL ?? '')).toBe('1');
+    // The matrix and the shard count follow upstream's ARM_SHARDS, so a rebase that raises it cannot leave the lane short.
+    expect((job.strategy?.matrix?.shard ?? []).length).toBe(ARM_SHARDS);
+    expect(step!.run).toContain(` ${ARM_SHARDS} --postgres-only`);
   });
 
   test('postgres: the required fork-suite aggregate needs every lane and passes only when each succeeded', () => {
@@ -86,13 +90,15 @@ describe('fork-suite PostgreSQL lanes (ledger 111)', () => {
 });
 
 /** One Bun JUnit report (the shape `bun test --reporter=junit` writes) with the given failed and passed cases. */
-function junit(cases: Array<{ file: string; name: string; failed: boolean }>): string {
+function junit(cases: Array<{ file: string; name: string; failed: boolean; skipped?: boolean }>): string {
   const body = cases
     .map((c) =>
       c.failed
         ? `<testcase name="${c.name}" classname="x" time="0.1" file="${c.file}" line="1" assertions="1">` +
           `<failure type="AssertionError" message="boom">AssertionError: boom</failure></testcase>`
-        : `<testcase name="${c.name}" classname="x" time="0.1" file="${c.file}" line="1" assertions="1" />`,
+        : c.skipped
+          ? `<testcase name="${c.name}" classname="x" time="0" file="${c.file}" line="1" assertions="0"><skipped /></testcase>`
+          : `<testcase name="${c.name}" classname="x" time="0.1" file="${c.file}" line="1" assertions="1" />`,
     )
     .join('\n');
   const failures = cases.filter((c) => c.failed).length;
@@ -102,20 +108,29 @@ function junit(cases: Array<{ file: string; name: string; failed: boolean }>): s
 }
 
 /**
- * Runs the retry script over a receipt dir holding `report`, with a stub test runner that records its argv and
- * exits `rerunExit`. Returns the script's exit status and every argv the stub saw.
+ * Runs the retry script over a receipt dir holding `report`, with a stub test runner that records its argv, writes
+ * its own JUnit report (the probe as `rerun`: passed, skipped or absent) and exits `rerunExit`. `log` is the shard
+ * log handed to the script. Returns the script's exit status and every argv the stub saw.
  */
-function retry(report: string | null, rerunExit: number): { status: number | null; reruns: string[]; output: string } {
+function retry(report: string | null, rerunExit: number, opts: { rerun?: 'pass' | 'skip' | 'none'; log?: string } = {}): { status: number | null; reruns: string[]; output: string } {
   const dir = mkdtempSync(join(tmpdir(), 'fork-retry-'));
   try {
     const receipts = join(dir, 'receipts');
-    spawnSync('mkdir', ['-p', receipts]);
+    mkdirSync(receipts, { recursive: true });
     if (report !== null) writeFileSync(join(receipts, 'unit--s1of12--primary.junit.xml'), report);
     const calls = join(dir, 'calls.log');
+    const rerunCase = opts.rerun === 'none' ? []
+      : [{ file: PROBE_13_FILE, name: PROBE_13_NAME, failed: rerunExit !== 0, skipped: opts.rerun === 'skip' }];
+    const rerunReport = join(dir, 'rerun-template.xml');
+    writeFileSync(rerunReport, junit(rerunCase));
     const stub = join(dir, 'stub-runner.sh');
-    writeFileSync(stub, `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> '${calls}'\nexit ${rerunExit}\n`);
+    writeFileSync(stub, `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> '${calls}'\n`
+      + `for a in "$@"; do case "$a" in --reporter-outfile=*) cp '${rerunReport}' "\${a#--reporter-outfile=}";; esac; done\n`
+      + `exit ${rerunExit}\n`);
     chmodSync(stub, 0o755);
-    const res = spawnSync('bun', [RETRY_SCRIPT, receipts], {
+    const args = [RETRY_SCRIPT, receipts];
+    if (opts.log !== undefined) { writeFileSync(join(dir, 'shard.log'), opts.log); args.push(join(dir, 'shard.log')); }
+    const res = spawnSync('bun', args, {
       cwd: ROOT,
       encoding: 'utf8',
       env: { ...process.env, FORK_RETRY_RUNNER: stub },
@@ -171,5 +186,28 @@ describe('fork-suite known-flake retry before red (ledger 105)', () => {
   test('flake: a red shard with no failed test in its receipts (a crash) stays red', () => {
     expect(retry(junit([{ file: 'test/other.test.ts', name: 'green', failed: false }]), 0).status).toBe(1);
     expect(retry(null, 0).status).toBe(1);
+  });
+
+  test('flake: a shard whose log counts errors outside any test (a file that failed to load) stays red, nothing re-run', () => {
+    const r = retry(junit([{ file: PROBE_13_FILE, name: PROBE_13_NAME, failed: true }]), 0,
+      { log: ' 120 pass\n 1 fail\n 1 error\nRan 121 tests across 12 files.\n' });
+    expect(r.status).toBe(1);
+    expect(r.reruns).toHaveLength(0);
+  });
+
+  test('flake: a re-run that exits 0 but skips the test, or never reaches it, is not a pass', () => {
+    expect(retry(junit([{ file: PROBE_13_FILE, name: PROBE_13_NAME, failed: true }]), 0, { rerun: 'skip' }).status).toBe(1);
+    expect(retry(junit([{ file: PROBE_13_FILE, name: PROBE_13_NAME, failed: true }]), 0, { rerun: 'none' }).status).toBe(1);
+  });
+
+  test('flake: every listed row names a test that exists in its file', () => {
+    // test-reads-source-ok[structural]: a stale row would retry whatever test later takes the same name.
+    const rows = readFileSync(FLAKE_LIST, 'utf8').split('\n').filter((l) => l.trim() && !l.startsWith('#'));
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      const [file, name] = row.split('\t');
+      expect(existsSync(join(ROOT, file!))).toBe(true);
+      expect(readFileSync(join(ROOT, file!), 'utf8')).toContain(name!);
+    }
   });
 });

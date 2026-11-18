@@ -5,10 +5,14 @@
 # (flock(1), case-sensitive paths, process groups, ps), so on macOS it is red on bare upstream too. This workflow runs
 # the same suite on GitHub's free Linux runners (the fork is public), with upstream's own shard scripts, and
 # `fork-suite` is the context the brains-v* ruleset requires beside `lander/verdict` (operator ruling 2026-10-19,
-# arc gbrain-bump). It also carries the tests only PostgreSQL can run: upstream's E2E corpus (scripts/run-e2e.sh) and
-# the unit suites' PostgreSQL arms (scripts/postgres-unit-arms.ts). A unit shard whose only failures are listed known
-# upstream flakes (scripts/fork-known-flakes.txt) re-runs them once before it reads red
-# (scripts/fork-retry-known-flakes.ts); any other failure stays red. Pinned by test/fork-suite-workflow.test.ts.
+# arc gbrain-bump). Lanes: the 12 unit and 4 serial shards; postgres-e2e (8 shards of scripts/run-e2e.sh against a
+# pgvector pg16 service; scripts/e2e-live-key-only.txt files skip, scripts/e2e-backend-matrix.txt files get their direct
+# pass only); postgres-arms (the ARM_SHARDS shards of scripts/postgres-unit-arms.ts --postgres-only on two databases).
+# The heavy files scripts/test-shard.sh excludes, which upstream runs in dedicated jobs, run in none of them.
+# A red unit shard goes to scripts/fork-retry-known-flakes.ts with its JUnit receipts and log: it stays red on any error
+# outside a test, any failure not listed in scripts/fork-known-flakes.txt, or receipts naming no failed test; a listed
+# failure is re-run once, alone, and counts only if its own JUnit report shows it passed (annotated ::warning::).
+# Pinned by test/fork-suite-workflow.test.ts.
 name: fork-suite
 
 on:
@@ -47,7 +51,9 @@ jobs:
       - name: Unit shard ${{ matrix.shard }}/12
         env:
           GBRAIN_TEST_RECEIPT_DIR: ${{ runner.temp }}/receipts
-        run: bash scripts/test-shard.sh ${{ matrix.shard }} 12 || bun scripts/fork-retry-known-flakes.ts "$GBRAIN_TEST_RECEIPT_DIR"
+        run: |
+          set -o pipefail
+          bash scripts/test-shard.sh ${{ matrix.shard }} 12 2>&1 | tee "$RUNNER_TEMP/unit-shard.log" || bun scripts/fork-retry-known-flakes.ts "$GBRAIN_TEST_RECEIPT_DIR" "$RUNNER_TEMP/unit-shard.log"
 
   serial:
     runs-on: ubuntu-24.04
