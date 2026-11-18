@@ -59,6 +59,7 @@ import { bundledPackPath } from '../core/schema-pack/bundled-assets.ts';
 import { gbrainPath, loadConfig, configPath, toEngineConfig, isThinClient, type GBrainConfig } from '../core/config.ts';
 import { opError } from '../core/ops/contract.ts';
 import { readDbSchemaPack } from '../core/schema-pack/best-effort.ts';
+import { primeBrainResidentPack } from '../core/schema-pack/load-active.ts';
 import { sanitizeTypeForDisplay } from '../core/schema-pack/type-usage.ts';
 import { yamlScalar } from '../core/frontmatter-inference.ts';
 import { ROUTERS, SCHEMA_SUBCOMMANDS, subcommandHelpRequested } from '../cli/subcommands.ts';
@@ -200,7 +201,12 @@ Resolution chain (7-tier, tier 1 trust-gated):
 async function readDbSchemaPackConfig(cfg: GBrainConfig | null): Promise<string | undefined> {
   if (!cfg) return undefined;
   try {
-    return await withConnectedEngine((engine) => readDbSchemaPack(engine));
+    return await withConnectedEngine(async (engine) => {
+      const dbConfig = await readDbSchemaPack(engine);
+      // Ours (governedwork fork): the caller resolves after this connection closes; read the brain's pack heads now.
+      await primeBrainResidentPack({ cfg, remote: false, dbConfig, packStore: engine });
+      return dbConfig;
+    });
   } catch {
     return undefined;
   }
@@ -488,11 +494,12 @@ async function withConnectedEngine<T>(fn: (engine: import('../core/engine.ts').B
   const connectConfig = toEngineConfig(cfg);
   const engine = await createEngine(connectConfig);
   await engine.connect(connectConfig);
+  // Ours (governedwork fork): brain-resident packs resolve like disk packs in every schema subcommand.
+  const unbind = (await import('../core/schema-pack/db-store.ts')).bindBrainResidentPackStore(engine);
   try {
-    // Ours (governedwork fork): brain-resident packs resolve like disk packs in every schema subcommand.
-    await (await import('../core/schema-pack/db-store.ts')).refreshBrainResidentPacks(engine);
     return await fn(engine);
   } finally {
+    unbind();
     await engine.disconnect();
   }
 }

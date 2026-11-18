@@ -26,7 +26,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { GBrainConfig } from '../config.ts';
 import { gbrainPath } from '../config.ts';
-import { brainResidentPack } from './db-store.ts';
+import { brainResidentPack, ensureBrainResidentPacksFresh, type PackStore } from './db-store.ts';
 import type { SchemaPackManifest } from './manifest-v1.ts';
 import type { DeclaredPack } from './borrow-lint-rules.ts';
 import { loadPackFromFile } from './loader.ts';
@@ -62,6 +62,11 @@ export interface LoadActivePackInput {
   gbrainYml?: string;
   /** Tier-4 brain-wide DB config (overrides tier 6 file-plane). */
   dbConfig?: string;
+  /**
+   * Ours (governedwork fork): the brain whose brain-resident packs this resolution reads (engineSchemaInput sets
+   * it to the engine); without one, the bound store (db-store.ts bindBrainResidentPackStore).
+   */
+  packStore?: PackStore;
 }
 
 /**
@@ -133,9 +138,14 @@ function defaultPackLocator(name: string): string | null {
  * Load + parse + validate a pack by name. Used by `resolvePack` to walk
  * the extends chain. Throws UnknownPackError when the pack isn't on disk.
  */
-async function loadPackManifestByName(name: string): Promise<SchemaPackManifest> {
-  const resident = isBundledPackName(name) ? null : brainResidentPack(name);
-  if (resident) return resident;
+async function loadPackManifestByName(name: string, store?: PackStore): Promise<SchemaPackManifest> {
+  // Ours (governedwork fork): a pack GBrain does not bundle may live in the brain, which shadows the disk;
+  // re-check the heads first (stat-TTL gated, one check at a time).
+  if (!isBundledPackName(name)) {
+    await ensureBrainResidentPacksFresh(store);
+    const resident = brainResidentPack(name);
+    if (resident) return resident;
+  }
   const path = _packLocator(name);
   if (!path) {
     throw new UnknownPackError(name);
@@ -157,13 +167,25 @@ async function loadPackManifestByName(name: string): Promise<SchemaPackManifest>
 export async function loadActivePack(input: LoadActivePackInput): Promise<ResolvedPack> {
   const resolutionInput = buildResolutionInput(input);
   const resolution: ResolutionResult = resolveActivePackName(resolutionInput);
+  // Ours (governedwork fork): the resolved pack, not every tier, decides whether the brain's heads are read;
+  // a re-check that finds new heads evicts the cached packs they feed before the cache answers.
+  if (!isBundledPackName(resolution.pack_name)) await ensureBrainResidentPacksFresh(input.packStore);
   // v0.40.6.0: TTL-gated cache fast path. Inside STAT_TTL_MS (default 1s)
   // returns immediately (~10ns). Outside the window: stats files in the
   // extends chain; cascade-invalidates and falls through on mtime change.
   const cached = tryCachedPack(resolution.pack_name);
   if (cached) return cached;
-  const manifest = await loadPackManifestByName(resolution.pack_name);
-  return await resolveLoadedPack(manifest);
+  const manifest = await loadPackManifestByName(resolution.pack_name, input.packStore);
+  return await resolveLoadedPack(manifest, input.packStore);
+}
+
+/**
+ * Ours (governedwork fork): re-check now the brain-resident pack heads a later `loadActivePack(input)` needs,
+ * for a caller that resolves after the connection it read the brain through has closed (the `gbrain schema`
+ * subcommands' short-lived reads). A bundled resolved pack needs none.
+ */
+export async function primeBrainResidentPack(input: LoadActivePackInput): Promise<void> {
+  if (!isBundledPackName(resolveActivePackName(buildResolutionInput(input)).pack_name)) await ensureBrainResidentPacksFresh(input.packStore);
 }
 
 /**
@@ -174,7 +196,7 @@ export async function loadActivePack(input: LoadActivePackInput): Promise<Resolv
  * MERGED manifest, matching validate/use/active (#4373; CLI `schema lint
  * <name>` resolves by name via loadResolvedPackByName, #4501).
  */
-export async function resolveLoadedPack(manifest: SchemaPackManifest): Promise<ResolvedPack> {
+export async function resolveLoadedPack(manifest: SchemaPackManifest, store?: PackStore): Promise<ResolvedPack> {
   // Ours (governedwork fork): resolvePack's identity fast path compares only this pack's
   // own bytes, so a cached entry whose parent or borrow source changed on disk would come
   // back stale. tryCachedPack runs the stat-TTL dependency check loadActivePack relies on
@@ -182,7 +204,7 @@ export async function resolveLoadedPack(manifest: SchemaPackManifest): Promise<R
   tryCachedPack(manifest.name);
   // Thread the locator so resolvePack can snapshot file paths + mtimes
   // for the stat-TTL gate on subsequent calls (codex C6 + D11 + D13).
-  return await resolvePack(manifest, loadPackManifestByName, {
+  return await resolvePack(manifest, (name) => loadPackManifestByName(name, store), {
     loadByPath: (name) => _packLocator(name),
   });
 }
@@ -197,8 +219,8 @@ export async function resolveLoadedPack(manifest: SchemaPackManifest): Promise<R
  * (UnknownPackError, ExtendsChainTooDeepError, AliasCycleError,
  * SchemaPackManifestError).
  */
-export async function loadResolvedPackByName(name: string): Promise<ResolvedPack> {
-  return await resolveLoadedPack(await loadPackManifestByName(name));
+export async function loadResolvedPackByName(name: string, store?: PackStore): Promise<ResolvedPack> {
+  return await resolveLoadedPack(await loadPackManifestByName(name, store), store);
 }
 
 /**
@@ -206,16 +228,17 @@ export async function loadResolvedPackByName(name: string): Promise<ResolvedPack
  * resolves it through — what the borrow_from lint rules need
  * (LintOpts.declared): the resolved manifest hides every borrow outcome.
  */
-export function declaredPack(manifest: SchemaPackManifest): DeclaredPack {
-  return { manifest, loadByName: loadPackManifestByName, resolve: resolveLoadedPack };
+export function declaredPack(manifest: SchemaPackManifest, store?: PackStore): DeclaredPack {
+  return { manifest, loadByName: (name) => loadPackManifestByName(name, store), resolve: (m) => resolveLoadedPack(m, store) };
 }
 
 /** Ours (governedwork fork): `loadResolvedPackByName`, plus the pack as declared. */
 export async function loadDeclaredPackByName(
   name: string,
+  store?: PackStore,
 ): Promise<{ resolved: ResolvedPack; declared: DeclaredPack }> {
-  const manifest = await loadPackManifestByName(name);
-  return { resolved: await resolveLoadedPack(manifest), declared: declaredPack(manifest) };
+  const manifest = await loadPackManifestByName(name, store);
+  return { resolved: await resolveLoadedPack(manifest, store), declared: declaredPack(manifest, store) };
 }
 
 /**
@@ -226,7 +249,7 @@ export async function loadDeclaredPackByName(
 export async function loadActivePackDeclared(
   input: LoadActivePackInput,
 ): Promise<{ resolved: ResolvedPack; declared: DeclaredPack }> {
-  return await loadDeclaredPackByName(resolveActivePackName(buildResolutionInput(input)).pack_name);
+  return await loadDeclaredPackByName(resolveActivePackName(buildResolutionInput(input)).pack_name, input.packStore);
 }
 
 /**
@@ -235,7 +258,7 @@ export async function loadActivePackDeclared(
  * so a caller can be authorized for all of them before any is resolved. A pack
  * that does not load ends its branch (resolution fails on it, reading nothing).
  */
-export async function packResolutionNames(root: string): Promise<string[]> {
+export async function packResolutionNames(root: string, store?: PackStore): Promise<string[]> {
   const seen = new Set<string>();
   const pending = [root];
   while (pending.length > 0) {
@@ -244,7 +267,7 @@ export async function packResolutionNames(root: string): Promise<string[]> {
     seen.add(name);
     let manifest: SchemaPackManifest;
     try {
-      manifest = await loadPackManifestByName(name);
+      manifest = await loadPackManifestByName(name, store);
     } catch (err) {
       if (err instanceof UnknownPackError) continue;
       throw err;

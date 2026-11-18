@@ -3,7 +3,7 @@
 // A pack published into the brain resolves with no file on disk, keeps every
 // revision, refuses a stale write, is owned by one source, and rejects a bad
 // manifest as the caller's error. A second process sees a new revision within
-// the pack stat-TTL.
+// the pack stat-TTL, and a brain on a bundled pack never reads the heads.
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -17,8 +17,9 @@ import { OperationError } from '../src/core/ops/contract.ts';
 import { _resetPackCacheForTests } from '../src/core/schema-pack/registry.ts';
 import { SCHEMA_PACK_API_VERSION } from '../src/core/schema-pack/manifest-v1.ts';
 import {
-  _resetBrainResidentPacksForTests, brainResidentPack, keepBrainResidentPacksFresh, refreshBrainResidentPacks,
+  _resetBrainResidentPacksForTests, bindBrainResidentPackStore, brainResidentPack, refreshBrainResidentPacks,
 } from '../src/core/schema-pack/db-store.ts';
+import { loadActivePack } from '../src/core/schema-pack/load-active.ts';
 import { BRAIN_PACK_SCHEMA_SQL } from '../src/core/schema-pack/brain-pack-schema.ts';
 import { SCHEMA_SQL } from '../src/core/schema-embedded.generated.ts';
 import { PGLITE_SCHEMA_SQL } from '../src/core/pglite-schema.generated.ts';
@@ -228,26 +229,24 @@ describe('brain-resident schema packs', () => {
   });
 
   test('another process sees a new revision within the stat-TTL', async () => {
-    const r1 = await put(local(), { name: 'acme-pack', manifest: manifest('acme-pack', ['client']), expected_revision: null });
-    // Simulate a second process: its overlay was loaded at r1, then another
-    // process publishes r2 straight into the tables.
-    const publishElsewhere = async () => {
+    await withEnv({ GBRAIN_HOME: home, GBRAIN_SCHEMA_PACK: undefined, GBRAIN_PACK_STAT_TTL_MS: '500' }, async () => {
+      const r1 = await put(local(), { name: 'acme-pack', manifest: manifest('acme-pack', ['client']), expected_revision: null });
+      // A connected process: the store is bound at connect, and a resolution with no engine at hand reads it.
+      bindBrainResidentPackStore(engine);
+      const declares = async (type: string) => (await loadActivePack({ cfg: { schema_pack: 'acme-pack' } as never, remote: false }))
+        .manifest.page_types.some(t => t.name === type);
+      expect(await declares('client')).toBe(true);
+      expect(await declares('retainer')).toBe(false);
+      // Another process publishes r2 straight into the tables.
       await engine.executeRaw(`INSERT INTO schema_pack_revisions(revision,name,source_id,manifest,manifest_hash,parent_revision,published_by)
         VALUES('00000000-0000-4000-8000-000000000002','acme-pack','acme',$1::text::jsonb,'h',$2::uuid,'test')`,
-      [JSON.stringify(manifest('acme-pack', ['client', 'deal'])), r1.revision]);
-      await engine.executeRaw(`UPDATE schema_pack_heads SET revision='00000000-0000-4000-8000-000000000002', updated_at=now() + interval '1 second' WHERE name='acme-pack'`);
-    };
-    await publishElsewhere();
-    await Bun.sleep(150);
-    // Control: with no refresher the overlay still holds r1.
-    expect(brainResidentPack('acme-pack')?.page_types.map(t => t.name)).toEqual(['client']);
-
-    await withEnv({ GBRAIN_PACK_STAT_TTL_MS: '50' }, async () => {
-      const stop = keepBrainResidentPacksFresh(engine);
-      try {
-        await Bun.sleep(300);
-        expect(brainResidentPack('acme-pack')?.page_types.map(t => t.name)).toEqual(['client', 'deal']);
-      } finally { stop(); }
+      [JSON.stringify(manifest('acme-pack', ['client', 'retainer'])), r1.revision]);
+      await engine.executeRaw(`UPDATE schema_pack_heads SET revision='00000000-0000-4000-8000-000000000002', updated_at=now() WHERE name='acme-pack'`);
+      // Inside the stat-TTL the last check stands: no query per resolution.
+      expect(await declares('retainer')).toBe(false);
+      // Past it, the next resolution re-checks the heads and sees r2.
+      await Bun.sleep(600);
+      expect(await declares('retainer')).toBe(true);
     });
   });
 
@@ -276,5 +275,40 @@ describe('brain-resident schema packs', () => {
       await refreshBrainResidentPacks(engine);
     });
     expect(brainResidentPack('acme-other')?.page_types.map(t => t.name)).toEqual(['client', 'deal']);
+  });
+
+  test('L100: a bundled active pack reads no brain-resident pack heads, even when a shadowed tier names an unbundled pack', async () => {
+    const { loadActivePackForEngine } = await import('../src/core/schema-pack/engine-resolution.ts');
+    await put(local(), { name: 'acme-pack', manifest: manifest('acme-pack', ['client']), expected_revision: null });
+    _resetBrainResidentPacksForTests();
+    _resetPackCacheForTests();
+    const original = engine.executeRaw.bind(engine);
+    const headReads: string[] = [];
+    (engine as unknown as { executeRaw: (...args: unknown[]) => unknown }).executeRaw = (...args: unknown[]) => {
+      if (/schema_pack_heads/.test(String(args[0]))) headReads.push(String(args[0]));
+      return (original as (...a: unknown[]) => unknown)(...args);
+    };
+    try {
+      // The env tier (2) names the bundled base; the per-source (3) and brain-wide (4) keys name acme-pack but lose.
+      await engine.setConfig('schema_pack', 'acme-pack');
+      await engine.setConfig('schema_pack.source.acme', 'acme-pack');
+      await withEnv({ GBRAIN_HOME: home, GBRAIN_SCHEMA_PACK: 'gbrain-base' }, async () => {
+        const pack = await loadActivePackForEngine(engine, { remote: false, sourceId: 'acme' });
+        expect(pack.manifest.name).toBe('gbrain-base');
+      });
+      expect(headReads).toEqual([]);
+
+      // A remote caller's per-call pack is dropped by the trust gate, so it is not what resolves either.
+      await engine.executeRaw("DELETE FROM config WHERE key = 'schema_pack' OR key LIKE 'schema_pack.source.%'");
+      headReads.length = 0;
+      await withEnv({ GBRAIN_HOME: home, GBRAIN_SCHEMA_PACK: undefined }, async () => {
+        const pack = await loadActivePackForEngine(engine, { remote: true, perCall: 'acme-pack', sourceId: 'acme' });
+        expect(pack.manifest.name).toBe('gbrain-base');
+      });
+      expect(headReads).toEqual([]);
+    } finally {
+      delete (engine as unknown as { executeRaw?: unknown }).executeRaw;
+      await engine.executeRaw("DELETE FROM config WHERE key = 'schema_pack' OR key LIKE 'schema_pack.source.%'");
+    }
   });
 });

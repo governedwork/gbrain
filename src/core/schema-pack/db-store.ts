@@ -8,8 +8,11 @@
 // DB config key `schema_pack` (or `schema_pack.source.<id>`).
 //
 // The loader consults an in-process overlay of the heads before the disk
-// locator, so a brain with an empty disk still resolves its packs. The overlay
-// is refreshed from the database whenever the heads' generation changes.
+// locator, so a brain with an empty disk still resolves its packs. The loader
+// (load-active.ts) re-checks the heads before it reads the overlay for a pack
+// GBrain does not bundle, at most once per pack stat-TTL and one check at a
+// time, and the overlay reloads whenever the heads' generation changed. A
+// brain on a bundled pack never queries the heads.
 import { createHash, randomUUID } from 'node:crypto';
 import type { BrainEngine } from '../engine.ts';
 import type { SqlEngine } from '../persistence/model.ts';
@@ -19,8 +22,14 @@ import { AliasCycleError, AliasDepthExceededError } from './closure.ts';
 import { isBundledPackName } from './bundled.ts';
 import { ExtendsChainTooDeepError, invalidatePackCache, resolveStatTtlMs, UnknownPackError } from './registry.ts';
 
+/** The database a brain-resident pack lookup reads: an engine, or a transaction's. */
+export type PackStore = Pick<SqlEngine, 'executeRaw'>;
+
 const overlay = new Map<string, { revision: string; source_id: string; manifest: SchemaPackManifest }>();
 let overlayGeneration: string | null = null;
+let boundStore: PackStore | null = null;
+let lastCheck: { store: PackStore; at: number } | null = null;
+let inFlight: { store: PackStore; done: Promise<void> } | null = null;
 
 /** The brain-resident manifest for `name`, if the overlay holds one. */
 export function brainResidentPack(name: string): SchemaPackManifest | null {
@@ -41,13 +50,13 @@ const HEADS_GENERATION_SQL = `SELECT COALESCE(md5(string_agg(name || '=' || revi
   FROM schema_pack_heads`;
 
 /** Reload the overlay from the database when the heads changed since the last load. */
-export async function refreshBrainResidentPacks(engine: Pick<SqlEngine, 'executeRaw'>): Promise<void> {
+export async function refreshBrainResidentPacks(engine: PackStore): Promise<void> {
   let generation: string;
   try {
     const [row] = await engine.executeRaw<{ generation: string }>(HEADS_GENERATION_SQL);
     generation = row?.generation ?? '';
   } catch { return; } // tables not migrated yet
-  if (generation === overlayGeneration) return;
+  if (generation === overlayGeneration) { lastCheck = { store: engine, at: Date.now() }; return; }
   const rows = await engine.executeRaw<{ name: string; revision: string; source_id: string; manifest: unknown }>(
     `SELECT h.name, h.revision::text AS revision, h.source_id, r.manifest
       FROM schema_pack_heads h JOIN schema_pack_revisions r ON r.revision = h.revision`);
@@ -59,23 +68,35 @@ export async function refreshBrainResidentPacks(engine: Pick<SqlEngine, 'execute
   }
   overlayGeneration = generation;
   for (const name of changed) invalidatePackCache(name);
+  lastCheck = { store: engine, at: Date.now() };
 }
 
-let freshnessTimer: ReturnType<typeof setInterval> | null = null;
+/**
+ * The store a pack lookup reads when its caller passes none: the connected
+ * brain (the CLI's connect, serve, the jobs worker). Binding runs no query.
+ * Returns a function that restores the previous binding.
+ */
+export function bindBrainResidentPackStore(store: PackStore | null): () => void {
+  const previous = boundStore;
+  boundStore = store;
+  lastCheck = null;
+  return () => { if (boundStore === store) { boundStore = previous; lastCheck = null; } };
+}
 
 /**
- * Long-running processes (serve, the jobs worker): re-check the heads every
- * pack stat-TTL (GBRAIN_PACK_STAT_TTL_MS, default 1s), the same window a
- * file-backed pack edited by another process takes to show. Paths that
- * resolve a pack without the engine read only the overlay, so without this a
- * revision published through another process would stay invisible to them.
+ * Re-check the heads of `store` (else the bound store) unless that store was
+ * checked within the pack stat-TTL (GBRAIN_PACK_STAT_TTL_MS, default 1s), the
+ * window a file-backed pack edited by another process takes to show.
+ * Concurrent lookups share one check. With no store, the overlay stands.
  */
-export function keepBrainResidentPacksFresh(engine: Pick<SqlEngine, 'executeRaw'>): () => void {
-  if (freshnessTimer) clearInterval(freshnessTimer);
-  const timer = setInterval(() => { refreshBrainResidentPacks(engine).catch(() => {}); }, Math.max(resolveStatTtlMs(), 100));
-  timer.unref?.();
-  freshnessTimer = timer;
-  return () => { clearInterval(timer); if (freshnessTimer === timer) freshnessTimer = null; };
+export async function ensureBrainResidentPacksFresh(store?: PackStore | null): Promise<void> {
+  const target = store ?? boundStore;
+  if (!target) return;
+  if (lastCheck?.store === target && Date.now() - lastCheck.at < resolveStatTtlMs()) return;
+  if (inFlight?.store === target) return inFlight.done;
+  const done = refreshBrainResidentPacks(target).finally(() => { if (inFlight?.done === done) inFlight = null; });
+  inFlight = { store: target, done };
+  return done;
 }
 
 /** Errors that mean the submitted manifest (or its extends / borrow_from chain) is wrong, not that GBrain failed. */
@@ -84,12 +105,13 @@ function isManifestRejection(err: unknown): err is Error {
     || err instanceof ExtendsChainTooDeepError || err instanceof AliasCycleError || err instanceof AliasDepthExceededError;
 }
 
-/** Test seam: forget the overlay and stop the freshness timer. */
+/** Test seam: forget the overlay, the last check and the bound store. */
 export function _resetBrainResidentPacksForTests(): void {
-  if (freshnessTimer) clearInterval(freshnessTimer);
-  freshnessTimer = null;
   overlay.clear();
   overlayGeneration = null;
+  boundStore = null;
+  lastCheck = null;
+  inFlight = null;
 }
 
 function manifestHash(manifest: unknown): string {
