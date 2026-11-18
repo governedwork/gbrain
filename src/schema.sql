@@ -3413,9 +3413,25 @@ DO $rls$ BEGIN
 END $rls$;
 -- END GENERATED from src/core/schema-pack/brain-pack-schema.ts (BRAIN_PACK_SCHEMA_SQL)
 
+-- Ours (governedwork fork): derived mentions a person removed with remove_link; the mention pass does not derive them again.
+-- BEGIN GENERATED from src/core/mentions/suppression-schema.ts (MENTION_SUPPRESSION_SCHEMA_SQL). Edit that file, then run: bun run build:schema
+CREATE TABLE IF NOT EXISTS mention_suppressions (
+  from_page_id integer NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+  to_page_id integer NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (from_page_id, to_page_id)
+);
+CREATE INDEX IF NOT EXISTS mention_suppressions_to_page_idx ON mention_suppressions(to_page_id);
+DO $rls$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles r WHERE pg_has_role(current_user, r.oid, 'USAGE') AND (r.rolbypassrls OR r.rolsuper)) THEN
+    ALTER TABLE mention_suppressions ENABLE ROW LEVEL SECURITY;
+  END IF;
+END $rls$;
+-- END GENERATED from src/core/mentions/suppression-schema.ts (MENTION_SUPPRESSION_SCHEMA_SQL)
+
 -- Ours (governedwork fork): stamps the fork schema epoch; stays after every fork fragment.
 -- BEGIN GENERATED from src/core/fork-schema.ts (forkSchemaEpochSql). Edit that file, then run: bun run build:schema
-INSERT INTO config (key, value) VALUES ('fork_schema_epoch', '90e46d26b4e88d2d')
+INSERT INTO config (key, value) VALUES ('fork_schema_epoch', 'b7fc06d6c2983c1d')
   ON CONFLICT (key) DO UPDATE SET value = CASE
     WHEN position(',' || EXCLUDED.value || ',' IN ',' || config.value || ',') > 0 THEN config.value
     ELSE config.value || ',' || EXCLUDED.value END;

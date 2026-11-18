@@ -21,9 +21,11 @@ import { deriveEntityAliases, type RejectedAlias } from '../core/mentions/aliase
 import { aliasOptsOf } from '../core/mentions/pass.ts';
 import { readIdentitySiblings } from '../core/mentions/siblings.ts';
 import { MENTION_EXTRACTOR_VERSION } from '../core/mentions/pass.ts';
+import { suppressedMentionKeys } from '../core/mentions/suppressions.ts';
 
 export type ExplainReason = 'ambiguous_first_word' | 'below_min_length' | 'generic_token' | 'alias_collision' | 'case_mismatch'
-  | 'type_not_linkable' | 'linking_disabled' | 'pending' | 'ignored_by_page' | 'ignored_by_config' | 'excluded_by_config' | 'denied_by_config' | 'not_a_known_name';
+  | 'type_not_linkable' | 'linking_disabled' | 'pending' | 'ignored_by_page' | 'ignored_by_config' | 'excluded_by_config' | 'denied_by_config' | 'not_a_known_name'
+  | 'removed_by_link';
 
 export interface MentionExplanation {
   query: string;
@@ -62,6 +64,7 @@ const MESSAGES: Record<ExplainReason, string> = {
   excluded_by_config: 'The page is listed in `mentions.exclude_slugs`, so none of its names link.',
   denied_by_config: 'The name is on `mentions.alias_deny` or the page\'s frontmatter `alias_deny`, so it is never derived as an alias.',
   not_a_known_name: 'No linkable entity page has this title, title subject or alias in this source.',
+  removed_by_link: 'This page\'s mention of the entity was removed with remove_link, so the mention pass does not link it again; add_link links it by hand.',
 };
 
 function done(base: Omit<MentionExplanation, 'reason' | 'message'>, reason: ExplainReason | null, message?: string): MentionExplanation {
@@ -119,7 +122,11 @@ export async function explainMention(engine: BrainEngine, query: string, opts: {
       WHERE l.from_page_id = $1 AND l.link_source = 'mentions' AND t.source_id = $2 AND t.slug = ANY($3::text[])`, [page.id, sourceId, [...targets]]);
   const linked = Number(link?.n ?? 0) > 0;
   const withPage = (r: ExplainReason | null, message?: string) => ({ ...done(base, r, message), page: { slug: page.slug, linked } });
-  if (found && !linked) return { ...withPage('pending'), next: 'gbrain extract --stale' };
+  if (found && !linked) {
+    const suppressed = await suppressedMentionKeys(engine, [Number(page.id)]);
+    if ([...targets].some(slug => suppressed.has(`${page.id}\0${sourceId}\0${slug}`))) return withPage('removed_by_link');
+    return { ...withPage('pending'), next: 'gbrain extract --stale' };
+  }
   if (found) return withPage(null, 'The page names this entity with this name and links to it.');
   const cased = entries.find(e => e.caseTokens);
   if (cased && text.toLowerCase().includes(cased.caseTokens!.join(' ').toLowerCase())) return withPage('case_mismatch');

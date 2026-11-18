@@ -11,7 +11,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:tes
 import type { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { explainMention } from '../src/commands/extract-mentions-explain.ts';
 import { runExtract } from '../src/commands/extract.ts';
-import { mentionBrain, page, resetMentionBrain, sweep } from './helpers/mention-brain.ts';
+import { operationsByName } from '../src/core/operations.ts';
+import { ctxFor, mentionBrain, page, resetMentionBrain, sweep } from './helpers/mention-brain.ts';
 
 let engine: PGLiteEngine;
 beforeAll(async () => { engine = await mentionBrain(); }, 120_000);
@@ -87,6 +88,16 @@ describe('extract mentions --explain reason codes', () => {
     expect((await explainMention(engine, 'quco')).next).toBeUndefined();
     await sweep(engine);
     expect(await explainMention(engine, 'QUCO', { page: 'tickets/t1' })).toMatchObject({ reason: null, page: { linked: true } });
+  });
+
+  test('L159: removed_by_link: a mention removed with remove_link is not reported as pending', async () => {
+    await account();
+    await page(engine, 'tickets/t1', 'ticket', 'Ticket 1', 'Customer: QUCO\nStatus: Open');
+    await sweep(engine);
+    expect(await operationsByName.remove_link!.handler(ctxFor(engine, false), { from: 'tickets/t1', to: 'crm/123' })).toMatchObject({ removed: 1 });
+    const r = await explainMention(engine, 'QUCO', { page: 'tickets/t1' });
+    expect(r).toMatchObject({ reason: 'removed_by_link', page: { slug: 'tickets/t1', linked: false } });
+    expect(r.next).toBeUndefined();
   });
 
   test('ignored_by_page', async () => {

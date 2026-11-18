@@ -41,6 +41,7 @@ import {
   type Gazetteer,
   type GazetteerEntry,
 } from '../src/core/by-mention.ts';
+import { maskLinkSyntax } from '../src/core/markdown-code.ts';
 
 let engine: PGLiteEngine;
 
@@ -364,6 +365,56 @@ describe('findMentionedEntities — pure cases', () => {
     expect(mentions).toHaveLength(1); // first-mention-only cap
     expect(mentions[0]!.slug).toBe('companies/acme');
   });
+});
+
+// ============================================================
+// L159 — link targets are not prose
+// ============================================================
+//
+// A link's target (a wikilink slug, the hidden target of [[target|Display]], a markdown link's (...) destination, a
+// bare URL) is not text the page says. Tokenizing it derived mentions from slug words: a page linking
+// [[notes/widget-co-launch]] gained a mention of Widget Co, and [[projects/acme-example-kernels|Kernels]] (visible
+// text "Kernels") gained a mention of Acme Example with nothing on the page naming it.
+
+const l159Gazetteer = () => gazetteerFromEntries([
+  { slug: 'products/widget-co', source_id: 'default', title: 'Widget Co' },
+  { slug: 'projects/acme-example', source_id: 'default', title: 'Acme Example' },
+]);
+const l159Scan = (body: string) => findMentionedEntities(body, l159Gazetteer(), { fromSlug: 'notes/n1', fromSourceId: 'default' })
+  .map(m => [m.slug, m.offset]);
+
+test('L159: a wikilink target is not prose: [[notes/widget-co-launch]] mentions nothing', () => {
+  expect(l159Scan('We shipped [[notes/widget-co-launch]] today.')).toEqual([]);
+});
+
+test('L159: the hidden target of [[target|Display]] is not prose: [[projects/acme-example-kernels|Kernels]] mentions nothing', () => {
+  expect(l159Scan('See [[projects/acme-example-kernels|Kernels]] for detail.')).toEqual([]);
+});
+
+test('L159: a markdown link destination is not prose: [Kernels](projects/acme-example-kernels) mentions nothing', () => {
+  expect(l159Scan('See [Kernels](projects/acme-example-kernels) for detail.')).toEqual([]);
+});
+
+test('L159: a bare URL is not prose: https://docs.example.com/widget-co/setup mentions nothing', () => {
+  expect(l159Scan('Setup notes live at https://docs.example.com/widget-co/setup today.')).toEqual([]);
+});
+
+test('L159: visible text still matches: a wikilink display name and plain prose link at their own offsets', () => {
+  const body = 'We met [[notes/launch-call|Widget Co]] about the rollout. Acme Example signed the order.';
+  expect(l159Scan(body)).toEqual([['products/widget-co', body.indexOf('Widget Co')], ['projects/acme-example', body.indexOf('Acme Example')]]);
+  const linked = 'Read [Acme Example](https://acme.example.com/about) first.';
+  expect(l159Scan(linked)).toEqual([['projects/acme-example', linked.indexOf('Acme Example')]]);
+});
+
+test('L159: maskLinkSyntax keeps length and line breaks, masks a reference definition and an autolink, and leaves a bracketed prose label alone', () => {
+  const body = 'Intro\r\n[kernels]: projects/acme-example-kernels "Acme Example kernels"\r\n<https://widget-co.example.com>\n[Update]: Acme Example shipped.\n';
+  const masked = maskLinkSyntax(body);
+  expect(masked.length).toBe(body.length);
+  expect([...masked].filter(c => c === '\r' || c === '\n').join('')).toBe('\r\n\r\n\n\n');
+  expect(masked).not.toContain('acme-example-kernels');
+  expect(masked).not.toContain('widget-co');
+  expect(masked).toContain('[Update]: Acme Example shipped.');
+  expect(l159Scan(body)).toEqual([['projects/acme-example', body.indexOf('Acme Example shipped')]]);
 });
 
 // ============================================================

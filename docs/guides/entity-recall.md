@@ -177,7 +177,9 @@ acmx (source default): case_mismatch
 The reason codes are `ambiguous_first_word`, `below_min_length`,
 `generic_token`, `alias_collision`, `case_mismatch`, `type_not_linkable`,
 `linking_disabled`, `pending`, `ignored_by_page`, `ignored_by_config`,
-`excluded_by_config`, `denied_by_config` and `not_a_known_name`. Only `pending`
+`excluded_by_config`, `denied_by_config`, `not_a_known_name` and
+`removed_by_link` (the page's mention was removed with `remove_link`, so the
+mention pass does not link it again; `add_link` links it by hand). Only `pending`
 is fixed by running `gbrain extract --stale`. Given a slug
 (`gbrain extract mentions --explain crm/acme-example`), it also lists every name
 the page derives with its origin and declaring line, each rejected candidate

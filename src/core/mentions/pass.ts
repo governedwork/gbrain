@@ -30,7 +30,8 @@
  *      generations and each page's content revision are unchanged since the
  *      scan read them (conditional publish), so an edit or a gazetteer change
  *      during the scan leaves the page due. Only plain mention rows are
- *      touched; `typed_ner` rows stay.
+ *      touched; `typed_ner` rows stay. A page pair `remove_link` suppressed
+ *      (`mention_suppressions`, ours) is never derived again.
  *   6. Status row: state, pending pages (mention-due pages plus linkable
  *      entity pages with stale derived aliases, counted when the pass ends
  *      or its deadline stops it), last pass, generation. `coverage` on
@@ -62,9 +63,10 @@ import { normalizeAliasList } from '../search/alias-normalize.ts';
 import { withCoordinatedWrite } from '../persistence/context.ts';
 import { maintenanceAttribution } from '../persistence/attribution.ts';
 import { managedPersistenceEnabled } from '../persistence/ownership.ts';
+import { suppressedMentionKeys } from './suppressions.ts';
 
 /** Bump to rescan every page's mentions once (gazetteer or scanner behavior change). */
-export const MENTION_EXTRACTOR_VERSION = 7;
+export const MENTION_EXTRACTOR_VERSION = 8;
 /** Bump to re-derive every entity page's declared aliases and title subject once. */
 export const ALIAS_DERIVATION_VERSION = 4;
 
@@ -481,9 +483,11 @@ async function reconcileSource(engine: BrainEngine, sourceId: string, gazetteer:
       // A cross-source mention is also covered by an explicit link to the same slug in any source (the resolver may pick another twin).
       const covered = new Set(rows.filter(r => !r.plain).flatMap(r => [`${r.from_page_id}\0${r.to_source_id}\0${r.to_slug}`, `${r.from_page_id}\0*\0${r.to_slug}`]));
       const pageSource = new Map(fresh.map(p => [Number(p.id), p.source_id]));
+      // A pair a person removed with remove_link (mention_suppressions) is never derived again.
+      const suppressed = await suppressedMentionKeys(tx, fresh.map(p => Number(p.id)));
       const want = new Set(fresh.flatMap(p => (found.get(Number(p.id)) ?? [])
         .filter(m => !covered.has(`${p.id}\0${m.source_id}\0${m.slug}`) && !(m.source_id !== pageSource.get(Number(p.id)) && covered.has(`${p.id}\0*\0${m.slug}`)))
-        .map(m => `${p.id}\0${m.source_id}\0${m.slug}`)));
+        .map(m => `${p.id}\0${m.source_id}\0${m.slug}`).filter(key => !suppressed.has(key))));
       const have = new Set(existing.map(r => `${r.from_page_id}\0${r.to_source_id}\0${r.to_slug}`));
       const drop = existing.filter(r => !want.has(`${r.from_page_id}\0${r.to_source_id}\0${r.to_slug}`)).map(r => Number(r.id));
       if (drop.length) await tx.executeRaw('DELETE FROM links WHERE id = ANY($1::int[])', [drop]);

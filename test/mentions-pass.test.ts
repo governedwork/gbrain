@@ -20,7 +20,11 @@ import { MENTION_EXTRACTOR_VERSION, countMentionDuePages, runMentionPass } from 
 import { buildGazetteer } from '../src/core/by-mention.ts';
 import { readMentionCoverage } from '../src/core/mentions/coverage.ts';
 import { mentionIndexUpgradeNotice } from '../src/core/mentions/upgrade-notice.ts';
-import { derivedAliases, mentionBrain, mentionLinks, page, resetMentionBrain, sweep } from './helpers/mention-brain.ts';
+import { operationsByName } from '../src/core/operations.ts';
+import { MENTION_SUPPRESSION_SCHEMA_SQL } from '../src/core/mentions/suppression-schema.ts';
+import { SCHEMA_SQL } from '../src/core/schema-embedded.generated.ts';
+import { PGLITE_SCHEMA_SQL } from '../src/core/pglite-schema.generated.ts';
+import { ctxFor, derivedAliases, mentionBrain, mentionLinks, page, resetMentionBrain, sweep } from './helpers/mention-brain.ts';
 
 let engine: PGLiteEngine;
 beforeAll(async () => { engine = await mentionBrain(); }, 120_000);
@@ -397,4 +401,56 @@ describe('gazetteer guards', () => {
     const meetings = await extractTimelineFromMeetings(engine, { dryRun: true });
     expect(meetings.entries_created).toBeGreaterThanOrEqual(1);
   });
+});
+
+// L159: the pass derived mentions from link targets (a page whose only reference is
+// [[projects/acme-example-kernels|Kernels]] gained a mention of Acme Example, a name its visible text never says), and a
+// derived mention a person removed with remove_link came back the next time the page was rescanned, with no page write.
+
+test('L159: a page whose only reference is [[projects/acme-example-kernels|Kernels]] gets no mention; a page saying the name does', async () => {
+  await page(engine, 'companies/acme-example', 'company', 'Acme Example', 'A company.');
+  await page(engine, 'notes/kernels', 'note', 'Kernel notes', 'See [[projects/acme-example-kernels|Kernels]] for detail.');
+  await page(engine, 'notes/prose', 'note', 'Call notes', 'Talked to Acme Example about the rollout.');
+  const r = await runMentionPass(engine);
+  expect(r.state).toBe('complete');
+  expect(await mentionLinks(engine)).toEqual(['notes/prose -> companies/acme-example']);
+});
+
+test('L159: a prose mention removed with remove_link stays removed when the page is rescanned without a page write', async () => {
+  await page(engine, 'companies/acme-example', 'company', 'Acme Example', 'A company.');
+  await page(engine, 'notes/n1', 'note', 'n1', 'Talked to Acme Example about the rollout.');
+  await runMentionPass(engine);
+  expect(await mentionLinks(engine)).toEqual(['notes/n1 -> companies/acme-example']);
+  const removed = await operationsByName.remove_link!.handler(ctxFor(engine, false), { from: 'notes/n1', to: 'companies/acme-example' });
+  expect(removed).toMatchObject({ status: 'ok', removed: 1 });
+  expect(await mentionLinks(engine)).toEqual([]);
+  const [before] = await engine.executeRaw<{ revision: string }>("SELECT knowledge_revision::text AS revision FROM pages WHERE slug = 'notes/n1'");
+  // What a gazetteer change does to the pages it affects (mentions/pass.ts saveEntries): due again, page unchanged.
+  await engine.executeRaw('UPDATE page_mention_state SET mention_revision = NULL');
+  const r = await runMentionPass(engine);
+  expect(r.state).toBe('complete');
+  expect(await mentionLinks(engine)).toEqual([]);
+  const [after] = await engine.executeRaw<{ revision: string }>("SELECT knowledge_revision::text AS revision FROM pages WHERE slug = 'notes/n1'");
+  expect(after!.revision).toBe(before!.revision);
+});
+
+const suppressions = async () => (await engine.executeRaw<{ pair: string }>(`SELECT f.slug || ' -> ' || t.slug AS pair FROM mention_suppressions s
+  JOIN pages f ON f.id = s.from_page_id JOIN pages t ON t.id = s.to_page_id ORDER BY 1`)).map(r => r.pair);
+
+test('L159: remove_link records a suppression only when it removes a derived mention, and a deleted page drops its suppressions', async () => {
+  // Both engine blobs carry the fork fragment verbatim (fresh installs; upgrades replay the blob, src/core/fork-schema.ts).
+  expect(SCHEMA_SQL).toContain(MENTION_SUPPRESSION_SCHEMA_SQL.trim());
+  expect(PGLITE_SCHEMA_SQL).toContain(MENTION_SUPPRESSION_SCHEMA_SQL.trim());
+  await page(engine, 'companies/acme-example', 'company', 'Acme Example', 'A company.');
+  await page(engine, 'notes/n1', 'note', 'n1', 'Talked to Acme Example about the rollout.');
+  await runMentionPass(engine);
+  const remove = (params: Record<string, string>) => operationsByName.remove_link!.handler(ctxFor(engine, false), { from: 'notes/n1', to: 'companies/acme-example', ...params });
+  // A filter that matches no derived mention removes nothing and records nothing.
+  expect(await remove({ link_source: 'manual' })).toMatchObject({ status: 'ok', removed: 0 });
+  expect(await suppressions()).toEqual([]);
+  expect(await mentionLinks(engine)).toEqual(['notes/n1 -> companies/acme-example']);
+  expect(await remove({ link_source: 'mentions' })).toMatchObject({ status: 'ok', removed: 1 });
+  expect(await suppressions()).toEqual(['notes/n1 -> companies/acme-example']);
+  await engine.executeRaw("DELETE FROM pages WHERE slug = 'notes/n1'");
+  expect(await suppressions()).toEqual([]);
 });

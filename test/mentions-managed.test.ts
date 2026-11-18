@@ -16,6 +16,7 @@ import { disposePersistenceConsumer } from '../src/core/persistence/service.ts';
 import { extractManagedStaleLinks } from '../src/core/persistence/links-maintenance.ts';
 import { extractStaleFromDB } from '../src/commands/extract.ts';
 import { runReindexAliases } from '../src/commands/reindex-aliases.ts';
+import { operationsByName } from '../src/core/operations.ts';
 import { managedBrain } from './helpers/managed-brain.ts';
 import { derivedAliases, mentionLinks } from './helpers/mention-brain.ts';
 
@@ -39,5 +40,23 @@ test('managed brain: import writes derived aliases; sync-style extraction writes
     await extractStaleFromDB(engine, { dryRun: false, jsonMode: false, quiet: true, catchUp: true });
     await runReindexAliases(engine, ['--json']);
     expect(await derivedAliases(engine, 'crm/123')).toEqual(['declared:quco (cs)', 'subject:quormiro capital']);
+  });
+}, 180_000);
+
+test('L159: managed brain: remove_link of a derived mention records its pair through the coordinator, and the next sweep does not bring it back', async () => {
+  await managedBrain(async ({ engine, ctx }) => {
+    await engine.setConfig('schema_pack', 'gbrain-base-v2');
+    await put(ctx, 'crm/123', 'crm', 'CRM record: Quormiro Capital', 'Account code: QUCO');
+    await put(ctx, 'tickets/t1', 'ticket', 'Ticket 1', 'Customer: QUCO\nStatus: Open');
+    await disposePersistenceConsumer(engine);
+    await extractStaleFromDB(engine, { dryRun: false, jsonMode: false, quiet: true, catchUp: true });
+    expect(await mentionLinks(engine)).toEqual(['tickets/t1 -> crm/123']);
+    expect(await operationsByName.remove_link!.handler(ctx, { from: 'tickets/t1', to: 'crm/123' })).toMatchObject({ status: 'ok', removed: 1 });
+    expect(await engine.executeRaw<{ from_slug: string; to_slug: string }>(`SELECT f.slug AS from_slug, t.slug AS to_slug FROM mention_suppressions s
+      JOIN pages f ON f.id = s.from_page_id JOIN pages t ON t.id = s.to_page_id`)).toEqual([{ from_slug: 'tickets/t1', to_slug: 'crm/123' }]);
+    await engine.executeRaw('UPDATE page_mention_state SET mention_revision = NULL');
+    const r = await extractStaleFromDB(engine, { dryRun: false, jsonMode: false, quiet: true, catchUp: true });
+    expect(r.mentions).toMatchObject({ state: 'complete', remaining: 0 });
+    expect(await mentionLinks(engine)).toEqual([]);
   });
 }, 180_000);

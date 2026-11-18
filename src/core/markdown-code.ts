@@ -69,3 +69,38 @@ export function stripCodeBlocks(content: string, opts: { onHtmlComment?: (start:
   }
   return out;
 }
+
+/**
+ * Link syntax that is not text the page says, in one left-to-right scan: a
+ * wikilink (`[[target]]`, `![[target]]`; group 1 is the visible part of
+ * `[[target|Display]]`), an inline link's or image's `(destination "title")`
+ * after its `]`, a reference definition line, a scheme autolink `<scheme:…>`,
+ * and a bare URL (`scheme://…`, `www.…`). The patterns' character classes are
+ * disjoint where they repeat, so matching stays linear.
+ */
+const LINK_SYNTAX_RE = new RegExp([
+  /!?\[\[[^[\]\n|]*(?:\|([^[\]\n]*))?\]\]/.source,
+  /(?<=\])\([ \t]*(?:<[^>\n]*>|[^\s()]*(?:\([^\s()]*\)[^\s()]*)*)(?:[ \t]+(?:"[^"\n]*"|'[^'\n]*'))?[ \t]*\)/.source,
+  /^ {0,3}\[[^\]\n]+\]:[ \t]*(?:<[^>\n]*>|\S+)(?:[ \t]+(?:"[^"\n]*"|'[^'\n]*'|\([^)\n]*\)))?[ \t]*\r?$/.source,
+  /<[A-Za-z][A-Za-z0-9+.-]{1,31}:[^\s<>]*>/.source,
+  /\b(?:[A-Za-z][A-Za-z0-9+.-]{1,31}:\/\/|www\.)[^\s<>]+/.source,
+].join('|'), 'gm');
+
+const blank = (s: string) => s.replace(/[^\r\n]/g, ' ');
+
+/**
+ * Mask link syntax that is not prose, replacing every masked character but CR/LF
+ * with a space, so UTF-16 offsets hold (like `stripCodeBlocks`): a wikilink's
+ * target (`[[target]]` whole; `[[target|Display]]` all but `Display`), a markdown
+ * link's or image's destination and title (the bracketed text stays), a
+ * reference definition, an autolink and a bare URL. Run it on text whose code is
+ * already stripped, so link syntax inside code is not read at all.
+ */
+export function maskLinkSyntax(content: string): string {
+  if (!/[[<]|:\/\/|www\./.test(content)) return content;
+  return content.replace(LINK_SYNTAX_RE, (match: string, display: string | undefined) => {
+    if (display === undefined) return blank(match);
+    const at = match.indexOf('|') + 1;
+    return blank(match.slice(0, at)) + display + blank(match.slice(at + display.length));
+  });
+}

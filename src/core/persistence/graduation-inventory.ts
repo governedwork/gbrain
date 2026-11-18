@@ -85,6 +85,7 @@ export const GRADUATION_INVENTORY: Inventory = {
     carry('mcp_spend_reservations', 'operational', 'Pending and unresolved MCP charges; admission counts them and late settlement needs them.'),
     carry('mention_gazetteer_entries', 'operational', 'Entity mention index: the linkable names the last mention pass used per source; a name change rescans only affected pages.'),
     carry('mention_index_status', 'operational', 'Entity mention index: per-source pass state, generation and coverage the entity card reports.'),
+    carry('mention_suppressions', 'user_data', 'Ours (governedwork fork): derived mentions a person removed with remove_link (page ids only); dropping them would let the mention pass derive them again.'),
     carry('migration_impact_log', 'operational', 'Remediation impact log.'),
     carry('minion_attachments', 'operational', 'Job attachments.'),
     carry('minion_budget_log', 'operational', 'Job budget events.'),
