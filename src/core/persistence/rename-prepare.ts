@@ -12,7 +12,8 @@ import { withTrustKeep } from './context.ts';
 import { pageIdentityError } from './page-identity.ts';
 import { pageFix, pageRefusal } from './page-prepare.ts';
 import type { PreparedMutation } from './coordinator.ts';
-import type { WriteRequest } from './model.ts';
+import type { WriteRequest, WriteAuthority } from './model.ts';
+import { slugDisclosable } from './authority.ts';
 
 /**
  * rename_page moves a page row to a new slug in the database only. A source
@@ -51,7 +52,7 @@ export function renameTargetSlug(row: WriteRequest): string {
  * alias that redirects somewhere other than the page being renamed (taking the
  * slug over would silently drop that redirect).
  */
-async function assertRenameTargetFree(engine: BrainEngine, sourceId: string, oldSlug: string, newSlug: string): Promise<void> {
+export async function assertRenameTargetFree(engine: BrainEngine, authority: WriteAuthority, sourceId: string, oldSlug: string, newSlug: string): Promise<void> {
   const occupant = await engine.readPageSnapshot(newSlug, { sourceId, includeDeleted: true });
   if (occupant) {
     throw new OperationError('slug_conflict', occupant.page.deleted_at
@@ -66,7 +67,10 @@ async function assertRenameTargetFree(engine: BrainEngine, sourceId: string, old
   const foreign = aliases.find(alias => alias.canonical_slug !== oldSlug);
   if (foreign) {
     throw new OperationError('slug_conflict',
-      `Cannot rename to '${newSlug}': it is a slug alias that redirects to '${foreign.canonical_slug}' in source '${sourceId}'.`,
+      // #6517: the redirect's target is named only to a writer that may see it (a remote caller outside its grant or readers gets the bare refusal).
+      await slugDisclosable(engine, authority, foreign.canonical_slug)
+        ? `Cannot rename to '${newSlug}': it is a slug alias that redirects to '${foreign.canonical_slug}' in source '${sourceId}'.`
+        : `Cannot rename to '${newSlug}': it is a slug alias that redirects to another page in source '${sourceId}'.`,
       'Choose a different new_slug; renaming onto the alias would break the redirect. Retry with a new request_id.');
   }
 }
@@ -97,13 +101,13 @@ export async function prepareRenameMutation(engine: BrainEngine, row: WriteReque
     throw new OperationError('page_not_found', `Page '${row.slug}' is soft-deleted; only live pages can be renamed.`,
       'Restore it with restore_page first, then rename it with its new revision.');
   }
-  await assertRenameTargetFree(engine, row.source_id, row.slug, newSlug);
+  await assertRenameTargetFree(engine, row.authority, row.source_id, row.slug, newSlug);
   return {
     observedRevision: snapshot.revision,
     additionalPageKeys: [{ sourceId: row.source_id, slug: newSlug }],
     // The coordinator already holds both page keys here and has rechecked the
     // old page's identity and revision; the target is rechecked under the lock.
-    validate: async tx => { await assertRenameTargetFree(tx, row.source_id, row.slug, newSlug); },
+    validate: async tx => { await assertRenameTargetFree(tx, row.authority, row.source_id, row.slug, newSlug); },
     apply: async tx => {
       // A rename moves no content, but the trust triggers count `slug` and the
       // facts' `entity_slug` as content columns; the keep scope stops the move

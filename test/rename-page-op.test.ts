@@ -26,6 +26,8 @@ import { activatePersistence } from '../src/core/persistence/activation.ts';
 import { withCoordinatedWrite } from '../src/core/persistence/context.ts';
 import { claimWorktree } from '../src/core/persistence/ownership.ts';
 import { submitPageMutation } from '../src/core/persistence/page-mutations.ts';
+import { assertRenameTargetFree } from '../src/core/persistence/rename-prepare.ts';
+import type { WriteAuthority } from '../src/core/persistence/model.ts';
 import { disposePersistenceConsumer } from '../src/core/persistence/service.ts';
 import { isolatedPersistencePostgres } from './helpers/persistence-postgres.ts';
 import { TEST_WRITE_ATTRIBUTION } from './helpers/write-attribution.ts';
@@ -222,6 +224,22 @@ The project formerly known as old-name.
       expect(await engine.readPageSnapshot(b.page.slug, { sourceId: DB_SOURCE })).toEqual(b);
       expect(await aliasOf(a.page.slug)).toBeNull();
       expect(await aliasOf('projects/conflict-alias')).toBe(b.page.slug);
+    }, 60_000);
+
+    test('the alias refusal names the redirect target only to a writer that may see it (#6517 slugDisclosable)', async () => {
+      // Uses the alias the test above left: projects/conflict-alias -> projects/conflict-b.
+      const authority = (remote: boolean) => ({ version: 1, remote, principal: { kind: 'oauth_client', id: CLIENT }, sourceId: DB_SOURCE,
+        sourceIncarnation: 'unused', scopes: ['read', 'write'], operations: null,
+        slugPrefixes: remote ? ['projects/conflict-a', 'projects/conflict-alias'] : null }) as unknown as WriteAuthority;
+      const refusal = (remote: boolean) => assertRenameTargetFree(engine, authority(remote), DB_SOURCE, 'projects/conflict-a', 'projects/conflict-alias')
+        .then(() => null, (e: Error & { code?: string }) => e);
+      const local = await refusal(false);
+      expect(local?.code).toBe('slug_conflict');
+      expect(local?.message).toContain('projects/conflict-b');
+      const remote = await refusal(true);
+      expect(remote?.code).toBe('slug_conflict');
+      expect(remote?.message).not.toContain('projects/conflict-b');
+      expect(remote?.message).toContain('another page');
     }, 60_000);
 
     test('stale expected_revision → revision_conflict; missing revision is refused like delete_page', async () => {

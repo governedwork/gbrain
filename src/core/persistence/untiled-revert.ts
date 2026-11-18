@@ -38,6 +38,8 @@ import { isSegmentedPage, pageBodySegmentedError } from '../page-body/page-shape
 import type { BodyRegion, JsonObject, ManifestRow } from '../page-body/types.ts';
 import { preserveWithdrawnFenceRows, assertPreparedFactWithdrawals } from '../facts/withdrawal.ts';
 import { PAGE_MAX_BYTES } from '../page-size-policy.ts';
+import { remoteLabelsChecked } from './page-visibility.ts';
+import { assertRetirementStampUnchanged } from './derived-retirement-hold.ts';
 import { isQuarantined } from '../quarantine.ts';
 import { loadImportSanityConfig } from '../import-screen.ts';
 import { DEFAULT_WRITE_GATE_CONFIG, writeGateApplies } from '../write-gate.ts';
@@ -105,6 +107,13 @@ export async function prepareUntiledRevert(engine: BrainEngine, row: WriteReques
     throw pageBodySegmentedError(stored.page, 'revert_version repair (the write gate scans the whole body of an external_untrusted write)');
   }
   stampPageTrustMarker(row, frontmatter, trust, storedTier);
+  if (row.authority.remote) {
+    // 737's remote write checks, as revert_version's ordinary path runs them (page-prepare.ts): the version's frontmatter
+    // never drops readable_by from a page that names readers, names only readers the writer may name, keeps a
+    // labelled-only create named, and leaves the retirement stamp as stored.
+    assertRetirementStampUnchanged(row.slug, frontmatter, stored.page.frontmatter as Record<string, unknown> | undefined);
+    await remoteLabelsChecked(engine, row.authority, row.slug, stored.page, { parsedPage: { frontmatter } });
+  }
   // The version's generation must tile its recorded body_bytes before a byte of it is staged.
   const rows = await engine.readManifest(pageId, { generation });
   await assertGenerationTiles(engine, pageId, generation, rows);

@@ -25,6 +25,7 @@ const PAGE = 'notes/untiled-repair';
 const TILED = 'notes/untiled-tiled';
 const OTHER = 'notes/untiled-other';
 const OVERLAID = 'notes/untiled-overlaid';
+const READERS = 'notes/untiled-readers';
 const TEA = 'Overlaid Example drinks green tea daily';
 const SECRET = 'Overlaid Example keeps a spare key under the mat';
 const STALE = 'Overlaid Example once shared a door code';
@@ -61,6 +62,7 @@ for (const kind of testBackends()) {
       await brain.seed(PAGE, fm('Repair') + body(31));
       await brain.seed(TILED, fm('Tiled') + body(32));
       await brain.seed(OVERLAID, fm('Overlaid') + body(33));
+      await brain.seed(READERS, fm('Readers').replace('type: note\n', 'type: note\nreadable_by:\n  - alice-example\n') + body(34));
       expect((await brain.body(PAGE)).storage).toBe('segmented');
       for (let i = 0; i < 3; i++) {
         expect((await brain.call('remember', { fact: `repair fact ${i}`, provenance: 'test', entity: PAGE, request_id: randomUUID() })).isError).toBe(false);
@@ -195,6 +197,30 @@ for (const kind of testBackends()) {
       expect(teaLine).toBeDefined();
       expect(teaLine).toContain('forgotten:');
       expect(await fact(TEA)).toBeUndefined();
+    }, 600_000);
+
+    test('a remote repair runs 737\'s remote readers check on the version\'s frontmatter (readable_by_invalid)', async () => {
+      // The preimage version names a reader (alice-example) this unbound remote connection is not. 737 keeps readable_by
+      // through every edit (readers change on the host), so the live page's readers are cleared directly, the state a
+      // host-side widening leaves: the connection now reads the page. A body edit first stages a new generation the test
+      // makes unreadable. Republishing the version remotely would leave the page unreadable by the connection that wrote
+      // it, which 737's remote write check refuses on every other path (page-visibility.ts remoteReadersChecked).
+      const rev = (await readable(READERS)).revision as string;
+      const edit = await brain.call('edit_page', { slug: READERS, expected_revision: rev, request_id: randomUUID(),
+        edits: [{ old_text: 'Intro.', new_text: 'Intro, edited.' }] });
+      expect(edit.body.error, JSON.stringify(edit.body).slice(0, 400)).toBeUndefined();
+      const edited = await page(READERS);
+      await brain.engine.executeRaw(`UPDATE pages SET frontmatter = frontmatter - 'readable_by' WHERE id=$1`, [Number(edited.id)]);
+      expect((await readable(READERS, true)).error).toBeUndefined();
+      const versions = (await brain.call('get_versions', { slug: READERS, limit: 10 })).body as Array<{ id: number; body_generation?: number }>;
+      const target = versions.find(v => v.body_generation !== undefined && Number(v.body_generation) !== Number(edited.body_generation))!;
+      expect(target).toBeDefined();
+      await brain.engine.executeRaw(`DELETE FROM page_body_manifest WHERE page_id=$1 AND staging_id IS NULL AND gen_from=$2::bigint`, [Number(edited.id), Number(edited.body_generation)]);
+      expect(await untiledSegmentedPages(brain.engine, { sourceIds: ['default'], slugs: [READERS] })).toHaveLength(1);
+      const res = await brain.call('revert_version', { slug: READERS, version_id: target.id, force: true, request_id: randomUUID() }, { remote: true });
+      expect(res.body.error, JSON.stringify(res.body).slice(0, 400)).toBe('readable_by_invalid');
+      // Nothing changed: the generation is still the unreadable one.
+      expect(Number((await page(READERS)).body_generation)).toBe(Number(edited.body_generation));
     }, 600_000);
 
     test('revert_version of a segmented page that tiles is refused as before', async () => {
