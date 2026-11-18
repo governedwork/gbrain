@@ -80,6 +80,8 @@ import { isWriteThroughDisabled, resolvePageWriteTarget } from '../write-through
 import { commitFactFenceFile, gitPathState } from './fence-write.ts';
 import { isOwnedClone } from '../url-clone.ts';
 import { isSourceDbOnlySlug } from '../persistence/source-storage.ts';
+import { wholeBodySnapshot } from '../persistence/segmented-apply.ts';
+import type { PageSnapshot } from '../page-state/types.ts';
 
 export interface UnfencedFactRow {
   id: string;
@@ -125,6 +127,12 @@ export interface UnfencedFactsOutcome {
    * Their rows never gate the run (they are held out of reconciliation only); doctor `fence_integrity` names the opt-in.
    */
   unbound_refused: Array<{ source_id: string; slug: string; rows: number }>;
+  /**
+   * Unmanaged: file-backed pages stored in segments. This step neither compares nor rewrites such a file, so their rows
+   * stay unfenced, active and searchable and their page skips reconciliation; they never gate the run (the
+   * `extract_facts` empty-fence guard, the migration's status), which names each page with `segmentedFileToken`.
+   */
+  segmented_files: Array<{ source_id: string; slug: string; rows: number }>;
   /** Legacy rows this run left as they are because the fence codec would change them or the page already carries the claim (#6278). */
   unadoptable_rows: UnadoptableFactRecord[];
 }
@@ -237,6 +245,16 @@ export function fenceableRowCount(plan: UnfencedFactsPlan): number {
 }
 
 /**
+ * A page's stored body as the one markdown string the fence planner reads, with the snapshot it came from. A page
+ * stored in segments reads back whole up to PAGE_MAX_BYTES (`wholeBodySnapshot`, under the snapshot's withdrawal
+ * ledger as an inline page's body is); one over it refuses with `page_body_segmented`. Null: no live page.
+ */
+async function storedPageMarkdown(engine: BrainEngine, sourceId: string, slug: string): Promise<{ snapshot: PageSnapshot; markdown: string } | null> {
+  const snapshot = await wholeBodySnapshot(engine, await engine.readPageSnapshot(slug, { sourceId }), 'facts fence adoption');
+  return snapshot && { snapshot, markdown: serializePageToMarkdown(snapshot.page, snapshot.tags) };
+}
+
+/**
  * #6610: where an unmanaged page with no canonical file on this host gets its fence. A page that records an origin
  * (`source_path` or `source_uri`) has a file on some host: `missing`. A page with no recorded origin and no file at its
  * slug path is database-only, and follows the fact writers' rule (`resolveFactWriteTarget`, #6608): fenced into its
@@ -267,6 +285,11 @@ export function unboundRefusedSentence(pages: UnfencedFactsOutcome['unbound_refu
     + `with gbrain config set ${UNBOUND_WRITE_KEY} database_only (a brain-wide choice: such pages stay database-only after binding).`;
 }
 
+/** How a run names a page of `segmented_files`: the stable `<slug> (page_body_segmented: …)` token. */
+export function segmentedFileToken(slug: string): string {
+  return `${slug} (page_body_segmented: the page is stored in segments, so its file is not compared or rewritten here; its rows stay unfenced, active and searchable, and the page skips fact reconciliation)`;
+}
+
 /** Read the unfenced active rows of one source (or every source) and group the fenceable ones per page. */
 export async function planUnfencedFacts(engine: BrainEngine, opts: { sourceId?: string } = {}): Promise<UnfencedFactsPlan> {
   const managed = await managedPersistenceEnabled(engine);
@@ -290,7 +313,7 @@ export async function planUnfencedFacts(engine: BrainEngine, opts: { sourceId?: 
   );
   const outcome: UnfencedFactsOutcome = {
     scanned: rows.length, fenced: 0, skipped_no_entity: 0, skipped_no_local_path: 0, skipped_no_page: 0,
-    skipped_archived: 0, skipped_url_clone: 0, pages_touched: 0, failed_pages: [], fenced_slugs: [], missing_files: [], unbound_refused: [], unadoptable_rows: [],
+    skipped_archived: 0, skipped_url_clone: 0, pages_touched: 0, failed_pages: [], fenced_slugs: [], missing_files: [], unbound_refused: [], segmented_files: [], unadoptable_rows: [],
   };
   const groups = new Map<string, UnfencedFactRow[]>();
   for (const row of rows) {
@@ -442,13 +465,14 @@ type ManagedPagePlan =
   | { kind: 'no_page' }
   | { kind: 'warnings'; warnings: string[] }
   | { kind: 'unadoptable'; records: UnadoptableFactRecord[] }
-  | { kind: 'submit'; snapshot: NonNullable<Awaited<ReturnType<BrainEngine['readPageSnapshot']>>>; fence: { body: string; assignments: Array<{ id: string; row_num: number }>; rejected: UnadoptableFactRecord[] };
+  | { kind: 'submit'; snapshot: PageSnapshot; fence: { body: string; assignments: Array<{ id: string; row_num: number }>; rejected: UnadoptableFactRecord[] };
       request: Extract<Awaited<ReturnType<typeof planFactFenceAdoption>>, { kind: 'submit' }> };
 
 async function planManagedPage(engine: BrainEngine, authority: MaintenanceAuthority, sourceId: string, entitySlug: string, group: UnfencedFactRow[]): Promise<ManagedPagePlan> {
-  const snapshot = await engine.readPageSnapshot(entitySlug, { sourceId });
-  if (!snapshot) return { kind: 'no_page' };
-  const fence = await planFence(engine, sourceId, entitySlug, serializePageToMarkdown(snapshot.page, snapshot.tags), group);
+  const stored = await storedPageMarkdown(engine, sourceId, entitySlug);
+  if (!stored) return { kind: 'no_page' };
+  const { snapshot } = stored;
+  const fence = await planFence(engine, sourceId, entitySlug, stored.markdown, group);
   if ('warnings' in fence) return { kind: 'warnings', warnings: fence.warnings };
   if (fence.assignments.length === 0) return { kind: 'unadoptable', records: fence.rejected };
   const request = await planFactFenceAdoption(engine, authority, entitySlug, {
@@ -529,9 +553,10 @@ async function fenceManaged(engine: BrainEngine, plan: UnfencedFactsPlan): Promi
 async function fenceDatabaseOnlyPage(engine: BrainEngine, sourceId: string, entitySlug: string, reason: NonNullable<WriteAuthority['databaseOnlyReason']> | null,
   group: UnfencedFactRow[], outcome: UnfencedFactsOutcome): Promise<void> {
   try {
-    const snapshot = await engine.readPageSnapshot(entitySlug, { sourceId });
-    if (!snapshot) { outcome.skipped_no_page += group.length; return; }
-    const fence = await planFence(engine, sourceId, entitySlug, serializePageToMarkdown(snapshot.page, snapshot.tags), group);
+    const stored = await storedPageMarkdown(engine, sourceId, entitySlug);
+    if (!stored) { outcome.skipped_no_page += group.length; return; }
+    const { snapshot } = stored;
+    const fence = await planFence(engine, sourceId, entitySlug, stored.markdown, group);
     if ('warnings' in fence) { outcome.failed_pages.push(`${entitySlug} (${fence.warnings.join('; ')})`); return; }
     recordUnadoptable(outcome, entitySlug, fence.rejected);
     if (fence.assignments.length === 0) return;
@@ -571,7 +596,7 @@ async function fenceFilePage(engine: BrainEngine, sourceId: string, entitySlug: 
     const stored = page && await readStoredBody(engine, sourceId, entitySlug);
     if (!page || !stored) { outcome.skipped_no_page += group.length; return; }
     if (bodyUnread(page)) {
-      outcome.failed_pages.push(`${entitySlug} (page_body_segmented: the page is stored in segments, so its file is not compared or rewritten here; its rows stay unfenced, active and searchable)`);
+      outcome.segmented_files.push({ source_id: sourceId, slug: entitySlug, rows: group.length });
       return;
     }
     if (!fileBodyMatchesStored(bytes, entitySlug, stored)) {
@@ -648,9 +673,13 @@ export async function auditUnadoptableFacts(engine: BrainEngine, plan: UnfencedF
     const [sourceId, entitySlug] = key.split('\0');
     let body: string;
     if (plan.managed || plan.databaseOnly.has(key)) {
-      const snapshot = await engine.readPageSnapshot(entitySlug, { sourceId });
-      if (!snapshot) continue;
-      body = serializePageToMarkdown(snapshot.page, snapshot.tags);
+      // A segmented page over the whole-body ceiling is refused by the write path, which names it in failed_pages.
+      const stored = await storedPageMarkdown(engine, sourceId, entitySlug).catch((error: unknown) => {
+        if (error instanceof OperationError && error.code === 'page_body_segmented') return null;
+        throw error;
+      });
+      if (!stored) continue;
+      body = stored.markdown;
     } else {
       const filePath = plan.filePaths.get(key);
       if (!filePath || !existsSync(filePath)) continue;

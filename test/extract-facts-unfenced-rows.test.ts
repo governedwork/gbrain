@@ -57,8 +57,10 @@ import type { BrainEngine } from '../src/core/engine.ts';
 import { parseFactsFence } from '../src/core/facts-fence.ts';
 import { serializePageToMarkdown } from '../src/core/markdown.ts';
 import { managedPersistenceEnabled } from '../src/core/persistence/ownership.ts';
+import { wholeBodySnapshot } from '../src/core/persistence/segmented-apply.ts';
 import { fenceIntegrityResult } from '../src/commands/doctor/checks/fence-integrity.ts';
 import { managedBrain } from './helpers/managed-brain.ts';
+import { createSegmentedPage } from './helpers/segmented-page.ts';
 import { LEGACY_DB_ONLY_SLUG, LEGACY_FILE_SLUG, seedLegacyManagedContent, type LegacySeed } from './helpers/managed-legacy-fixture.ts';
 import { isolatedSharedSkillsEngine } from './helpers/shared-skills-engine.ts';
 import { requirePostgresTestDatabase, testBackends } from './helpers/test-backends.ts';
@@ -434,5 +436,112 @@ for (const backend of testBackends()) {
       expect(readFileSync(join(managedRoot, `${LEGACY_FILE_SLUG}.md`), 'utf8')).toBe(file);
       expect((await managed.executeRaw<{ n: number }>('SELECT count(*)::int AS n FROM persistence_requests'))[0].n).toBe(requests);
     }, { databaseUrl, setup: async ({ engine: managed, root: managedRoot }) => { seed = await seedLegacyManagedContent(managed, managedRoot); } });
+  }, 120_000);
+
+  // L153: an entity page stored in segments (body in segments, NULL body columns) with a row_num-NULL fact. The fence
+  // step read the page body as one string, which a segmented page refuses (`page_body_segmented`), so the page landed in
+  // FACTS_FENCE_FAILED on every run, its row stayed unfenced and the phase never completed.
+  const SEGMENTED = 'people/erin-example';
+  const SEGMENTED_CLAIM = 'Erin example moved to Porto';
+  async function seedSegmentedEntity(engine: BrainEngine): Promise<number> {
+    await createSegmentedPage(engine, { slug: SEGMENTED, truth: '# Erin Example\n\nErin example leads the platform team.\n',
+      meta: { type: 'person', title: 'Erin Example' } });
+    const [row] = await engine.executeRaw<{ id: number }>(
+      `INSERT INTO facts (source_id, entity_slug, fact, kind, visibility, notability, valid_from, source, confidence)
+       VALUES ('default', $1, $2, 'fact', 'world', 'medium', '2026-03-01', 'mcp:remember', 0.9) RETURNING id`, [SEGMENTED, SEGMENTED_CLAIM]);
+    return Number(row.id);
+  }
+  /** The segmented page's stored body, read whole whatever storage the fence write left it in. */
+  async function segmentedBody(engine: BrainEngine): Promise<string> {
+    const snapshot = await wholeBodySnapshot(engine, await engine.readPageSnapshot(SEGMENTED, { sourceId: 'default' }), 'L153 test read');
+    return snapshot!.page.compiled_truth;
+  }
+  const fenceFailures = (details: unknown) => (details as { warnings: string[] }).warnings.filter(w => w.startsWith('FACTS_FENCE_FAILED'));
+  const segmentedRow = async (engine: BrainEngine, id: number) => (await engine.executeRaw<{ row_num: number | null; source_markdown_slug: string | null; fact: string; expired: boolean }>(
+    'SELECT row_num, source_markdown_slug, fact, expired_at IS NOT NULL AS expired FROM facts WHERE id = $1', [id]))[0]!;
+
+  test(`L153: ${backend}: managed: a segmented entity page's row_num-NULL fact is fenced through the coordinator in one cycle and a second cycle changes nothing`, async () => {
+    let factId!: number;
+    await managedBrain(async ({ engine: managed, root: managedRoot }) => {
+      expect(await pendingCount(managed)).toBe(1);
+      const first = await extractFactsPhase(managed, managedRoot);
+      expect(fenceFailures(first.details)).toEqual([]);
+      expect(first.status, JSON.stringify(first.details)).toBe('ok');
+      expect(first.details).toMatchObject({ unfencedRowsFenced: 1, legacyRowsPending: 0, pagesFailed: 0 });
+      expect(await pendingCount(managed)).toBe(0);
+      expect(await segmentedRow(managed, factId)).toEqual({ row_num: 1, source_markdown_slug: SEGMENTED, fact: SEGMENTED_CLAIM, expired: false });
+      const body = await segmentedBody(managed);
+      expect(parseFactsFence(body).facts.map(f => [f.rowNum, f.claim])).toEqual([[1, SEGMENTED_CLAIM]]);
+      expect(body).toContain('Erin example leads the platform team.');
+
+      const facts = await managed.executeRaw('SELECT id, row_num, fact, expired_at FROM facts ORDER BY id');
+      const [{ n: requests }] = await managed.executeRaw<{ n: number }>('SELECT count(*)::int AS n FROM persistence_requests');
+      const second = await extractFactsPhase(managed, managedRoot);
+      expect(fenceFailures(second.details)).toEqual([]);
+      expect(second.status).toBe('ok');
+      expect(second.details).toMatchObject({ unfencedRowsFenced: 0, factsInserted: 0, factsDeleted: 0 });
+      expect(await managed.executeRaw('SELECT id, row_num, fact, expired_at FROM facts ORDER BY id')).toEqual(facts);
+      expect(await segmentedBody(managed)).toBe(body);
+      expect((await managed.executeRaw<{ n: number }>('SELECT count(*)::int AS n FROM persistence_requests'))[0].n).toBe(requests);
+    }, { databaseUrl, setup: async ({ engine: managed }) => { factId = await seedSegmentedEntity(managed); } });
+  }, 120_000);
+
+  test(`L153: ${backend}: unmanaged: a segmented database-only entity page with sync.write_through off gets its row fenced into its database body in one cycle`, async () => {
+    await unmanagedBrain(databaseUrl, async ({ engine, root }) => {
+      await makeDatabaseOnly(engine, root);
+      await engine.setConfig('sync.write_through', 'false');
+      const factId = await seedSegmentedEntity(engine);
+      const first = await extractFactsPhase(engine, root);
+      expect(fenceFailures(first.details)).toEqual([]);
+      expect(first.status, JSON.stringify(first.details)).toBe('ok');
+      expect(first.details).toMatchObject({ unfencedRowsFenced: 3, legacyRowsPending: 0, pagesFailed: 0 });
+      expect(await pendingCount(engine)).toBe(0);
+      expect(await segmentedRow(engine, factId)).toEqual({ row_num: 1, source_markdown_slug: SEGMENTED, fact: SEGMENTED_CLAIM, expired: false });
+      const body = await segmentedBody(engine);
+      expect(parseFactsFence(body).facts.map(f => [f.rowNum, f.claim])).toEqual([[1, SEGMENTED_CLAIM]]);
+      expect(body).toContain('Erin example leads the platform team.');
+      expect(existsSync(join(root, `${SEGMENTED}.md`))).toBe(false);
+
+      const after = await factState(engine);
+      const second = await extractFactsPhase(engine, root);
+      expect(fenceFailures(second.details)).toEqual([]);
+      expect(second.details).toMatchObject({ unfencedRowsFenced: 0, factsInserted: 0, factsDeleted: 0 });
+      expect(await factState(engine)).toEqual(after);
+      expect(await segmentedBody(engine)).toBe(body);
+    });
+  }, 120_000);
+
+  test(`L153: ${backend}: unmanaged: doctor fence_integrity plans a segmented database-only page and names its unadoptable row`, async () => {
+    await unmanagedBrain(databaseUrl, async ({ engine, root }) => {
+      await makeDatabaseOnly(engine, root);
+      await engine.setConfig('sync.write_through', 'false');
+      await seedSegmentedEntity(engine);
+      const [struck] = await engine.executeRaw<{ id: number }>(
+        `INSERT INTO facts (source_id, entity_slug, fact, kind, visibility, notability, valid_from, source, confidence)
+         VALUES ('default', $1, '~~Erin example left~~', 'fact', 'world', 'medium', '2026-03-01', 'mcp:remember', 0.9) RETURNING id`, [SEGMENTED]);
+      const doctor = await fenceIntegrityResult(engine, { sourceIds: ['default'] });
+      expect(doctor.details).toMatchObject({ unrenderable_legacy_facts: { total: 1, complete: true,
+        pages: [{ source_id: 'default', slug: SEGMENTED, rows: [{ fact_id: Number(struck.id), reason: 'fence_unrenderable', class: 'struck' }] }] } });
+    });
+  }, 120_000);
+
+  test(`L153: ${backend}: unmanaged: a file-backed segmented entity page keeps its row unfenced and its file untouched, is named, and never gates the run`, async () => {
+    await unmanagedBrain(databaseUrl, async ({ engine, root }) => {
+      const factId = await seedSegmentedEntity(engine);
+      await engine.executeRaw("UPDATE pages SET source_path = $1 WHERE slug = $2 AND source_id = 'default'", [`${SEGMENTED}.md`, SEGMENTED]);
+      const snapshot = (await wholeBodySnapshot(engine, await engine.readPageSnapshot(SEGMENTED, { sourceId: 'default' }), 'L153 test read'))!;
+      const path = join(root, `${SEGMENTED}.md`);
+      mkdirSync(dirname(path), { recursive: true });
+      const file = serializePageToMarkdown(snapshot.page, snapshot.tags);
+      writeFileSync(path, file);
+      const run = await extractFactsPhase(engine, root);
+      const warnings = (run.details as { warnings: string[] }).warnings;
+      expect(warnings.filter(w => w.startsWith(`FACTS_FENCE_FAILED: ${SEGMENTED} (page_body_segmented:`))).toHaveLength(1);
+      // The other page's rows fence; this page's row is held out of reconciliation but is not a pending row of the guard.
+      expect(run.details).toMatchObject({ unfencedRowsFenced: 2, legacyRowsPending: 0, legacyPages: [], pagesFailed: 0 });
+      expect(run.summary).not.toContain('could not be fenced');
+      expect(await segmentedRow(engine, factId)).toEqual({ row_num: null, source_markdown_slug: null, fact: SEGMENTED_CLAIM, expired: false });
+      expect(readFileSync(path, 'utf8')).toBe(file);
+    });
   }, 120_000);
 }
