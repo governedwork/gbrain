@@ -3,11 +3,16 @@
  * generation does not tile its body. Such a page answers page_body_rows_unreadable to every reader, and the ordinary
  * paths cannot write it: put_page and edit_page read the current body first, and revert_version refuses segmented
  * pages (segmentedRevertRefusal). Here a revert takes the current body as unread and publishes a new generation from a
- * segmented version's body, streamed from the version's own generation (whose rows must tile its recorded body_bytes),
+ * segmented version's body, read from the version's own generation (whose rows must tile its recorded body_bytes),
  * one segment batch at a time. The page takes the version's title, type, frontmatter and tags, as a revert does.
  *
- * Nothing is re-projected: the write versions the page (a reference to the unreadable generation, kept as history),
- * flips the generation, sets the tags and reseals. Facts, takes, links and timeline rows stay as they are, so a fact,
+ * The version's regions are read whole and pass the purge and withdrawal overlay upstream's Git repair applies
+ * (preserveWithdrawnFenceRows; assertPreparedFactWithdrawals again inside the publication): a fact purged since the
+ * version was written stays out of the republished body, and a withdrawn one stays struck. A version over the
+ * single-string ceiling (PAGE_MAX_BYTES) refuses, as that repair holds one.
+ *
+ * Nothing is re-projected: the write flips the generation (keeping no version of the unreadable one, which no reader
+ * could open and a purge_fact's version scan would refuse on), sets the tags and reseals. Facts, takes, links and timeline rows stay as they are, so a fact,
  * take or timeline row the version's fences do not show stays in the database, as the database-canonical record.
  * Refused: a version of the unreadable generation itself, an inline version, a core-marked page or version, a page with
  * a canonical file (its file is the repair: sync or import it), and an external_untrusted writer under the write gate.
@@ -25,13 +30,14 @@ import { assertPageRevision, type PageSnapshot } from '../page-state/types.ts';
 import type { PreparedMutation } from './coordinator.ts';
 import type { WriteRequest } from './model.ts';
 import { assertGenerationTiles, untiledSegmentedPages } from '../page-body/body-tiling.ts';
-import { prepareSegmentedBody, segmentWriteScope } from '../page-body/ingest.ts';
+import { prepareSegmentedBody, segmentWriteScope, stringBodyFlags, stringRegion } from '../page-body/ingest.ts';
 import { buildSegmentedProjection } from '../page-body/projection.ts';
 import { splicePage } from '../page-body/splice.ts';
 import { readPageBodyPolicy, STAGE_BATCH_BYTES } from '../page-body/limits.ts';
 import { isSegmentedPage, pageBodySegmentedError } from '../page-body/page-shape.ts';
 import type { BodyRegion, JsonObject, ManifestRow } from '../page-body/types.ts';
-import { stepFenceWalk, type FenceWalk } from '../fence-scan.ts';
+import { preserveWithdrawnFenceRows, assertPreparedFactWithdrawals } from '../facts/withdrawal.ts';
+import { PAGE_MAX_BYTES } from '../page-size-policy.ts';
 import { isQuarantined } from '../quarantine.ts';
 import { loadImportSanityConfig } from '../import-screen.ts';
 import { DEFAULT_WRITE_GATE_CONFIG, writeGateApplies } from '../write-gate.ts';
@@ -63,19 +69,11 @@ async function* generationRegion(engine: BrainEngine, sourceId: string, rows: re
   }
 }
 
-/** ingest.ts regionFenceTrust over a region streamed from its segments: the same line walk, carried across segment edges. */
-async function streamedFenceTrust(stream: AsyncIterable<Uint8Array>): Promise<'trusted' | 'void'> {
-  const walk: FenceWalk = { opener: null, mispaired: false };
-  const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
-  let carry = '';
-  const step = (line: string) => { for (const part of line.split('\r')) stepFenceWalk(walk, part); };
-  for await (const bytes of stream) {
-    const lines = (carry + decoder.decode(bytes, { stream: true })).split('\n');
-    carry = lines.pop()!;
-    for (const line of lines) step(line);
-  }
-  step(carry + decoder.decode());
-  return walk.opener || walk.mispaired ? 'void' : 'trusted';
+/** A region of a retained generation as one string (the overlay works on text); the caller bounds it by PAGE_MAX_BYTES. */
+async function regionText(stream: AsyncIterable<Uint8Array>): Promise<string> {
+  const parts: Buffer[] = [];
+  for await (const bytes of stream) parts.push(Buffer.from(bytes));
+  return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(Buffer.concat(parts));
 }
 
 export async function prepareUntiledRevert(engine: BrainEngine, row: WriteRequest, stored: PageSnapshot): Promise<PreparedMutation | null> {
@@ -114,13 +112,22 @@ export async function prepareUntiledRevert(engine: BrainEngine, row: WriteReques
   const type = (version.type ?? stored.page.type) as PageType;
   const tags = [...new Set(version.tags ?? stored.tags)].sort();
   const quarantined = isQuarantined(frontmatter);
-  const [shape, policy, livePage, truthTrust, timelineTrust] = await Promise.all([splicePage(engine, pageId), readPageBodyPolicy(engine), segmentedLivePage(engine, pageId),
-    streamedFenceTrust(generationRegion(engine, row.source_id, rows, 'truth')), streamedFenceTrust(generationRegion(engine, row.source_id, rows, 'timeline'))]);
+  // The purge and withdrawal overlay upstream's Git repair applies (repair/segmented-tiling.ts): a fact purged since the
+  // version was written stays out of the republished body and a withdrawn one stays struck. It reads a region whole, so a
+  // version over the single-string ceiling is refused, as that repair holds one.
+  const versionBytes = rows.reduce((n, r) => n + r.byteLen, 0);
+  if (versionBytes > PAGE_MAX_BYTES) {
+    throw pageBodySegmentedError(stored.page, 'revert_version repair of a version over the single-string ceiling (the purge and withdrawal overlay reads its body whole)');
+  }
+  const [shape, policy, livePage, rawTruth, rawTimeline] = await Promise.all([splicePage(engine, pageId), readPageBodyPolicy(engine), segmentedLivePage(engine, pageId),
+    regionText(generationRegion(engine, row.source_id, rows, 'truth')), regionText(generationRegion(engine, row.source_id, rows, 'timeline'))]);
   if (!shape || livePage.generation !== live.generation) return null;
+  const truth = await preserveWithdrawnFenceRows(engine, row.source_id, rawTruth, row.slug);
+  const timeline = await preserveWithdrawnFenceRows(engine, row.source_id, rawTimeline, row.slug);
   const prepared = await prepareSegmentedBody(engine, { sourceId: row.source_id, slug: row.slug, live: livePage, title, type, frontmatter: frontmatter as JsonObject, tags,
-    truth: generationRegion(engine, row.source_id, rows, 'truth'), timeline: generationRegion(engine, row.source_id, rows, 'timeline'),
-    hasTimeline: rows.some(r => r.region === 'timeline'), flags: { fence_trust: truthTrust, timeline_fence_trust: timelineTrust },
-    declaredBytes: rows.reduce((n, r) => n + r.byteLen, 0),
+    truth: stringRegion(truth), timeline: stringRegion(timeline),
+    hasTimeline: rows.some(r => r.region === 'timeline'), flags: stringBodyFlags(truth, timeline),
+    declaredBytes: Buffer.byteLength(truth, 'utf8') + Buffer.byteLength(timeline, 'utf8'),
     owner: { kind: 'edit', principalKind: row.principal_kind, principalId: row.principal_id, baseRevision: stored.revision },
     chunking: { quarantined, tier: shape.crTier, corpusGeneration: shape.corpusGeneration } });
   const abort = () => engine.setBodyStagingState(prepared.stagingId, 'aborted').catch(() => undefined);
@@ -128,8 +135,10 @@ export async function prepareUntiledRevert(engine: BrainEngine, row: WriteReques
   try {
     return { observedRevision: stored.revision, noop: false, ...await pageDatabaseOnlyPublication(engine, row, undefined), ...(trust ? { trust } : {}),
       apply: async tx => {
-        // The version records the unreadable generation as it is (O(1): a reference), before the flip retires it.
-        await tx.createVersion(row.slug, { sourceId: row.source_id });
+        // A withdrawal or purge committed since the overlay above refuses (revision_conflict) instead of republishing the claim.
+        await assertPreparedFactWithdrawals(tx, row.source_id, truth, timeline, row.slug);
+        // No version of the unreadable generation: no reader could open it, and a purge_fact that scans the page's versions
+        // would refuse page_body_rows_unreadable on it for as long as it is kept. The flip retires it and the sweep collects it.
         applied = await applySegmentedBody(tx, { slug: row.slug, sourceId: row.source_id, pageId, prepared, promotion: false, retireMaxRows: policy.flipRetireMaxRows,
           meta: { title, type, frontmatter: frontmatter as JsonObject, page_kind: shape.pageKind as PageKind } });
         for (const tag of stored.tags) if (!tags.includes(tag)) await tx.removeTag(row.slug, tag, { sourceId: row.source_id });

@@ -302,7 +302,7 @@ or a physical projection that leaves attribution untouched):
 - `src/core/persistence/prepared-maintenance.ts` (5): managed maintenance request preparer (consolidation closes an unfenced fact in the database and a fenced one from its published fence cell; a held move clears the row number of the struck held rows it removes from their holding page).
 - `src/core/persistence/rename-prepare.ts` (1): `rename_page` request preparer (ours, governedwork fork).
 - `src/core/persistence/semantic-pages.ts` (1): `add_timeline_entry` request preparer.
-- `src/core/persistence/untiled-revert.ts` (3): `revert_version` repair of a segmented page whose generation does not tile (ours, governedwork fork): its version, flip and tag rows run inside the request's publication.
+- `src/core/persistence/untiled-revert.ts` (3): `revert_version` repair of a segmented page whose generation does not tile (ours, governedwork fork): its version, flip and tag rows run inside the request's publication, and the republished body passes the purge and withdrawal overlay.
 - `src/core/persistence/sync-image.ts` (2): managed sync image request preparer; a Git rename retires the old page inside the same publication.
 - `src/core/persistence/sync-prepare.ts` (4): managed sync request preparer.
 - `src/core/persistence/sync-streamed.ts` (1): the streamed sync of a file over the single-string ceiling moves a renamed page (`updateSlug`) in its request's apply, inside the coordinated publication.

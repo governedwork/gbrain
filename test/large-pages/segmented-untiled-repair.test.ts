@@ -24,6 +24,10 @@ import { untiledSegmentedPages } from '../../src/core/page-body/body-tiling.ts';
 const PAGE = 'notes/untiled-repair';
 const TILED = 'notes/untiled-tiled';
 const OTHER = 'notes/untiled-other';
+const OVERLAID = 'notes/untiled-overlaid';
+const TEA = 'Overlaid Example drinks green tea daily';
+const SECRET = 'Overlaid Example keeps a spare key under the mat';
+const STALE = 'Overlaid Example once shared a door code';
 const fm = (title: string) => `---\ntitle: ${title}\ntype: note\nmoved_from:\n  - slug: old/a\n    brain: zz\n---\n\n`;
 const timeline = Array.from({ length: 200 }, (_, i) => `- **2024-0${1 + (i % 9)}-1${i % 10}** | src — entry ${i}`).join('\n');
 const body = (seed: number) => 'Intro.\n\nSee [[notes/untiled-other]].\n\n' + FACTS_BLOCK + '\n' + conversationBody(1_250_000, { seed }) + '\n\n<!-- timeline -->\n\n' + timeline + '\n';
@@ -56,6 +60,7 @@ for (const kind of testBackends()) {
       await brain.seed(OTHER, fm('Other') + 'The other page.\n');
       await brain.seed(PAGE, fm('Repair') + body(31));
       await brain.seed(TILED, fm('Tiled') + body(32));
+      await brain.seed(OVERLAID, fm('Overlaid') + body(33));
       expect((await brain.body(PAGE)).storage).toBe('segmented');
       for (let i = 0; i < 3; i++) {
         expect((await brain.call('remember', { fact: `repair fact ${i}`, provenance: 'test', entity: PAGE, request_id: randomUUID() })).isError).toBe(false);
@@ -114,6 +119,8 @@ for (const kind of testBackends()) {
       expect(res.body).toMatchObject({ status: 'reverted', repaired: { unreadable_generation: Number(edited.body_generation), body_bytes: Number(edited.body_bytes),
         rows: broken.rows, covered_bytes: broken.covered_bytes, from_version: target.id } });
 
+      // No version keeps the unreadable generation: a purge_fact scanning the page's versions would refuse on it.
+      expect(await brain.engine.executeRaw('SELECT id FROM page_versions WHERE page_id=$1 AND body_generation=$2::bigint', [id, Number(edited.body_generation)])).toEqual([]);
       const repaired = await page(PAGE);
       expect(Number(repaired.body_generation)).toBe(Number(edited.body_generation) + 1);
       expect(await untiled()).toBeUndefined();
@@ -130,6 +137,64 @@ for (const kind of testBackends()) {
         edits: [{ old_text: 'Intro.', new_text: 'Intro, repaired.' }] });
       expect(next.body.error).toBeUndefined();
       expect(await untiled()).toBeUndefined();
+    }, 600_000);
+
+    test('the repair keeps a fact forgotten or purged since the version out of the republished page', async () => {
+      const call = async (name: string, params: Record<string, unknown>) => (await brain.call(name, params)).body as Record<string, unknown>;
+      const live = async () => (await page(OVERLAID));
+      // Two remembered facts land as fence rows on the page; an edit then makes the page's preimage a segmented version
+      // that holds both rows.
+      for (const claim of [TEA, SECRET, STALE]) {
+        const saved = await call('remember', { fact: claim, provenance: 'test', entity: OVERLAID, request_id: randomUUID() });
+        expect(saved.error, JSON.stringify(saved).slice(0, 300)).toBeUndefined();
+      }
+      const edit = await call('edit_page', { slug: OVERLAID, expected_revision: (await readable(OVERLAID)).revision, request_id: randomUUID(),
+        edits: [{ old_text: 'Intro.', new_text: 'Intro, versioned.' }] });
+      expect(edit.error).toBeUndefined();
+      const fact = async (claim: string) => (await brain.engine.executeRaw<{ id: number; row_num: number | null }>(
+        `SELECT id, row_num FROM facts WHERE source_id='default' AND (source_markdown_slug=$1 OR entity_slug=$1) AND fact=$2 AND expired_at IS NULL ORDER BY id LIMIT 1`, [OVERLAID, claim]))[0];
+      const tea = await fact(TEA), secret = await fact(SECRET);
+      expect(tea && secret).toBeTruthy();
+      // After the version was written: forget one claim, purge the other.
+      expect((await call('forget', { id: String(tea!.id), reason: 'test', request_id: randomUUID() })).error).toBeUndefined();
+      const dry = await call('purge_fact', { id: Number(secret!.id), dry_run: true });
+      expect(dry.confirm_token).toBeDefined();
+      const purged = await call('purge_fact', { id: Number(secret!.id), confirm: dry.confirm_token, expected_revision: dry.expected_revision, request_id: randomUUID() });
+      expect(purged.error, JSON.stringify(purged).slice(0, 400)).toBeUndefined();
+      const versions = (await brain.call('get_versions', { slug: OVERLAID, limit: 10 })).body as Array<{ id: number; body_generation?: number }>;
+      const edited = await live();
+      const target = versions.find(v => v.body_generation !== undefined && Number(v.body_generation) !== Number(edited.body_generation))!;
+      expect(target).toBeDefined();
+      const inVersion = async (claim: string) => (await brain.engine.executeRaw<{ n: number }>(`SELECT count(*)::int AS n FROM page_body_manifest m
+        JOIN page_segment_texts t ON t.source_id=m.source_id AND t.sha256=m.sha256
+        WHERE m.page_id=$1 AND m.staging_id IS NULL AND m.gen_from <= $2::bigint AND (m.gen_to IS NULL OR m.gen_to > $2::bigint)
+          AND strpos(convert_from(t.body,'UTF8'), $3::text) > 0`, [Number(edited.id), Number(target.body_generation), claim]))[0]!.n > 0;
+      // The premises: forget never rewrites history, so the version still holds the forgotten row; purge_fact scrubs
+      // versions itself, so the purged claim is already gone from it.
+      expect(await inVersion(TEA)).toBe(true);
+      expect(await inVersion(SECRET)).toBe(false);
+      // A purge tombstone over a version its scrub did not reach (the state a stale preparation leaves): the claim's fact
+      // row is gone and fact_purges holds it, while the version still carries its fence row.
+      const stale = await fact(STALE);
+      await brain.engine.executeRaw(`INSERT INTO fact_purges (source_id, visibility, subject, fact_hash, reason) VALUES ('default', 'world', '*', gbrain_fact_fingerprint($1), 'test')`, [STALE]);
+      await brain.engine.executeRaw('DELETE FROM facts WHERE id=$1', [Number(stale!.id)]);
+      expect(await inVersion(STALE)).toBe(true);
+      // Make the live generation unreadable, then repair from the version.
+      await brain.engine.executeRaw(`DELETE FROM page_body_manifest WHERE page_id=$1 AND staging_id IS NULL AND gen_from=$2::bigint`, [Number(edited.id), Number(edited.body_generation)]);
+      expect(await untiledSegmentedPages(brain.engine, { sourceIds: ['default'], slugs: [OVERLAID] })).toHaveLength(1);
+      const res = await brain.call('revert_version', { slug: OVERLAID, version_id: target.id, force: true, request_id: randomUUID() }, { remote: true });
+      expect(res.body.error, JSON.stringify(res.body).slice(0, 400)).toBeUndefined();
+      const after = await brain.body(OVERLAID);
+      const text = after.truth + after.timeline;
+      // The purged claim is gone from the body and from facts; the forgotten one stays struck, never active again.
+      expect(text).not.toContain(SECRET);
+      expect(await fact(SECRET)).toBeUndefined();
+      expect(text).not.toContain(STALE);
+      expect(await fact(STALE)).toBeUndefined();
+      const teaLine = text.split('\n').find(line => line.includes(TEA));
+      expect(teaLine).toBeDefined();
+      expect(teaLine).toContain('forgotten:');
+      expect(await fact(TEA)).toBeUndefined();
     }, 600_000);
 
     test('revert_version of a segmented page that tiles is refused as before', async () => {
