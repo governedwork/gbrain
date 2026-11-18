@@ -87,6 +87,19 @@ describe('fork-suite PostgreSQL lanes (ledger 111)', () => {
     expect(listed.status).toBe(0);
     expect(listed.stdout.split('\n')).toContain('test/e2e/takes-db-native-postgres.test.ts');
   });
+  test('postgres: every fork E2E exclusion names an existing E2E file and its reason, and the lane drops exactly those', () => {
+    // test-reads-source-ok[structural]: an exclusion row is the only record of why a file runs nowhere.
+    const rows = readFileSync(join(ROOT, 'scripts/fork-e2e-exclusions.txt'), 'utf8').split('\n').filter((l) => l.trim() && !l.startsWith('#'));
+    for (const row of rows) {
+      const [file, reason] = row.split('\t');
+      expect(file!.startsWith('test/e2e/')).toBe(true);
+      expect(existsSync(join(ROOT, file!))).toBe(true);
+      expect((reason ?? '').trim().length).toBeGreaterThan(20);
+    }
+    const step = stepRunning(workflow().jobs['postgres-e2e'], 'scripts/run-e2e.sh');
+    expect(step!.run).toContain('scripts/fork-e2e-exclusions.txt');
+  });
+
 });
 
 /** One Bun JUnit report (the shape `bun test --reporter=junit` writes) with the given failed and passed cases. */

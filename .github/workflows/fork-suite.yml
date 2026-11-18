@@ -7,7 +7,8 @@
 # `fork-suite` is the context the brains-v* ruleset requires beside `lander/verdict` (operator ruling 2026-10-19,
 # arc gbrain-bump). Lanes: the 12 unit and 4 serial shards; postgres-e2e (8 shards of scripts/run-e2e.sh against a
 # pgvector pg16 service; scripts/e2e-live-key-only.txt files skip, scripts/e2e-backend-matrix.txt files get their direct
-# pass only); postgres-arms (the ARM_SHARDS shards of scripts/postgres-unit-arms.ts --postgres-only on two databases).
+# pass only, scripts/fork-e2e-exclusions.txt files — fork divergences, each with its reason — not at all); postgres-arms
+# (the ARM_SHARDS shards of scripts/postgres-unit-arms.ts --postgres-only on two databases).
 # The heavy files scripts/test-shard.sh excludes, which upstream runs in dedicated jobs, run in none of them.
 # A red unit shard goes to scripts/fork-retry-known-flakes.ts with its JUnit receipts and log: it stays red on any error
 # outside a test, any failure not listed in scripts/fork-known-flakes.txt, or receipts naming no failed test; a listed
@@ -108,7 +109,11 @@ jobs:
         env:
           DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/gbrain_test
           SHARD: ${{ matrix.shard }}/8
-        run: bash scripts/run-e2e.sh
+        # The default corpus minus the fork's reasoned exclusions (scripts/fork-e2e-exclusions.txt); run-e2e.sh shards
+        # an explicit list the same way.
+        run: |
+          mapfile -t files < <(SHARD= bash scripts/run-e2e.sh --dry-run-list | grep -vxF -f <(grep -v '^#' scripts/fork-e2e-exclusions.txt | cut -f1))
+          bash scripts/run-e2e.sh "${files[@]}"
 
   # The unit suites' PostgreSQL arms (gated on DATABASE_URL, so every unit lane skips them), on two databases.
   postgres-arms:
