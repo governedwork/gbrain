@@ -117,7 +117,9 @@ async function ontology(engine: BrainEngine, sourceId: string) {
     const overridden = ownsAttendanceInference(pack);
     return { hash: attendanceRepairHash([bindings, approvedSchemaIdentity(resolved)]), name: pack.name,
       direction: overridden ? 'pack_semantics_preserved' as const : 'person_to_meeting' as const, pack };
-  } catch {
+  } catch (err) {
+    // Ours (governedwork fork): an unreadable pack store is not "no pack" (db-store.ts isPackStoreFailure).
+    if ((await import('./schema-pack/db-store.ts')).isPackStoreFailure(err)) throw err;
     return { hash: attendanceRepairHash(bindings), name: 'unavailable', direction: 'pack_unavailable' as const, pack: null };
   }
 }

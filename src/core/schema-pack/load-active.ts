@@ -138,14 +138,18 @@ function defaultPackLocator(name: string): string | null {
  * Load + parse + validate a pack by name. Used by `resolvePack` to walk
  * the extends chain. Throws UnknownPackError when the pack isn't on disk.
  */
+/**
+ * Ours (governedwork fork): a pack GBrain does not bundle may live in the brain, which shadows the disk; re-check
+ * the brain's heads before it is read (stat-TTL gated, one check at a time). A bundled pack never reads them.
+ */
+async function freshFor(name: string, store?: PackStore): Promise<void> {
+  if (!isBundledPackName(name)) await ensureBrainResidentPacksFresh(store);
+}
+
 async function loadPackManifestByName(name: string, store?: PackStore): Promise<SchemaPackManifest> {
-  // Ours (governedwork fork): a pack GBrain does not bundle may live in the brain, which shadows the disk;
-  // re-check the heads first (stat-TTL gated, one check at a time).
-  if (!isBundledPackName(name)) {
-    await ensureBrainResidentPacksFresh(store);
-    const resident = brainResidentPack(name);
-    if (resident) return resident;
-  }
+  await freshFor(name, store);
+  const resident = isBundledPackName(name) ? null : brainResidentPack(name);
+  if (resident) return resident;
   const path = _packLocator(name);
   if (!path) {
     const err = new UnknownPackError(name);
@@ -174,7 +178,7 @@ export async function loadActivePack(input: LoadActivePackInput): Promise<Resolv
   const resolution: ResolutionResult = resolveActivePackName(resolutionInput);
   // Ours (governedwork fork): the resolved pack, not every tier, decides whether the brain's heads are read;
   // a re-check that finds new heads evicts the cached packs they feed before the cache answers.
-  if (!isBundledPackName(resolution.pack_name)) await ensureBrainResidentPacksFresh(input.packStore);
+  await freshFor(resolution.pack_name, input.packStore);
   // v0.40.6.0: TTL-gated cache fast path. Inside STAT_TTL_MS (default 1s)
   // returns immediately (~10ns). Outside the window: stats files in the
   // extends chain; cascade-invalidates and falls through on mtime change.
@@ -190,7 +194,7 @@ export async function loadActivePack(input: LoadActivePackInput): Promise<Resolv
  * subcommands' short-lived reads). A bundled resolved pack needs none.
  */
 export async function primeBrainResidentPack(input: LoadActivePackInput): Promise<void> {
-  if (!isBundledPackName(resolveActivePackName(buildResolutionInput(input)).pack_name)) await ensureBrainResidentPacksFresh(input.packStore);
+  await freshFor(resolveActivePackName(buildResolutionInput(input)).pack_name, input.packStore);
 }
 
 /**
@@ -341,6 +345,7 @@ export async function findPackSuccessors(
       if (!_versionRangeMatches(packVersion, mf.version)) continue;
       successors.push(candidate);
     } catch {
+      // pack-store-failure-ok: a successor candidate that does not load is skipped; a read.
       // Log-and-skip per D4 EMPTY FILTER contract; corrupt pack on disk
       // shouldn't break the upgrade-available check.
       continue;

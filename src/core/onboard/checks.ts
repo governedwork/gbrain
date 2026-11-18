@@ -308,6 +308,7 @@ async function resolveNerInferenceCapability(
     if (!pack) return 'unresolved';
     return packSupportsNerInference(pack) ? 'supported' : 'no_rules';
   } catch {
+    // pack-store-failure-ok: an onboarding check that reports the pack as unresolved.
     return 'unresolved';
   }
 }
@@ -653,6 +654,7 @@ export async function checkPackUpgradeAvailable(
       ],
     };
   } catch (e) {
+    // pack-store-failure-ok: an onboarding check that reports the pack as unresolved.
     return {
       check: {
         name: 'pack_upgrade_available',

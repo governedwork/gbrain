@@ -15,7 +15,7 @@
 //     not declare 'note'.
 
 import type { BrainEngine } from '../engine.ts';
-import { loadActivePackForEngine, packOrNull } from './engine-resolution.ts';
+import { loadActivePackForEngineOrNull } from './engine-resolution.ts';
 import type { ResolvedPack } from './registry.ts';
 
 export interface WriteVocabularyContext {
@@ -38,10 +38,10 @@ export interface WriteVocabularyContext {
 export async function loadActivePackForWriteVocabulary(
   ctx: WriteVocabularyContext,
 ): Promise<ResolvedPack | null> {
-  return packOrNull(loadActivePackForEngine(ctx.engine, {
+  return loadActivePackForEngineOrNull(ctx.engine, {
     remote: ctx.remote === false ? false : true,
     sourceId: ctx.sourceId,
-  }));
+  });
 }
 
 export function packDeclaresPageType(pack: ResolvedPack, typeName: string): boolean {

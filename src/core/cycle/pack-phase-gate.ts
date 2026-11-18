@@ -39,6 +39,7 @@ export async function resolvePackPhaseGate(
     if ((await engine.getConfig(`cycle.${phase}.enabled`))?.trim() === 'true') return gate;
     return { ...gate, consent_required: true };
   } catch {
+    // pack-store-failure-ok: fails closed: the phase is skipped, so nothing runs without the pack.
     return { declared: false, reason: 'pack_resolution_failed' };
   }
 }
@@ -58,6 +59,8 @@ export async function packGateSkip(engine: BrainEngine, phase: CyclePhase, sourc
     duration_ms: 0,
     summary: gate.consent_required
       ? `${phase}: the active pack ${gate.resolved_pack} (from ${gate.source_tier}) declares this paid phase, which did not run before; run \`gbrain config set cycle.${phase}.enabled true\` to let the cycle run it`
+      // Ours (governedwork fork): a pack that did not resolve is not a pack that left the phase out.
+      : gate.reason === 'pack_resolution_failed' ? `${phase}: the active pack could not be resolved, so the phase did not run; \`gbrain schema active\` shows why`
       : NOT_DECLARED[phase] ?? `${phase}: active pack does not declare this phase`,
     details: {
       reason: gate.consent_required ? 'consent_required' : gate.reason ?? 'not_in_active_pack',

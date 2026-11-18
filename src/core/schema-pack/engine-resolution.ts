@@ -4,7 +4,7 @@ import type { BrainEngine } from '../engine.ts';
 import { OperationError } from '../ops/contract.ts';
 import { loadActivePack, loadResolvedPackByName, type LoadActivePackInput } from './load-active.ts';
 import { invalidatePackCache, type ResolvedPack } from './registry.ts';
-import { isPackStoreUnreadable } from './db-store.ts';
+import { isPackStoreFailure } from './db-store.ts';
 
 export type EngineSchemaOptions = Omit<LoadActivePackInput, 'cfg' | 'dbConfig' | 'perSourceDb' | 'packStore'>;
 
@@ -31,17 +31,25 @@ export async function engineSchemaInput(
 
 /**
  * Ours (governedwork fork): the pack `load` resolves, or null when it does not resolve (unknown, invalid,
- * untrusted ...): the callers' "no vocabulary" contract. A brain whose stored packs cannot be read
- * (`pack_store_unreadable`) is raised instead, never read as "no pack": the active pack may live there, and a
- * write must not go ahead without it. Use it for every pack load whose failure would otherwise become null.
+ * untrusted ...): the callers' "no vocabulary" contract. A failure reading the brain's stored packs
+ * (`pack_store_unreadable`, or a database error passed on for its caller to classify) is raised instead, never
+ * read as "no pack": the active pack may live there, and a write must not go ahead without it. Use it for every
+ * pack load whose failure would otherwise become null.
  */
 export async function packOrNull<T>(load: Promise<T>): Promise<T | null> {
   try {
     return await load;
   } catch (err) {
-    if (isPackStoreUnreadable(err)) throw err;
+    if (isPackStoreFailure(err)) throw err;
     return null;
   }
+}
+
+/** Ours (governedwork fork): `loadActivePackForEngine` under the `packOrNull` contract (null when unresolvable). */
+export async function loadActivePackForEngineOrNull(
+  ...args: Parameters<typeof loadActivePackForEngine>
+): Promise<ResolvedPack | null> {
+  return packOrNull(loadActivePackForEngine(...args));
 }
 
 export async function loadActivePackForEngine(

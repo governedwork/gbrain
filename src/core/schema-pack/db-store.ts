@@ -18,6 +18,7 @@ import type { BrainEngine } from '../engine.ts';
 import type { SqlEngine } from '../persistence/model.ts';
 import { opError, OperationError } from '../ops/contract.ts';
 import { isMissingSchemaObject } from '../utils.ts';
+import { viewedEngine } from '../persistence/switches.ts';
 import { parseSchemaPackManifest, SchemaPackManifestError, type SchemaPackManifest } from './manifest-v1.ts';
 import { AliasCycleError, AliasDepthExceededError } from './closure.ts';
 import { isBundledPackName } from './bundled.ts';
@@ -26,11 +27,17 @@ import { ExtendsChainTooDeepError, invalidatePackCache, resolveStatTtlMs, Unknow
 /** The database a brain-resident pack lookup reads: an engine, or a transaction's. */
 export type PackStore = Pick<SqlEngine, 'executeRaw'>;
 
-const overlay = new Map<string, { revision: string; source_id: string; manifest: SchemaPackManifest }>();
+/** A stored pack: its manifest, or why this build cannot read it (a manifest it rejects, e.g. one a newer build wrote). */
+type OverlayEntry = { source_id: string; manifest: SchemaPackManifest } | { source_id: string; unreadable: OperationError };
+
+let overlay = new Map<string, OverlayEntry>();
 let overlayGeneration: string | null = null;
 let boundStore: PackStore | null = null;
-let lastCheck: { store: PackStore; at: number } | null = null;
-let inFlight: { store: PackStore; done: Promise<void> } | null = null;
+/** Checks are keyed by the engine a store reads through (a write's bounded-reads view is a new object per write). */
+let lastCheck: { key: object; at: number } | null = null;
+let inFlight: { key: object; done: Promise<void> } | null = null;
+/** Errors the store raised that are not about its shape (a lost connection, a cancel, a deadline): passed on as they are. */
+const passedThrough = new WeakSet<object>();
 /** The last check found the brain without the pack tables (its migrations have not run): no brain-resident packs. */
 let storeAbsent = false;
 
@@ -41,14 +48,25 @@ const PACK_TABLES = ['schema_pack_heads', 'schema_pack_revisions'] as const;
  * bundle may live there, so resolution fails rather than answer "no pack": a write must not go ahead
  * without the vocabulary and typing of the pack the brain holds.
  */
-export function packStoreUnreadable(cause: unknown): OperationError {
+function packStoreUnreadable(cause: unknown): OperationError {
   const reason = cause instanceof Error ? cause.message : String(cause);
   return opError('pack_store_unreadable', `The brain's stored schema packs could not be read (${reason}).`,
     'Retry the command. If it keeps failing, check the database connection and schema with `gbrain doctor --json`.');
 }
 
-export function isPackStoreUnreadable(err: unknown): boolean {
-  return err instanceof OperationError && err.code === 'pack_store_unreadable';
+/**
+ * A failure reading the brain's stored packs: `pack_store_unreadable`, or a database error passed on unchanged so its
+ * caller can classify it (retry a lost connection, release on a deadline). Never to be read as "no pack".
+ */
+export function isPackStoreFailure(err: unknown): boolean {
+  return (err instanceof OperationError && err.code === 'pack_store_unreadable') || (typeof err === 'object' && err !== null && passedThrough.has(err));
+}
+
+/** A store error about the store's shape or contents (SQLSTATE class 42 or 22, or no code at all) reads as unreadable. */
+function storeShapeError(err: unknown): boolean {
+  const { code, name } = (typeof err === 'object' && err !== null ? err : {}) as { code?: unknown; name?: unknown };
+  if (typeof code === 'string') return /^(42|22)[0-9A-Z]{3}$/.test(code);
+  return name !== 'AbortError';
 }
 
 /** Whether the last check found this brain without the brain-resident pack tables (apply-migrations creates them). */
@@ -56,9 +74,12 @@ export function brainResidentPackStoreAbsent(): boolean {
   return storeAbsent;
 }
 
-/** The brain-resident manifest for `name`, if the overlay holds one. */
+/** The brain-resident manifest for `name`, if the overlay holds one; throws `pack_store_unreadable` when this build cannot read it. */
 export function brainResidentPack(name: string): SchemaPackManifest | null {
-  return overlay.get(name)?.manifest ?? null;
+  const entry = overlay.get(name);
+  if (!entry) return null;
+  if ('unreadable' in entry) throw entry.unreadable;
+  return entry.manifest;
 }
 
 /** The source that owns the brain-resident pack `name`, if the overlay holds one. */
@@ -76,8 +97,10 @@ const HEADS_GENERATION_SQL = `SELECT COALESCE(md5(string_agg(name || '=' || revi
 
 /**
  * Reload the overlay from the database when the heads changed since the last load. A brain without the pack
- * tables holds no brain-resident packs (a resolution that needs one says how to create them); any other
- * failure throws `pack_store_unreadable` and leaves the overlay and the last check as they were.
+ * tables holds no brain-resident packs (a resolution that needs one says how to create them). A failure about the
+ * store's shape throws `pack_store_unreadable`; any other database error (connection, cancel, deadline) is thrown
+ * unchanged for its caller to classify. Either way the overlay and the last check stay as they were. A stored
+ * manifest this build rejects marks only that pack unreadable.
  */
 export async function refreshBrainResidentPacks(engine: PackStore): Promise<void> {
   let generation: string;
@@ -85,25 +108,34 @@ export async function refreshBrainResidentPacks(engine: PackStore): Promise<void
   try {
     const [row] = await engine.executeRaw<{ generation: string }>(HEADS_GENERATION_SQL);
     generation = row?.generation ?? '';
-    if (generation === overlayGeneration && !storeAbsent) { lastCheck = { store: engine, at: Date.now() }; return; }
+    if (generation === overlayGeneration && !storeAbsent) { lastCheck = { key: viewedEngine(engine), at: performance.now() }; return; }
     rows = await engine.executeRaw<{ name: string; revision: string; source_id: string; manifest: unknown }>(
       `SELECT h.name, h.revision::text AS revision, h.source_id, r.manifest
         FROM schema_pack_heads h JOIN schema_pack_revisions r ON r.revision = h.revision`);
     storeAbsent = false;
   } catch (err) {
-    if (!isMissingSchemaObject(err, 'table', PACK_TABLES)) throw packStoreUnreadable(err);
+    if (!isMissingSchemaObject(err, 'table', PACK_TABLES)) {
+      if (storeShapeError(err)) throw packStoreUnreadable(err);
+      if (typeof err === 'object' && err !== null) passedThrough.add(err);
+      throw err;
+    }
     generation = '';
     storeAbsent = true;
   }
-  const changed = new Set<string>([...overlay.keys(), ...rows.map(r => r.name)]);
-  overlay.clear();
+  const next = new Map<string, OverlayEntry>();
   for (const row of rows) {
-    const manifest = typeof row.manifest === 'string' ? JSON.parse(row.manifest) : row.manifest;
-    overlay.set(row.name, { revision: row.revision, source_id: row.source_id, manifest: parseSchemaPackManifest(manifest, { path: `brain:${row.name}` }) });
+    try {
+      const manifest = typeof row.manifest === 'string' ? JSON.parse(row.manifest) : row.manifest;
+      next.set(row.name, { source_id: row.source_id, manifest: parseSchemaPackManifest(manifest, { path: `brain:${row.name}` }) });
+    } catch (err) {
+      next.set(row.name, { source_id: row.source_id, unreadable: packStoreUnreadable(err) });
+    }
   }
+  const changed = new Set<string>([...overlay.keys(), ...next.keys()]);
+  overlay = next;
   overlayGeneration = generation;
   for (const name of changed) invalidatePackCache(name);
-  lastCheck = { store: engine, at: Date.now() };
+  lastCheck = { key: viewedEngine(engine), at: performance.now() };
 }
 
 /**
@@ -127,10 +159,11 @@ export function bindBrainResidentPackStore(store: PackStore | null): () => void 
 export async function ensureBrainResidentPacksFresh(store?: PackStore | null): Promise<void> {
   const target = store ?? boundStore;
   if (!target) return;
-  if (lastCheck?.store === target && Date.now() - lastCheck.at < resolveStatTtlMs()) return;
-  if (inFlight?.store === target) return inFlight.done;
+  const key = viewedEngine(target);
+  if (lastCheck?.key === key && performance.now() - lastCheck.at < resolveStatTtlMs()) return;
+  if (inFlight?.key === key) return inFlight.done;
   const done = refreshBrainResidentPacks(target).finally(() => { if (inFlight?.done === done) inFlight = null; });
-  inFlight = { store: target, done };
+  inFlight = { key, done };
   return done;
 }
 
@@ -142,7 +175,7 @@ function isManifestRejection(err: unknown): err is Error {
 
 /** Test seam: forget the overlay, the last check and the bound store. */
 export function _resetBrainResidentPacksForTests(): void {
-  overlay.clear();
+  overlay = new Map();
   overlayGeneration = null;
   boundStore = null;
   lastCheck = null;

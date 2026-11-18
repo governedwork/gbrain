@@ -32,6 +32,7 @@ async function readDatabasePlane(withEngine: WithEngine, sourceId: string | unde
       return { state: 'read' as const, input, sourceKnown: !sourceId || (source !== null && source.archived !== true) };
     });
   } catch (e) {
+    // pack-store-failure-ok: reported as the database plane being unreadable.
     return { state: 'unreadable', error: e instanceof Error ? e.message : String(e) };
   }
 }

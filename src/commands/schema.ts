@@ -60,6 +60,7 @@ import { gbrainPath, loadConfig, configPath, toEngineConfig, isThinClient, type 
 import { opError } from '../core/ops/contract.ts';
 import { readDbSchemaPack } from '../core/schema-pack/best-effort.ts';
 import { primeBrainResidentPack } from '../core/schema-pack/load-active.ts';
+import { bindBrainResidentPackStore, isPackStoreFailure } from '../core/schema-pack/db-store.ts';
 import { sanitizeTypeForDisplay } from '../core/schema-pack/type-usage.ts';
 import { yamlScalar } from '../core/frontmatter-inference.ts';
 import { ROUTERS, SCHEMA_SUBCOMMANDS, subcommandHelpRequested } from '../cli/subcommands.ts';
@@ -207,7 +208,9 @@ async function readDbSchemaPackConfig(cfg: GBrainConfig | null): Promise<string 
       await primeBrainResidentPack({ cfg, remote: false, dbConfig, packStore: engine });
       return dbConfig;
     });
-  } catch {
+  } catch (err) {
+    // Ours (governedwork fork): the brain answered but its stored packs could not be read; the pack it names may live there.
+    if (isPackStoreFailure(err)) throw err;
     return undefined;
   }
 }
@@ -495,7 +498,7 @@ async function withConnectedEngine<T>(fn: (engine: import('../core/engine.ts').B
   const engine = await createEngine(connectConfig);
   await engine.connect(connectConfig);
   // Ours (governedwork fork): brain-resident packs resolve like disk packs in every schema subcommand.
-  const unbind = (await import('../core/schema-pack/db-store.ts')).bindBrainResidentPackStore(engine);
+  const unbind = bindBrainResidentPackStore(engine);
   try {
     return await fn(engine);
   } finally {
@@ -814,6 +817,7 @@ async function runLintCmd(args: string[]): Promise<void> {
           pack = loaded.resolved.manifest;
           declared = loaded.declared;
         } catch (e) {
+          // pack-store-failure-ok: a CLI read that prints the error.
           const msg = e instanceof Error ? e.message : String(e);
           console.error(`warn: could not resolve extends chain for pack \`${name}\` (${msg}); linting raw manifest only`);
           pack = raw;

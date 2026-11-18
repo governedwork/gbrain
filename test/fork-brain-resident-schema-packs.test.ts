@@ -311,4 +311,27 @@ describe('brain-resident schema packs', () => {
       await engine.executeRaw("DELETE FROM config WHERE key = 'schema_pack' OR key LIKE 'schema_pack.source.%'");
     }
   });
+
+  test('L100: write preparations reading through their own view of one engine share its heads re-check within the stat-TTL', async () => {
+    const { ensureBrainResidentPacksFresh } = await import('../src/core/schema-pack/db-store.ts');
+    const { registerEngineView } = await import('../src/core/persistence/switches.ts');
+    await put(local(), { name: 'acme-pack', manifest: manifest('acme-pack', ['client']), expected_revision: null }).catch(() => undefined);
+    _resetBrainResidentPacksForTests();
+    _resetPackCacheForTests();
+    let headReads = 0;
+    // Each write preparation reads through a new view of the engine (bounded-reads.ts), registered as viewing it.
+    const view = () => registerEngineView(new Proxy(engine, { get(target, key) {
+      if (key === 'executeRaw') return (sql: string, params?: unknown[]) => { if (/schema_pack_heads/.test(sql)) headReads++; return target.executeRaw(sql, params); };
+      const value = Reflect.get(target, key);
+      return typeof value === 'function' ? value.bind(target) : value;
+    } }), engine);
+    await withEnv({ GBRAIN_PACK_STAT_TTL_MS: '60000' }, async () => {
+      await ensureBrainResidentPacksFresh(view());
+      const afterFirst = headReads;
+      expect(afterFirst).toBeGreaterThan(0);
+      await ensureBrainResidentPacksFresh(view());
+      expect(headReads).toBe(afterFirst);
+    });
+    _resetBrainResidentPacksForTests();
+  });
 });
