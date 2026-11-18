@@ -13,7 +13,7 @@ import { authorizePageVisibility, excludesPrivateWritesAtAdmission } from './pag
 import { currentCallerAccess } from '../search/private-visibility.ts';
 import { parseStoredActor, storedActorIdentity } from '../access/actor.ts';
 import { ownerSpeaksForItself, sameAttestedActor } from '../access/member-facts.ts';
-import { perCallWriteSource, storedPerCallWriteSource } from '../access/attest-sources.ts';
+import { clientGrantReads, ownerPageReadSource, perCallWriteSource, sourcesOf, storedOwnerPageReadSource, storedPerCallWriteSource } from '../access/attest-sources.ts';
 import { pipelined, transactionMemo } from '../page-state/transactions.ts';
 
 function deny(message: string): never { throw new OperationError('permission_denied', message, 'Inspect the current writer registration and source/operation grants.'); }
@@ -39,6 +39,13 @@ function liveDelegation(row: Record<string, unknown>, jobId: unknown): readonly 
 }
 /** GST-2091: the page writes the brain owner's own credential may make to a private page it reads. */
 const OWNER_PRIVATE_WRITES = new Set(['put_page', 'edit_page', 'append_page']);
+/**
+ * governedwork fork (F13): the public operation that grants an internal journaled write no grant can name. The owner's
+ * marked-page confirm on a managed brain publishes as trust_owner_page (trust/page-handlers.ts submitOwnerPage), whose only
+ * remote caller is confirm_memory (ops/trust.ts), and no rescope can list trust_owner_page; so a grant of exactly
+ * confirm_memory, the hosted confirmer's, is checked as confirm_memory, as an attested write is checked as its attestedOp.
+ */
+const GRANTED_BY: Readonly<Record<string, string>> = { trust_owner_page: 'confirm_memory' };
 function skillWrite(operation: string): boolean {
   return ['put_skill', 'delete_skill', 'adopt_skillpack'].includes(operation);
 }
@@ -89,7 +96,7 @@ export async function submissionAuthority(ctx: OperationContext, operation: stri
   };
   const owner = access?.remotePolicy?.ownerMember;
   if (owner && OWNER_PRIVATE_WRITES.has(operation) && hasScope(a.scopes, 'write') && ownerSpeaksForItself(ctx)) a.ownerWrite = `member:${owner}`;
-  if (ctx.auth?.sourceId != null && ctx.auth.sourceId !== sourceId && !a.attestedSource) deny('The source is outside this writer grant.');
+  if (ctx.auth?.sourceId != null && ctx.auth.sourceId !== sourceId && !a.attestedSource && !ownerPageReadSource(ctx, operation, sourceId)) deny('The source is outside this writer grant.');
   if (!prefixAllowed(a.slugPrefixes, slug)) deny('The target is outside this writer grant.');
   await authorizeWrite(ctx.engine, a, operation, slug);
   if (!skillWrite(operation)) await authorizePageVisibility(ctx.engine, a, slug);
@@ -157,7 +164,7 @@ export async function authorizeWrite(engine: SqlEngine, a: WriteAuthority, opera
   if (a.version !== 1 || !a.principal || !a.sourceId || !a.sourceIncarnation) deny('Missing durable write authority.');
   assertSkillWriteScopes(a.scopes, operation, a.remote);
   // GST-359: an attested write is granted by the public operation the person's system called (memory_write runs remember).
-  const granted = a.actingFor && !Array.isArray(a.actingFor) && a.attestedOp ? a.attestedOp : operation;
+  const granted = a.actingFor && !Array.isArray(a.actingFor) && a.attestedOp ? a.attestedOp : GRANTED_BY[operation] ?? operation;
   if (!hasScope(a.scopes, a.delegated ? 'agent' : 'write') || !operationAllowed(a.operations, granted) || !prefixAllowed(a.slugPrefixes, slug)) deny('The operation exceeds its original accepted grant.');
   if ((a.delegated || a.restrictedNamespace) && (!a.delegatedPrefixes?.length || !matchesSlugAllowList(slug, a.delegatedPrefixes))) deny('The target exceeds the accepted delegated namespace.');
   if (a.actingFor && !Array.isArray(a.actingFor)) {
@@ -170,12 +177,16 @@ export async function authorizeWrite(engine: SqlEngine, a: WriteAuthority, opera
   }
   // GST-1113: the one exception to the owner's single write source (the scope page), re-checked against the live attest_sources above.
   // A live grant of no sources writes nothing, so it refuses before that exception.
-  const ownSource = (source: unknown, sourcesNone: boolean) => !sourcesNone && (source === a.sourceId || storedPerCallWriteSource(a, slug) !== null);
+  // governedwork fork (F13): the owner's page confirm writes the page's own source when the live grant still reads it.
+  const ownSource = (source: unknown, sourcesNone: boolean, reads: readonly string[]) => !sourcesNone
+    && (source === a.sourceId || storedPerCallWriteSource(a, slug) !== null || storedOwnerPageReadSource(operation, a.sourceId, reads));
   const suffix = lock ? ' FOR SHARE' : '';
   if (a.principal.kind === 'oauth_client') {
-    const [row] = await engine.executeRaw<Record<string, unknown>>(`SELECT deleted_at,scope,source_id,source_grant,allowed_operations,
+    const [row] = await engine.executeRaw<Record<string, unknown>>(`SELECT deleted_at,scope,source_id,source_grant,federated_read,allowed_operations,
       bound_slug_prefixes,bound_tools,delegated_namespace,delegated_slug_prefixes FROM oauth_clients WHERE client_id=$1${suffix}`, [a.principal.id]);
-    if (!row || row.deleted_at != null || !ownSource(row.source_id, row.source_grant === 'none')) deny('The owning OAuth client is revoked or its source changed.');
+    const reads = row ? clientGrantReads({ sourcesNone: row.source_grant === 'none', sourceId: typeof row.source_id === 'string' ? row.source_id : null,
+      federatedRead: strings(row.federated_read) ? row.federated_read : [] }) : [];
+    if (!row || row.deleted_at != null || !ownSource(row.source_id, row.source_grant === 'none', reads)) deny('The owning OAuth client is revoked or its source changed.');
     const scopes = typeof row.scope === 'string' ? row.scope.split(/\s+/) : [];
     assertSkillWriteScopes(scopes, operation, a.remote);
     if (skillWrite(operation) && (!strings(row.allowed_operations) || !row.allowed_operations.includes(operation))) deny('The current skill operation grant was removed.');
@@ -196,7 +207,7 @@ export async function authorizeWrite(engine: SqlEngine, a: WriteAuthority, opera
     assertSkillWriteScopes(normalizeTokenScopes(row.scopes) ?? [], operation, a.remote);
     const liveOperations = grant.allowedOperations;
     if (!operationAllowed(liveOperations, granted) || skillWrite(operation) && !liveOperations?.includes(operation)) deny('The current legacy operation grant excludes this write.');
-    if (!hasScope(grant.scopes, 'write') || !ownSource(authSourcesFromGrant(grant).sourceId, grant.sources.kind === 'none')) deny('The current token no longer permits this source write.');
+    if (!hasScope(grant.scopes, 'write') || !ownSource(authSourcesFromGrant(grant).sourceId, grant.sources.kind === 'none', sourcesOf(grant.sources).reads)) deny('The current token no longer permits this source write.');
     return;
   }
   if (a.principal.kind === 'local_cli' || a.principal.kind === 'local_stdio') {

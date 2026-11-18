@@ -20,6 +20,7 @@ import { applyOwnerAction, previewOwnerAction } from '../trust/owner-actions.ts'
 import { parseTrustRef } from '../trust/refs.ts';
 import { currentVerifiedLocalWriter } from '../persistence/identity.ts';
 import { PAGE_MUTATION_PARAMS } from '../persistence/params.ts';
+import { callerAccessAllowedSql } from '../search/private-visibility.ts';
 
 const confirm_memory: Operation = {
   name: 'confirm_memory',
@@ -46,9 +47,13 @@ const confirm_memory: Operation = {
       const allowed = ctx.auth?.allowedSources ?? (ctx.auth?.sourceId ? [ctx.auth.sourceId] : null);
       const [sourceRow] = ref.kind === 'page' ? [{ source_id: ref.sourceId! }] : await ctx.engine.executeRaw<{ source_id: string }>(
         ref.kind === 'fact' ? 'SELECT source_id FROM facts WHERE id = $1' : 'SELECT p.source_id FROM takes t JOIN pages p ON p.id = t.page_id WHERE t.id = $1', [ref.id]);
-      if (allowed && sourceRow && !allowed.includes(sourceRow.source_id)) {
-        throw opError('not_found', `No ${ref.kind} ${preview.ref} visible to this connection.`, 'Check the ref and the source your connection may use.');
-      }
+      // governedwork fork (F13): a page is visible to the connection only when the caller reads it (its readers, folder
+      // rules and origins), not merely its source: the owner's page confirm writes in the page's own source on that ground
+      // (access/attest-sources.ts ownerPageReadSource).
+      const hidden = allowed && sourceRow && !allowed.includes(sourceRow.source_id)
+        || ref.kind === 'page' && !(await ctx.engine.executeRaw(`SELECT 1 FROM pages p WHERE p.source_id = $1 AND p.slug = $2 AND p.deleted_at IS NULL
+          AND ${callerAccessAllowedSql('p')}`, [ref.sourceId, ref.slug])).length;
+      if (hidden) throw opError('not_found', `No ${ref.kind} ${preview.ref} visible to this connection.`, 'Check the ref and the source your connection may use.');
     }
     if (ctx.dryRun) return { dry_run: true, action: 'confirm_memory', ref: preview.ref, raises: preview.raises, summary: preview.summary };
     if (!preview.raises) return { action: 'confirm', ref: preview.ref, status: 'unchanged', tier: 'user_confirmed' };
