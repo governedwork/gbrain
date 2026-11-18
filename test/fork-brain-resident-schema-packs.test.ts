@@ -250,4 +250,31 @@ describe('brain-resident schema packs', () => {
       } finally { stop(); }
     });
   });
+
+  test('L101: a head revised by a transaction that commits after a faster one is still picked up', async () => {
+    // acme-other first, acme-pack second: acme-pack's head carries the newest updated_at.
+    const other1 = await put(local(), { name: 'acme-other', manifest: manifest('acme-other', ['client']), expected_revision: null });
+    await put(local(), { name: 'acme-pack', manifest: manifest('acme-pack', ['client']), expected_revision: null });
+    await refreshBrainResidentPacks(engine);
+    expect(brainResidentPack('acme-other')?.page_types.map(t => t.name)).toEqual(['client']);
+    const heads = async () => (await engine.executeRaw<{ max: string; n: number }>(
+      'SELECT max(updated_at)::text AS max, count(*)::int AS n FROM schema_pack_heads'))[0];
+    const before = await heads();
+
+    // On Postgres a slower transaction revising acme-other began before acme-pack's and commits after it:
+    // its updated_at (now() = its start) is older than the newest head, and the head count is unchanged.
+    // PGLite cannot interleave two transactions, so build that committed end state directly.
+    await engine.executeRaw(`INSERT INTO schema_pack_revisions(revision,name,source_id,manifest,manifest_hash,parent_revision,published_by)
+      VALUES('00000000-0000-4000-8000-000000000003','acme-other','acme',$1::text::jsonb,'h',$2::uuid,'test')`,
+    [JSON.stringify(manifest('acme-other', ['client', 'deal'])), other1.revision]);
+    await engine.executeRaw(`UPDATE schema_pack_heads SET revision='00000000-0000-4000-8000-000000000003',
+      updated_at=(SELECT updated_at FROM schema_pack_heads WHERE name='acme-pack') - interval '1 millisecond' WHERE name='acme-other'`);
+    expect(await heads()).toEqual(before);
+
+    await withEnv({ GBRAIN_PACK_STAT_TTL_MS: '50' }, async () => {
+      await Bun.sleep(100);
+      await refreshBrainResidentPacks(engine);
+    });
+    expect(brainResidentPack('acme-other')?.page_types.map(t => t.name)).toEqual(['client', 'deal']);
+  });
 });

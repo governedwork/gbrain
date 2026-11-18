@@ -32,13 +32,20 @@ export function brainResidentPackSource(name: string): string | null {
   return overlay.get(name)?.source_id ?? null;
 }
 
+/**
+ * The heads' generation: a hash of every (name, head revision) pair. Each publish writes a fresh random
+ * revision, so any head change changes it whatever order transactions commit in; a timestamp would not
+ * (a transaction that began earlier but commits later leaves the newest updated_at unchanged).
+ */
+const HEADS_GENERATION_SQL = `SELECT COALESCE(md5(string_agg(name || '=' || revision::text, ',' ORDER BY name)), '') AS generation
+  FROM schema_pack_heads`;
+
 /** Reload the overlay from the database when the heads changed since the last load. */
 export async function refreshBrainResidentPacks(engine: Pick<SqlEngine, 'executeRaw'>): Promise<void> {
   let generation: string;
   try {
-    const [row] = await engine.executeRaw<{ generation: string }>(
-      `SELECT COALESCE(max(updated_at)::text,'') || ':' || count(*) AS generation FROM schema_pack_heads`);
-    generation = row?.generation ?? ':0';
+    const [row] = await engine.executeRaw<{ generation: string }>(HEADS_GENERATION_SQL);
+    generation = row?.generation ?? '';
   } catch { return; } // tables not migrated yet
   if (generation === overlayGeneration) return;
   const rows = await engine.executeRaw<{ name: string; revision: string; source_id: string; manifest: unknown }>(
