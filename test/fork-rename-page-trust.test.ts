@@ -16,6 +16,8 @@ import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { operations } from '../src/core/operations.ts';
 import type { OperationContext } from '../src/core/ops/contract.ts';
 import { activatePersistence } from '../src/core/persistence/activation.ts';
+import type { WriteAttribution } from '../src/core/persistence/attribution.ts';
+import { withCoordinatedWrite } from '../src/core/persistence/context.ts';
 import { submitPageMutation } from '../src/core/persistence/page-mutations.ts';
 import { disposePersistenceConsumer } from '../src/core/persistence/service.ts';
 import { withEnv } from './helpers/with-env.ts';
@@ -72,5 +74,46 @@ describe('rename_page and trust tiers', () => {
 
     expect(await pageTier('notes/trust-b')).toBe(pageBefore);
     expect(await factTiers('notes/trust-b')).toEqual(factsBefore);
+  }, 120_000);
+});
+
+// Every slug move outside rename_page (sync renames, rename-identity and file
+// repair, the rename-collision and sync-hold moves) runs engine.updateSlug
+// inside its caller's writer scope. The move authors nothing, so the page and
+// the facts it re-keys keep their tier whatever tier the mover declares: an
+// owner-tier sync must not raise them, an undeclared mover must not lower them.
+describe('slug moves outside rename_page and trust tiers', () => {
+  const seedPageWithFact = async (slug: string, fact: string): Promise<number> => {
+    const put = await inHome(() => submitPageMutation(ctx(), { operation: 'put_page', waitMs: 30_000,
+      params: { request_id: randomUUID(), slug, content: `---\ntitle: ${slug}\ntype: note\n---\n\nBody.\n` } }));
+    expect(put.state).toBe('committed');
+    const remembered = await call('remember', { entity: slug, fact, provenance: 'slug move trust test fixture', request_id: randomUUID() });
+    expect(remembered.status).toBe('inserted');
+    expect(await pageTier(slug)).toBe('agent_written');
+    expect(await factTiers(slug)).toEqual(['agent_written']);
+    return (await engine.readPageSnapshot(slug, { sourceId: SOURCE }))!.page.id;
+  };
+  const moveSlug = (from: string, to: string, trust?: WriteAttribution['trust']) => inHome(() => engine.transaction(tx =>
+    withCoordinatedWrite(tx, [SOURCE], () => tx.updateSlug(from, to, { sourceId: SOURCE }),
+      { requestId: null, principal: { kind: 'local_cli', id: 'slug-move-trust-test' }, ...(trust ? { trust } : {}) })));
+  const pageIdsAt = async (slug: string) => (await engine.executeRaw<{ id: number }>(
+    'SELECT id FROM pages WHERE source_id=$1 AND slug=$2', [SOURCE, slug])).map(r => Number(r.id));
+
+  test('L107: an owner-tier (operator_curated) slug move keeps the page and its facts agent_written', async () => {
+    const pageId = await seedPageWithFact('notes/trust-c', 'Widget-co ships the owner move example.');
+    expect(await moveSlug('notes/trust-c', 'notes/trust-d', { tier: 'operator_curated', origin: null })).toBe(1);
+    expect(await pageIdsAt('notes/trust-c')).toEqual([]);
+    expect(await pageIdsAt('notes/trust-d')).toEqual([pageId]);
+    expect(await pageTier('notes/trust-d')).toBe('agent_written');
+    expect(await factTiers('notes/trust-d')).toEqual(['agent_written']);
+  }, 120_000);
+
+  test('L107: a slug move with no declared tier keeps the page and its facts agent_written', async () => {
+    const pageId = await seedPageWithFact('notes/trust-e', 'Widget-co ships the undeclared move example.');
+    expect(await moveSlug('notes/trust-e', 'notes/trust-f')).toBe(1);
+    expect(await pageIdsAt('notes/trust-e')).toEqual([]);
+    expect(await pageIdsAt('notes/trust-f')).toEqual([pageId]);
+    expect(await pageTier('notes/trust-f')).toBe('agent_written');
+    expect(await factTiers('notes/trust-f')).toEqual(['agent_written']);
   }, 120_000);
 });

@@ -1603,6 +1603,20 @@
           },
           {
             "lane": "tx",
+            "params": [],
+            "sql": "SELECT current_setting('gbrain.write_trust_keep',true) AS s0",
+            "textSha256": "5469783f090ae973954c889998dbae06fed8c90e5477c5e729bf3d6671e9db71"
+          },
+          {
+            "lane": "tx",
+            "params": [
+              "string"
+            ],
+            "sql": "SELECT set_config('gbrain.write_trust_keep',$1,true)",
+            "textSha256": "a2b90331211ee05dc71e4ac3e03115c95d0fe0e44b3a66af7f17d5fb1c5c0cf9"
+          },
+          {
+            "lane": "tx",
             "params": [
               "string",
               "string",
@@ -1792,6 +1806,14 @@
             "lane": "tx>sp"
           },
           {
+            "lane": "tx",
+            "params": [
+              "string"
+            ],
+            "sql": "SELECT set_config('gbrain.write_trust_keep',$1,true)",
+            "textSha256": "a2b90331211ee05dc71e4ac3e03115c95d0fe0e44b3a66af7f17d5fb1c5c0cf9"
+          },
+          {
             "event": "commit",
             "lane": "tx"
           }
@@ -1831,6 +1853,20 @@
           },
           {
             "lane": "tx",
+            "params": [],
+            "sql": "SELECT current_setting('gbrain.write_trust_keep',true) AS s0",
+            "textSha256": "5469783f090ae973954c889998dbae06fed8c90e5477c5e729bf3d6671e9db71"
+          },
+          {
+            "lane": "tx",
+            "params": [
+              "string"
+            ],
+            "sql": "SELECT set_config('gbrain.write_trust_keep',$1,true)",
+            "textSha256": "a2b90331211ee05dc71e4ac3e03115c95d0fe0e44b3a66af7f17d5fb1c5c0cf9"
+          },
+          {
+            "lane": "tx",
             "params": [
               "string",
               "string",
@@ -1838,6 +1874,14 @@
             ],
             "sql": "UPDATE pages SET slug = $1, updated_at = now() WHERE slug = $2 AND source_id = $3 RETURNING id",
             "textSha256": "bf3641ff709a5368753967c9c95db40c4ef2c2f065e9449147765b3f40922370"
+          },
+          {
+            "lane": "tx",
+            "params": [
+              "string"
+            ],
+            "sql": "SELECT set_config('gbrain.write_trust_keep',$1,true)",
+            "textSha256": "a2b90331211ee05dc71e4ac3e03115c95d0fe0e44b3a66af7f17d5fb1c5c0cf9"
           },
           {
             "event": "commit",
