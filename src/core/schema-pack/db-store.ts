@@ -146,12 +146,21 @@ export async function refreshBrainResidentPacks(engine: PackStore): Promise<void
  * Returns a function that restores the previous binding.
  */
 export function bindBrainResidentPackStore(store: BindableStore | null): () => void {
+  // Only an engine that reports its disconnect is bound, so the binding ends with the engine: a later engine (the
+  // next brain a process opens) is never read through a closed one, and a stand-in that cannot report it is not bound.
+  if (store && typeof store.registerBeforeDisconnect !== 'function') return () => {};
   const previous = boundStore;
   boundStore = store;
   lastCheck = null;
-  // An engine that disconnects stops being the store its process resolves packs from: a later engine (the next
-  // brain a process opens, graduation's target) must not be read through a closed one.
-  const unhook = store?.registerBeforeDisconnect?.(async () => { if (boundStore === store) { boundStore = null; lastCheck = null; } });
+  let unhook: (() => void) | undefined;
+  if (store) {
+    const onDisconnect = async () => { if (boundStore === store) { boundStore = null; lastCheck = null; } };
+    // The degraded engine (serve while its brain is unreachable) wraps every method as async and refuses while the
+    // brain is down: take the unhook either way and never let its refusal become an unhandled rejection.
+    const registered: unknown = store.registerBeforeDisconnect!(onDisconnect);
+    if (typeof registered === 'function') unhook = registered as () => void;
+    else if (registered instanceof Promise) registered.then((u: unknown) => { if (typeof u === 'function') unhook = u as () => void; }, () => {});
+  }
   return () => { unhook?.(); if (boundStore === store) { boundStore = previous; lastCheck = null; } };
 }
 

@@ -24,10 +24,10 @@ export async function engineSchemaInput(
   const value = sourceValue?.trim();
   if (options.sourceId && value) perSourceDb.set(options.sourceId, value);
   // Ours (governedwork fork): the engine is also the store brain-resident packs resolve from; the loader reads it
-  // only when the resolved pack is one GBrain does not bundle (load-active.ts). An engine that cannot be read for
-  // them reads none, never the process's bound store (another brain's).
-  const packStore = engine ? ('executeRaw' in engine ? engine as PackStore : null) : undefined;
-  return { ...options, cfg: loadConfigFileOnly(), dbConfig, perSourceDb, ...(packStore !== undefined ? { packStore } : {}) };
+  // only when the resolved pack is one GBrain does not bundle (load-active.ts). No engine, or one that cannot be read
+  // for them, reads none: never the process's bound store, which may be another brain.
+  const packStore = engine && 'executeRaw' in engine ? engine as PackStore : null;
+  return { ...options, cfg: loadConfigFileOnly(), dbConfig, perSourceDb, packStore };
 }
 
 /**

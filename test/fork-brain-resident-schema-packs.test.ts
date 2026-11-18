@@ -335,12 +335,48 @@ describe('brain-resident schema packs', () => {
     _resetBrainResidentPacksForTests();
     _resetPackCacheForTests();
     let boundReads = 0;
-    bindBrainResidentPackStore({ executeRaw: async () => { boundReads++; throw new Error('another brain'); } } as never);
+    bindBrainResidentPackStore({ executeRaw: async () => { boundReads++; throw new Error('another brain'); }, registerBeforeDisconnect: () => () => {} } as never);
     const configOnly = { getConfig: async (key: string) => (key === 'schema_pack' ? 'pack-nobody-published' : null) } as never;
-    await withEnv({ GBRAIN_HOME: home, GBRAIN_SCHEMA_PACK: undefined }, async () => {
+    await withEnv({ GBRAIN_HOME: home, GBRAIN_SCHEMA_PACK: 'pack-nobody-published' }, async () => {
       expect(await loadActivePackForEngineOrNull(configOnly, { remote: false })).toBeNull();
+      // No engine at all reads none either.
+      expect(await loadActivePackForEngineOrNull(null, { remote: false })).toBeNull();
     });
     expect(boundReads).toBe(0);
+    _resetBrainResidentPacksForTests();
+  });
+
+  test('L100: a stand-in that cannot report its disconnect is never bound, so no later lookup reads it', async () => {
+    const { UnknownPackError } = await import('../src/core/schema-pack/registry.ts');
+    _resetBrainResidentPacksForTests();
+    _resetPackCacheForTests();
+    let reads = 0;
+    bindBrainResidentPackStore({ executeRaw: async () => { reads++; throw new Error('a stand-in'); } } as never);
+    let thrown: unknown = null;
+    await withEnv({ GBRAIN_HOME: home, GBRAIN_SCHEMA_PACK: undefined }, async () => {
+      try { await loadActivePack({ cfg: null, remote: false, dbConfig: 'pack-nobody-published' }); } catch (err) { thrown = err; }
+    });
+    expect(thrown).toBeInstanceOf(UnknownPackError);
+    expect(reads).toBe(0);
+    _resetBrainResidentPacksForTests();
+  });
+
+  test('L100: binding the degraded engine (async methods that refuse while its brain is down) raises no unhandled rejection', async () => {
+    _resetBrainResidentPacksForTests();
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => { unhandled.push(reason); };
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const restore = bindBrainResidentPackStore({
+        executeRaw: async () => { throw new Error('brain unreachable'); },
+        registerBeforeDisconnect: async () => { throw new Error('brain unreachable'); },
+      } as never);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      restore();
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+    expect(unhandled).toEqual([]);
     _resetBrainResidentPacksForTests();
   });
 
