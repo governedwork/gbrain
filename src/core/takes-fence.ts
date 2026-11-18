@@ -581,6 +581,28 @@ export function upsertTakeRow(
  * Throws when the target row is not found in the fence, and
  * `FenceRewriteRefusal` when the fence does not parse cleanly.
  */
+/**
+ * The row a `superseded by #N` strike citation names. The fence writer
+ * (`supersedeRow`) appends the citation after the row's own provenance, so a
+ * cell that was struck more than once ends with the live pointer: the LAST
+ * citation counts, in any case. Shared by the canonical projection, the
+ * takes_remove guard and fence-repair's renumber so they can never disagree.
+ */
+export function supersessionCitation(text: string | undefined): number | null {
+  const cited = [...(text ?? '').matchAll(/superseded by #(\d+)/gi)].at(-1)?.[1];
+  if (cited === undefined) return null;
+  const n = Number(cited);
+  return Number.isSafeInteger(n) && n > 0 ? n : null;
+}
+
+/** `text` with the citation `supersessionCitation` reads pointed at row `target`; unchanged when it carries none. */
+export function rewriteSupersessionCitation(text: string, target: number): string {
+  const matches = [...text.matchAll(/(superseded by #)\d+/gi)];
+  const last = matches.at(-1);
+  if (!last || last.index === undefined) return text;
+  return `${text.slice(0, last.index)}${last[1]}${target}${text.slice(last.index + last[0].length)}`;
+}
+
 export function supersedeRow(
   body: string,
   oldRowNum: number,

@@ -9,7 +9,7 @@
  * canonical value and never look at other cells, so the validator can
  * recompute what a rule may output for a given before value.
  */
-import { isValidHolder, TAKE_KIND_VALUES } from '../takes-fence.ts';
+import { isValidHolder, rewriteSupersessionCitation, supersessionCitation, TAKE_KIND_VALUES } from '../takes-fence.ts';
 import type { FenceKind } from './types.ts';
 
 export const FACTS_COLUMNS = [
@@ -269,12 +269,24 @@ export function appendOriginalKind(context: string, word: string): string {
   return context.trim() ? `${context.trim()}; ${note}` : note;
 }
 
-/** The `superseded by #N` reference a facts context or takes source cell carries. */
-export function supersededRef(text: string): number | null {
+/**
+ * The `superseded by #N` reference a facts context or takes source cell
+ * carries. A takes cell reads the citation the takes projection reads
+ * (`supersessionCitation`: the last one); a facts cell reads the first, as
+ * `facts-fence.ts` projects it.
+ */
+export function supersededRef(text: string, kind: FenceKind): number | null {
+  if (kind === 'takes') return supersessionCitation(text);
   const m = /superseded by #(\d+)/i.exec(text);
   if (!m) return null;
   const n = parseInt(m[1]!, 10);
   return n > 0 ? n : null;
+}
+
+/** `text` with the reference `supersededRef` reads pointed at row `target`. */
+export function rewriteSupersededRef(text: string, target: number, kind: FenceKind): string {
+  if (kind === 'takes') return rewriteSupersessionCitation(text, target);
+  return text.replace(/(superseded by #)\d+/i, `$1${target}`);
 }
 
 /** Whitespace-collapsed text for comparisons. */

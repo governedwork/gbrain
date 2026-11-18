@@ -42,6 +42,7 @@ const LIST_DOCS = 'docs/TESTING.md#postgres-arm-lanes';
 /** Arms deliberately left out of every Postgres lane. Each row names its reason and TODO. */
 const ALLOWLIST: Record<string, string> = {
   'test/export-scale.slow.test.ts': 'the 100,001-page Postgres arm passes but takes ~9 minutes; no lane has that budget yet (TODOS: give the export-scale Postgres arm a scheduled lane)',
+  'test/takes-supersession-citation.test.ts': 'fork-suite has no Postgres lane; runs by hand on pg16 (brain-move arc deferred ledger, Postgres e2e job)',
 };
 
 function files(dir: string, keep: (name: string) => boolean): string[] {
