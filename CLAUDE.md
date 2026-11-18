@@ -514,3 +514,20 @@ ordinary memory writes never imply skill editing or script execution. Native rou
 installation is not proof of native use. Read
 [shared brain skills](docs/guides/shared-brain-skills.md) and its
 [key-file contracts](docs/architecture/key-files/shared-skills.md) before changing this lifecycle.
+
+## This fork: how a pull request lands
+
+This is GovernedWork's fork. Its pull requests target the branch for the upstream version it carries
+(`brains-v<upstream>`; the current base is `brains-v0.60.737.0`), never `master`, and they land through the
+lander (governedwork/lander), never by hand: open the PR (a draft while you work on it), then run
+`lander enqueue <pr-url>` once — the `lander` on PATH — and stop. The lander validates the PR's exact head
+against the current base on the wardrobe, posts the required `lander/verdict` and merges; it tells your
+session on the presence board when the PR bounces, is held or merges. Never `gh pr merge`, never `--auto`,
+never a watch loop.
+
+The lander's check has two steps. Per PR: `bun run typecheck`, then the test files the change names — a
+changed `test/*.test.ts`, and `test/<name>.test.ts` of each changed `src/**/<name>.ts`. Once per base: the
+whole unit suite (`bun run test`); a red it finds holds the queue until the base is fixed. Both run with
+`GBRAIN_TEST_SKIP_LAUNCHD=1`. The whole suite on Linux, PostgreSQL arms included, is the `fork-suite`
+workflow, required beside `lander/verdict`. Run the tests your change can break beyond the ones it names,
+`bun run verify`, and anything else it needs yourself, and say in the PR what you ran.
