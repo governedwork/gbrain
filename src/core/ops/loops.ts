@@ -24,6 +24,7 @@ import type { Action, Notice } from '../agent-output.ts';
 import { hostFix, invalidParam, opTransport, paramUse, readFix } from './op-fix.ts';
 import { resolveRequestedScope, sourceScopeOpts } from './context.ts';
 import { validateSourceId } from '../utils.ts';
+import { privatePagesFilterForCaller } from '../search/private-visibility.ts';
 import { isGmailHoldKey } from '../google/types.ts';
 import { closedLoopWithActiveFact, retireLoopFact } from '../persistence/loop-fact-retirement.ts';
 import {
@@ -480,6 +481,7 @@ const open_loops: Operation = {
       );
     }
     const loops = await listOpenLoops(ctx.engine, {
+      ...counterpartyGate(ctx, trusted), // fork: a counterparty page is named only when this caller may read it
       ...(scope.sourceIds ? { sourceIds: scope.sourceIds } : {}),
       ...(scope.sourceId ? { sourceIds: [scope.sourceId] } : {}),
       status,
@@ -634,6 +636,19 @@ function requestedLoopId(ctx: OperationContext, raw: unknown): number | undefine
   if (typeof raw === 'number' && Number.isSafeInteger(raw) && raw >= 1) return raw;
   throw invalidParam(ctx, 'open_loops', 'id', 'open_loops: id must be a whole number of 1 or more.',
     { def: open_loops.params.id, example: 42 });
+}
+
+/**
+ * Fork: a remote caller is named a counterparty page (its slug, its source, a slug filter's match) only when it may
+ * read that page: the page sits in its grant and passes its page read access (readers, folder rules, privacy;
+ * privatePagesFilterForCaller). Sync resolves a correspondent to a person page in ANY source (google/counterparty.ts);
+ * otherwise the loop comes back by its email alone, never dropped. The grant, not the narrowed scope, decides: a page
+ * in another granted source is the caller's to read. Trusted local reads keep every name.
+ */
+function counterpartyGate(ctx: OperationContext, trusted: boolean): { counterpartyGate?: { sourceIds: string[]; pageSql: string } } {
+  if (trusted) return {};
+  const grant = sourceScopeOpts(ctx);
+  return { counterpartyGate: { sourceIds: grant.sourceIds ?? (grant.sourceId ? [grant.sourceId] : []), pageSql: privatePagesFilterForCaller('cp') } };
 }
 
 function grantedSources(ctx: OperationContext): string[] {

@@ -252,6 +252,14 @@ export interface ListLoopsOpts {
    */
   loopId?: number;
   limit?: number;
+  /**
+   * Fork: the caller may be named a counterparty page only when that page is in these sources AND passes
+   * `counterpartyPageSql` (the caller's page read access over alias `cp`, e.g. privatePagesFilterForCaller('cp')).
+   * Set, each row carries `counterparty_readable` and a `counterparty` SLUG matches only such a page; the email
+   * arm is unaffected (a loop's correspondent address is part of the loop, inside the caller's scope). Omitted =
+   * any page in any source (trusted local reads).
+   */
+  counterpartyGate?: { sourceIds: string[]; pageSql: string };
 }
 
 export async function listOpenLoops(
@@ -259,13 +267,17 @@ export async function listOpenLoops(
   opts: ListLoopsOpts = {},
 ): Promise<OpenLoopRow[]> {
   const limit = Math.min(Math.max(opts.limit ?? 200, 1), 1000);
+  const gate = opts.counterpartyGate;
+  // Fork: a counterparty page the caller may read (open_loops' counterparty fence); TRUE when ungated.
+  const readable = gate ? `EXISTS (SELECT 1 FROM pages cp WHERE cp.source_id = COALESCE(ol.counterparty_source_id, ol.source_id)
+       AND cp.slug = ol.counterparty_slug AND cp.deleted_at IS NULL AND cp.source_id = ANY(string_to_array($7, ',')) AND ${gate.pageSql})` : 'TRUE';
   const rows = await engine.executeRaw<Record<string, unknown>>(
-    `SELECT * FROM open_loops
+    `SELECT ol.*${gate ? `, ${readable} AS counterparty_readable` : ''} FROM open_loops ol
      WHERE ($1::text IS NULL OR source_id = ANY(string_to_array($1, ',')))
        AND ($2::text IS NULL OR status = $2)
        AND ($3::text IS NULL OR loop_type = $3)
        AND ($4::text IS NULL
-            OR (counterparty_slug = $4 AND ($6::text IS NULL OR COALESCE(counterparty_source_id, source_id) = $6))
+            OR (counterparty_slug = $4 AND ($6::text IS NULL OR COALESCE(counterparty_source_id, source_id) = $6) AND ${readable})
             OR counterparty_email = $4)
        AND ($5::bigint IS NULL OR id = $5::bigint)
      ORDER BY last_activity_at DESC, id DESC
@@ -277,9 +289,11 @@ export async function listOpenLoops(
       opts.counterparty ?? null,
       opts.loopId === undefined ? null : opts.loopId,
       opts.counterpartySourceId ?? null,
+      ...(gate ? [gate.sourceIds.join(',')] : []),
     ],
   );
-  return rows.map(normalizeRow);
+  return rows.map(({ counterparty_readable: readableRow, ...r }) => gate && readableRow !== true
+    ? { ...normalizeRow(r), counterparty_slug: null, counterparty_source_id: null } : normalizeRow(r));
 }
 
 /**
