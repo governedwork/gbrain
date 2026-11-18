@@ -1072,16 +1072,16 @@ export async function revertToVersion(
  * knowledge revision, so it first versions the page as it stood: page-at-time
  * (belief ledger W2) reads the body before the rename from that preimage.
  *
- * A move authors nothing, but the trust triggers count the page's `slug` and
- * the facts' `entity_slug` as content columns. The keep scope holds the page
- * and every fact it re-keys at their stored tier whatever tier the mover
- * declares (an owner-tier sync must not raise them, an undeclared mover must
- * not lower them), for every caller of the move.
+ * A move authors nothing, but the trust triggers count the page's `slug` as
+ * a content column. The keep scope holds the page at its stored tier whatever
+ * tier the mover declares (an owner-tier sync must not raise it, an
+ * undeclared mover must not lower it), for every caller of the move;
+ * moveSlugBindings keeps the facts it re-keys the same way.
  */
 export async function updateSlug(exec: SqlExecutor, tx: BrainEngine, oldSlug: string, newSlug: string, sourceId: string): Promise<number> {
       const preimage = await tx.readPageSnapshot(oldSlug, { sourceId, includeDeleted: true });
       if (preimage) await createPageVersion(tx, oldSlug, sourceId, preimage);
-      const moved = await withTrustKeep(tx, ['pages', 'facts'], async () => {
+      const moved = await withTrustKeep(tx, ['pages'], async () => {
         // origin-guard-ok: the moved row keeps its own origin and liveness, so it adds no claimant (#6948); callers that record a new path bind it with bindOrigin
         const rows = await exec.executeRaw(
           `UPDATE pages SET slug = $1, updated_at = now() WHERE slug = $2 AND source_id = $3 RETURNING id`,

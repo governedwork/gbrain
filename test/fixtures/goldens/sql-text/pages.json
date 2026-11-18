@@ -1664,6 +1664,20 @@
           },
           {
             "lane": "tx",
+            "params": [],
+            "sql": "SELECT current_setting('gbrain.write_trust_keep',true) AS s0",
+            "textSha256": "5469783f090ae973954c889998dbae06fed8c90e5477c5e729bf3d6671e9db71"
+          },
+          {
+            "lane": "tx",
+            "params": [
+              "string"
+            ],
+            "sql": "SELECT set_config('gbrain.write_trust_keep',$1,true)",
+            "textSha256": "a2b90331211ee05dc71e4ac3e03115c95d0fe0e44b3a66af7f17d5fb1c5c0cf9"
+          },
+          {
+            "lane": "tx",
             "params": [
               "string",
               "string",
@@ -1804,6 +1818,14 @@
           {
             "event": "savepoint-release",
             "lane": "tx>sp"
+          },
+          {
+            "lane": "tx",
+            "params": [
+              "string"
+            ],
+            "sql": "SELECT set_config('gbrain.write_trust_keep',$1,true)",
+            "textSha256": "a2b90331211ee05dc71e4ac3e03115c95d0fe0e44b3a66af7f17d5fb1c5c0cf9"
           },
           {
             "lane": "tx",

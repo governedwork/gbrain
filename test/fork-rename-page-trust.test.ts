@@ -16,8 +16,13 @@ import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { operations } from '../src/core/operations.ts';
 import type { OperationContext } from '../src/core/ops/contract.ts';
 import { activatePersistence } from '../src/core/persistence/activation.ts';
-import type { WriteAttribution } from '../src/core/persistence/attribution.ts';
+import { maintenanceTransaction, type WriteAttribution } from '../src/core/persistence/attribution.ts';
 import { withCoordinatedWrite } from '../src/core/persistence/context.ts';
+import { moveSlugBindings } from '../src/core/page-state/rename-alias.ts';
+import { renamePageOntoSlug } from '../src/commands/sync/rename-collision.ts';
+import { mergeTwinInto } from '../src/core/persistence/twin-merge.ts';
+import { movePhantomFacts } from '../src/core/cycle/phantom-redirect.ts';
+import type { WriteTrust } from '../src/core/trust/tier.ts';
 import { submitPageMutation } from '../src/core/persistence/page-mutations.ts';
 import { disposePersistenceConsumer } from '../src/core/persistence/service.ts';
 import { withEnv } from './helpers/with-env.ts';
@@ -116,4 +121,81 @@ describe('slug moves outside rename_page and trust tiers', () => {
     expect(await pageTier('notes/trust-f')).toBe('agent_written');
     expect(await factTiers('notes/trust-f')).toEqual(['agent_written']);
   }, 120_000);
+});
+
+// The other slug moves (an unmanaged brain, so the maintenance writers run as
+// they do there): the slug bindings a sync rename carries (moveSlugBindings,
+// called by updateSlug, carryRenameIdentity and the tombstone merge), the
+// tombstone a rename onto an occupied slug re-keys, a twin merged into its
+// survivor, and a phantom's facts redirected to its canonical page. Each moves
+// rows to a new slug and authors nothing, so an owner-tier row keeps its tier
+// whether the mover declares no tier or a lower one.
+describe('L107: slug bindings, tombstone re-key, twin merge and phantom redirect keep trust', () => {
+  const SRC = 'slug-move-unmanaged-example';
+  const OWNER: WriteTrust = { tier: 'operator_curated', origin: null };
+  const MOVERS: ReadonlyArray<[string, WriteTrust | undefined]> = [['no declared tier', undefined], ['a lower declared tier', { tier: 'agent_written', origin: null }]];
+  let plain: PGLiteEngine;
+  beforeAll(async () => {
+    plain = new PGLiteEngine();
+    await plain.connect({});
+    await plain.initSchema();
+    await plain.executeRaw('INSERT INTO sources(id,name) VALUES($1,$1)', [SRC]);
+  }, 120_000);
+  afterAll(async () => { await plain.disconnect(); });
+
+  const asOwner = <T>(fn: (tx: PGLiteEngine) => Promise<T>) => maintenanceTransaction(plain, tx => fn(tx as PGLiteEngine), OWNER);
+  const seedPage = (slug: string) => asOwner(async tx => {
+    await tx.putPage(slug, { type: 'note', title: slug, compiled_truth: 'Body.' }, { sourceId: SRC });
+    return Number((await tx.executeRaw<{ id: number }>('SELECT id FROM pages WHERE source_id=$1 AND slug=$2', [SRC, slug]))[0].id);
+  });
+  const seedFact = (fact: string, entity: string, markdown: string | null, rowNum: number | null = null) => asOwner(async tx => Number((await tx.executeRaw<{ id: number }>(
+    'INSERT INTO facts (source_id, fact, source, entity_slug, source_markdown_slug, row_num) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id',
+    [SRC, fact, 'slug move trust fixture', entity, markdown, rowNum]))[0].id));
+  const factRow = async (id: number) => (await plain.executeRaw<{ trust_tier: string; entity_slug: string; source_markdown_slug: string | null }>(
+    'SELECT trust_tier, entity_slug, source_markdown_slug FROM facts WHERE id=$1', [id]))[0];
+  const pageRow = async (id: number) => (await plain.executeRaw<{ trust_tier: string; slug: string; deleted_at: Date | null }>(
+    'SELECT trust_tier, slug, deleted_at FROM pages WHERE id=$1', [id]))[0];
+
+  for (const [label, mover] of MOVERS) {
+    test(`L107: moveSlugBindings by a mover with ${label} keeps an operator_curated fact's tier`, async () => {
+      const slug = `notes/bind-${randomUUID().slice(0, 8)}`;
+      const id = await seedFact('Widget-co moves its bindings.', slug, slug, 1);
+      expect((await factRow(id)).trust_tier).toBe('operator_curated');
+      await maintenanceTransaction(plain, tx => moveSlugBindings(tx, SRC, slug, `${slug}-moved`), mover);
+      expect(await factRow(id)).toEqual({ trust_tier: 'operator_curated', entity_slug: `${slug}-moved`, source_markdown_slug: `${slug}-moved` });
+    }, 60_000);
+
+    test(`L107: a twin merge by a mover with ${label} keeps the operator_curated tier of the facts it moves`, async () => {
+      const key = randomUUID().slice(0, 8);
+      const survivor = { page_id: await seedPage(`notes/survivor-${key}`), slug: `notes/survivor-${key}` };
+      const twin = { page_id: await seedPage(`notes/twin-${key}`), slug: `notes/twin-${key}` };
+      const id = await seedFact('Widget-co merges its twin.', twin.slug, null);
+      const [source] = await plain.executeRaw<{ incarnation: string }>('SELECT incarnation::text AS incarnation FROM sources WHERE id=$1', [SRC]);
+      const merged = await maintenanceTransaction(plain, tx => mergeTwinInto(tx, { sourceId: SRC, incarnation: source.incarnation, survivor, twin }), mover);
+      expect(merged.facts_moved).toEqual([id]);
+      expect(await factRow(id)).toEqual({ trust_tier: 'operator_curated', entity_slug: survivor.slug, source_markdown_slug: null });
+    }, 60_000);
+
+    test(`L107: a phantom redirect by a mover with ${label} keeps the operator_curated tier of the facts it moves`, async () => {
+      const key = randomUUID().slice(0, 8);
+      const phantom = `notes/phantom-${key}`, canonical = `notes/canonical-${key}`;
+      const id = await seedFact('Widget-co redirects its phantom.', phantom, phantom, 1);
+      expect(await maintenanceTransaction(plain, tx => movePhantomFacts(tx, SRC, phantom, canonical, new Map([[1, 1]])), mover)).toBe(1);
+      expect(await factRow(id)).toEqual({ trust_tier: 'operator_curated', entity_slug: canonical, source_markdown_slug: canonical });
+    }, 60_000);
+  }
+
+  test('L107: a sync rename onto a tombstone keeps the tier of the tombstone it re-keys, the page it moves and the page\'s facts', async () => {
+    const key = randomUUID().slice(0, 8);
+    const from = `notes/rename-from-${key}`, to = `notes/rename-to-${key}`;
+    const moving = await seedPage(from);
+    const tombstone = await seedPage(to);
+    await asOwner(tx => tx.softDeletePage(to, { sourceId: SRC }));
+    const fact = await seedFact('Widget-co renames onto a tombstone.', from, null);
+    expect((await pageRow(tombstone)).trust_tier).toBe('operator_curated');
+    expect(await renamePageOntoSlug(plain, { sourceId: SRC, oldSlug: from, newSlug: to, to: `${to}.md` })).toBe('renamed');
+    expect(await pageRow(tombstone)).toMatchObject({ trust_tier: 'operator_curated', slug: `${to}~purged-${tombstone}` });
+    expect(await pageRow(moving)).toMatchObject({ trust_tier: 'operator_curated', slug: to, deleted_at: null });
+    expect(await factRow(fact)).toMatchObject({ trust_tier: 'operator_curated', entity_slug: to });
+  }, 60_000);
 });

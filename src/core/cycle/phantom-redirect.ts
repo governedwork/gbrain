@@ -64,6 +64,7 @@ import { isWriteThroughDisabled, resolvePageWriteTarget } from '../write-through
 import { fileBodyMatchesStored, fileDatabaseDriftToken, mirrorFileBody, readStoredBody, replaceStoredBody, replaceableFile } from '../facts/file-body-guard.ts';
 import { recordRenameAlias } from '../page-state/rename-alias.ts';
 import { maintenanceTransaction } from '../persistence/attribution.ts';
+import { withTrustKeep } from '../persistence/context.ts';
 import { managedPersistenceEnabled } from '../persistence/ownership.ts';
 import { ItemRun } from '../item-failure.ts';
 import { rotationAfter, saveRotation } from '../repair/rotation.ts';
@@ -405,7 +406,11 @@ async function migratePhantomFacts(
   return maintenanceTransaction(engine, tx => movePhantomFacts(tx, sourceId, phantomSlug, canonicalSlug, rowMap));
 }
 
-/** The body of migratePhantomFacts inside the caller's transaction. */
+/**
+ * The body of migratePhantomFacts inside the caller's transaction. Moving a
+ * fact to the canonical slug authors nothing, so each moved fact keeps its
+ * trust tier (the keep scope; `entity_slug` is a trust content column).
+ */
 export async function movePhantomFacts(
   tx: BrainEngine,
   sourceId: string,
@@ -422,20 +427,22 @@ export async function movePhantomFacts(
     [sourceId, canonicalSlug],
   )).map(r => Number(r.row_num)));
   let moved = 0;
-  for (const row of rows) {
-    const mapped = row.row_num == null ? undefined : rowMap.get(Number(row.row_num));
-    const target = mapped !== undefined && !taken.has(mapped) ? mapped : undefined;
-    if (target !== undefined) {
-      taken.add(target);
-      moved += 1;
+  await withTrustKeep(tx, ['facts'], async () => {
+    for (const row of rows) {
+      const mapped = row.row_num == null ? undefined : rowMap.get(Number(row.row_num));
+      const target = mapped !== undefined && !taken.has(mapped) ? mapped : undefined;
+      if (target !== undefined) {
+        taken.add(target);
+        moved += 1;
+      }
+      await tx.executeRaw(
+        `UPDATE facts SET entity_slug = $3, source_markdown_slug = $3, row_num = $4::integer,
+            expired_at = CASE WHEN $4::integer IS NULL THEN COALESCE(expired_at, now()) ELSE expired_at END
+          WHERE id = $1 AND source_id = $2`,
+        [row.id, sourceId, canonicalSlug, target ?? null],
+      );
     }
-    await tx.executeRaw(
-      `UPDATE facts SET entity_slug = $3, source_markdown_slug = $3, row_num = $4::integer,
-          expired_at = CASE WHEN $4::integer IS NULL THEN COALESCE(expired_at, now()) ELSE expired_at END
-        WHERE id = $1 AND source_id = $2`,
-      [row.id, sourceId, canonicalSlug, target ?? null],
-    );
-  }
+  });
   return moved;
 }
 
