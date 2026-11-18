@@ -244,9 +244,7 @@ src/core/facts/reconcile-watermark.ts	selectFactsReconcileDrain	sql	STREAM
 src/core/facts/relink-publish.ts	prepareRelinkMutation	call:serializePageToMarkdown	SEGW	
 src/core/facts/relink-publish.ts	prepareRelinkMutation	field	SEGW	
 src/core/facts/subject-infer-write.ts	linkAllowed	field	STREAM	
-src/core/facts/unfenced-facts.ts	auditUnadoptableFacts	call:serializePageToMarkdown	SEGW	
-src/core/facts/unfenced-facts.ts	fenceDatabaseOnlyPage	call:serializePageToMarkdown	SEGW	
-src/core/facts/unfenced-facts.ts	planManagedPage	call:serializePageToMarkdown	SEGW	
+src/core/facts/unfenced-facts.ts	storedPageMarkdown	call:serializePageToMarkdown	SEGW	the three fence planners' one reader: wholeBodySnapshot reads a segmented page back whole up to PAGE_MAX_BYTES and refuses page_body_segmented above it
 src/core/facts/withdrawal-discovery.ts	discoverWithdrawalTargets	field	STREAM	inline rows only
 src/core/facts/withdrawal-discovery.ts	discoverWithdrawalTargets	sql	STREAM	page scan reads inline bodies (NULL never matches); segmented pages are found by the chunk scan and their mirror writers refuse or skip (per-segment discovery, PR 2)
 src/core/fence-repair/census.ts	judgePages	field	STREAM	

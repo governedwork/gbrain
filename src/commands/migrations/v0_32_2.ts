@@ -194,6 +194,7 @@ function fenceFactsResult(outcome: UnfencedFactsOutcome): OrchestratorPhaseResul
     `skipped_no_local_path=${outcome.skipped_no_local_path} skipped_no_page=${outcome.skipped_no_page}` +
     (outcome.skipped_archived > 0 ? ` skipped_archived=${outcome.skipped_archived}` : '') +
     (outcome.unbound_refused.length > 0 ? ` skipped_unbound_source=${outcome.unbound_refused.reduce((n, page) => n + page.rows, 0)}` : '') +
+    (outcome.segmented_files.length > 0 ? ` skipped_segmented_file=${outcome.segmented_files.reduce((n, page) => n + page.rows, 0)}` : '') +
     (outcome.failed_pages.length > 0 ? ` failed=${outcome.failed_pages.length}` : '');
   if (outcome.failed_pages.length > 0) {
     // The same `FACTS_FENCE_FAILED: <slug> (<reason>)` token the extract_facts
