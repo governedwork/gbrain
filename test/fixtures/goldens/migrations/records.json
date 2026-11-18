@@ -2497,8 +2497,8 @@
         "idempotent": true,
         "name": "shared_brain_skills_and_membership",
         "sql": {
-          "length": 16782,
-          "sha256": "090ecc3e540eef46283dae087eff9e3aec0f54b0379820c43238b01cd3cc15c7"
+          "length": 16905,
+          "sha256": "504c75b7c3dc97e4f20d5caeaa3712af4f9422a6924d1e719e051b577667fc0e"
         },
         "sqlFor": "absent",
         "transaction": "absent",
@@ -4528,8 +4528,8 @@
         "idempotent": true,
         "name": "writer_fence_fail_closed",
         "sql": {
-          "length": 14684,
-          "sha256": "5178c247505dcb9aef90613cf507ae0d4e9e1a882d94550479fcaff600664274"
+          "length": 14807,
+          "sha256": "f8ab7c75825e0fedebccead6dcc8000dd7737aac5b6384af55d981d213531f43"
         },
         "sqlFor": "absent",
         "transaction": "absent",
@@ -4669,8 +4669,8 @@
         "idempotent": true,
         "name": "multi_page_recovery_record",
         "sql": {
-          "length": 2892,
-          "sha256": "1488202103a7bb671140619ddcfca160160f5c52f8981095af4d20fa097708da"
+          "length": 3015,
+          "sha256": "0a3476fd33d059cd033f43c095225de24c7c5b9a25953ac7c6831b475c3bc93e"
         },
         "sqlFor": "absent",
         "transaction": "absent",

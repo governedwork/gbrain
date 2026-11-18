@@ -1071,7 +1071,7 @@
             },
             "session_id": {
               "type": "string",
-              "description": "Optional caller session id, logged for attribution."
+              "description": "Optional caller session id, logged for attribution. Pages already volunteered to this session in the last 12 hours are not volunteered again."
             },
             "turn": {
               "type": "number",
@@ -1091,6 +1091,15 @@
               "items": {
                 "type": "string"
               }
+            },
+            "format": {
+              "type": "string",
+              "description": "Output shape (default json). 'text' returns the compact injectable block; 'hook' returns {hookSpecificOutput: {hookEventName, additionalContext}} for a Claude Code or Codex UserPromptSubmit hook.",
+              "enum": [
+                "json",
+                "text",
+                "hook"
+              ]
             }
           },
           "required": []

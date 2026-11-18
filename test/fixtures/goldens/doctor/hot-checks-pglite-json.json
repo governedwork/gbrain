@@ -529,7 +529,7 @@
                 "explicit_retention_days": null,
                 "over_target": false,
                 "target_bytes": 8589934592,
-                "used_bytes": 199663
+                "used_bytes": 200693
               },
               "inspected": 2,
               "outstanding": [],
@@ -539,7 +539,7 @@
               "verify": "gbrain doctor --only persistence_capacity --json"
             },
             "elapsed_ms": "<volatile>",
-            "message": "No cumulative write cap is set (the default), so receipt storage never refuses or pauses a write; it holds 199663 reserved bytes, and receipts not yet compacted are under the housekeeping target of 8589934592.",
+            "message": "No cumulative write cap is set (the default), so receipt storage never refuses or pauses a write; it holds 200693 reserved bytes, and receipts not yet compacted are under the housekeeping target of 8589934592.",
             "name": "persistence_capacity",
             "status": "ok"
           },
@@ -918,7 +918,7 @@
             "category": "brain",
             "details": {
               "archived": 0,
-              "as_of": "<ts>+00",
+              "as_of": "<ts>+01",
               "failed": 0,
               "ocr_required": 0,
               "oldest_age_seconds": "<volatile>",
@@ -1431,14 +1431,14 @@
           {
             "category": "meta",
             "elapsed_ms": "<volatile>",
-            "message": "1393 column(s) verified against live schema",
+            "message": "1406 column(s) verified against live schema",
             "name": "schema_columns",
             "status": "ok"
           },
           {
             "category": "meta",
             "elapsed_ms": "<volatile>",
-            "message": "All 186 table(s) the applied migrations create exist.",
+            "message": "All 188 table(s) the applied migrations create exist.",
             "name": "schema_missing_tables",
             "status": "ok"
           },
@@ -3234,7 +3234,7 @@
           {
             "category": "ops",
             "elapsed_ms": "<volatile>",
-            "message": "No configured collectors declare output paths",
+            "message": "No collector output dir falls inside a db_only path",
             "name": "db_only_collector_collision",
             "status": "ok"
           },
@@ -6001,7 +6001,7 @@
                 "explicit_retention_days": null,
                 "over_target": false,
                 "target_bytes": 8589934592,
-                "used_bytes": 199663
+                "used_bytes": 200693
               },
               "inspected": 2,
               "outstanding": [],
@@ -6011,7 +6011,7 @@
               "verify": "gbrain doctor --only persistence_capacity --json"
             },
             "elapsed_ms": "<volatile>",
-            "message": "No cumulative write cap is set (the default), so receipt storage never refuses or pauses a write; it holds 199663 reserved bytes, and receipts not yet compacted are under the housekeeping target of 8589934592.",
+            "message": "No cumulative write cap is set (the default), so receipt storage never refuses or pauses a write; it holds 200693 reserved bytes, and receipts not yet compacted are under the housekeeping target of 8589934592.",
             "name": "persistence_capacity",
             "status": "ok"
           },
@@ -6390,7 +6390,7 @@
             "category": "brain",
             "details": {
               "archived": 0,
-              "as_of": "<ts>+00",
+              "as_of": "<ts>+01",
               "failed": 0,
               "ocr_required": 0,
               "oldest_age_seconds": "<volatile>",
@@ -6903,14 +6903,14 @@
           {
             "category": "meta",
             "elapsed_ms": "<volatile>",
-            "message": "1393 column(s) verified against live schema",
+            "message": "1406 column(s) verified against live schema",
             "name": "schema_columns",
             "status": "ok"
           },
           {
             "category": "meta",
             "elapsed_ms": "<volatile>",
-            "message": "All 186 table(s) the applied migrations create exist.",
+            "message": "All 188 table(s) the applied migrations create exist.",
             "name": "schema_missing_tables",
             "status": "ok"
           },
@@ -8706,7 +8706,7 @@
           {
             "category": "ops",
             "elapsed_ms": "<volatile>",
-            "message": "No configured collectors declare output paths",
+            "message": "No collector output dir falls inside a db_only path",
             "name": "db_only_collector_collision",
             "status": "ok"
           },

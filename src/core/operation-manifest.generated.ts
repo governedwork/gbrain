@@ -887,6 +887,50 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
     "area": "pages"
   },
   {
+    "name": "rename_page",
+    "idempotent": true,
+    "outputRedaction": "no_stored_text",
+    "description": "Rename one live page to a new slug in the same source, in place: the page row keeps its id, so its content, chunks and embeddings, tags, timeline, versions, takes and inbound/outbound graph links stay attached. The same transaction records the old slug as a slug alias (get_page on the old slug redirects and reports resolved_slug; [[old]] links keep resolving) and moves facts keyed to the old slug, fact withdrawals and frontmatter aliases (page_aliases) to the new slug. Textual [[wikilinks]] in other pages' bodies are NOT rewritten; they resolve through the alias. Rows that only store the slug as text (open loops, file records, take proposals) are not moved. Renames one page, not its children: rename each projects/x/* child with its own call. Database-canonical sources only: a source with a working tree (local_path, or sync.repo_path for default) is refused with source_writeback_required, because its file paths are its slugs; rename there with git mv, commit and sync. Read the page revision first and pass expected_revision; retain request_id for replay. Refuses with page_not_found when the page is missing or soft-deleted, slug_conflict when new_slug is held in that source by a live page, a soft-deleted page, or an alias to another page, and revision_conflict when the page changed. The committed receipt reports status renamed, slug (the new slug), renamed_from and the new revision.",
+    "params": {
+      "source_id": {
+        "type": "string",
+        "description": "Source holding the page (a multi-source brain can hold the same slug in several sources); the rename stays inside it. Defaults to ctx.sourceId. Remote callers may only target their write source — federated read grants do not confer rename access."
+      },
+      "expected_revision": {
+        "type": "string",
+        "description": "Revision read; omit to create."
+      },
+      "force": {
+        "type": "boolean",
+        "description": "Ignore the revision."
+      },
+      "request_id": {
+        "type": "string",
+        "description": "Reuse only to retry."
+      },
+      "slug": {
+        "type": "string",
+        "required": true,
+        "description": "Current slug of the page to rename, e.g. 'projects/old-name'."
+      },
+      "new_slug": {
+        "type": "string",
+        "required": true,
+        "description": "Slug the page moves to, e.g. 'projects/new-name'. Must be free in the source (no live page, soft-deleted page or alias to another page)."
+      }
+    },
+    "mutating": true,
+    "scope": "write",
+    "cliHints": {
+      "name": "rename",
+      "positional": [
+        "slug",
+        "new_slug"
+      ]
+    },
+    "area": "pages"
+  },
+  {
     "name": "find_pages",
     "mutating": false,
     "idempotent": true,
@@ -2840,6 +2884,10 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
         "type": "string",
         "required": true,
         "description": "What to confirm: f<id> (fact), t<id> (take) or p:<source>/<slug> (page)."
+      },
+      "binding": {
+        "type": "string",
+        "description": "Optional: the binding a dry run of this call answered for the preview the user approved. The confirm then applies only to that exact state, and is refused with preview_changed when the row moved since."
       }
     },
     "scope": "write",
@@ -3032,7 +3080,7 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
   },
   {
     "name": "get_skill_asset",
-    "description": "Read an approved file from an exact skill revision (data, never executed).",
+    "description": "Read an approved skill file (data, never run); text files also in `text`.",
     "mutating": false,
     "idempotent": true,
     "outputRedaction": {
@@ -4760,6 +4808,10 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
     "description": "List takes (typed/weighted/attributed claims) filtered by holder/kind/active/etc.",
     "scope": "read",
     "params": {
+      "id": {
+        "type": "number",
+        "description": "This one take (its id as takes_list answers it); the other filters still apply"
+      },
       "page_slug": {
         "type": "string",
         "description": "Filter to this page"
@@ -4893,6 +4945,32 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
       "reference_date": {
         "type": "string",
         "description": "YYYY-MM-DD the question's relative time words resolve against (default: today in brain.timezone)."
+      },
+      "whole_pages": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Up to 5 page slugs (usually the anchor) to read in full and put first, within token_budget (default 24000; remote max 32000). The response's evidence_pages says for every page in the prompt whether it reached the model whole, as an excerpt, or not at all — about the inspected evidence, not the whole brain."
+      },
+      "return_unit": {
+        "type": "string",
+        "enum": [
+          "chunk",
+          "window",
+          "section",
+          "page",
+          "auto"
+        ],
+        "description": "Evidence unit for the gathered pages, as query takes it (default: the think.return_unit config, else 'auto')."
+      },
+      "return_window": {
+        "type": "number",
+        "description": "Neighbor chunks each side for window (1-3)."
+      },
+      "token_budget": {
+        "type": "number",
+        "description": "Token budget for the delivered evidence (remote max 32000); also bounds whole_pages."
       }
     },
     "mutating": true,
@@ -6038,7 +6116,7 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
       },
       "session_id": {
         "type": "string",
-        "description": "Optional caller session id, logged for attribution."
+        "description": "Optional caller session id, logged for attribution. Pages already volunteered to this session in the last 12 hours are not volunteered again."
       },
       "turn": {
         "type": "number",
@@ -6058,6 +6136,16 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
           "type": "string"
         },
         "description": "Narrow to these sources (omit or [] for all you can read)."
+      },
+      "format": {
+        "type": "string",
+        "enum": [
+          "json",
+          "text",
+          "hook"
+        ],
+        "description": "Output shape (default json). 'text' returns the compact injectable block; 'hook' returns {hookSpecificOutput: {hookEventName, additionalContext}} for a Claude Code or Codex UserPromptSubmit hook.",
+        "fullSurfaceOnly": true
       }
     },
     "cliHints": {
@@ -6401,6 +6489,16 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
       "limit": {
         "type": "number",
         "description": "Per-arm max (default 50, cap 100).",
+        "fullSurfaceOnly": true
+      },
+      "offset": {
+        "type": "number",
+        "description": "Skip first N facts of the collapsed newest-first list; page with limit.",
+        "fullSurfaceOnly": true
+      },
+      "fact_id": {
+        "type": "string",
+        "description": "Read this one fact (facts[].fact_id); not with question, entity, since, session_id, supersessions, query or offset.",
         "fullSurfaceOnly": true
       },
       "grep": {
@@ -7584,6 +7682,70 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
     "area": "schema"
   },
   {
+    "name": "put_schema_pack",
+    "idempotent": false,
+    "outputRedaction": "no_stored_text",
+    "description": "Publish a new revision of a brain-resident schema pack (stored in the database, not on disk). Compare-and-swap on expected_revision (null to create). The manifest must parse and resolve its extends/borrow_from chain. Rollback: publish an older revision's manifest from get_schema_pack.",
+    "params": {
+      "name": {
+        "type": "string",
+        "required": true,
+        "description": "Pack name (not a bundled pack)."
+      },
+      "manifest": {
+        "type": "object",
+        "required": true,
+        "description": "Complete gbrain-schema-pack-v1 manifest."
+      },
+      "expected_revision": {
+        "type": "string",
+        "description": "Current head revision; JSON null to create."
+      },
+      "note": {
+        "type": "string",
+        "description": "Why this revision exists."
+      },
+      "source_id": {
+        "type": "string",
+        "description": "Owning source (default: the connection's write source)."
+      }
+    },
+    "scope": "admin",
+    "requiredScopes": [
+      "skill_publisher"
+    ],
+    "mutating": true,
+    "cliHints": {
+      "name": "put-schema-pack",
+      "positional": []
+    },
+    "area": "schema"
+  },
+  {
+    "name": "get_schema_pack",
+    "mutating": false,
+    "idempotent": true,
+    "outputRedaction": "no_stored_text",
+    "description": "Read a brain-resident schema pack: head revision, the manifest at head or at a given revision, and its full revision history.",
+    "params": {
+      "name": {
+        "type": "string",
+        "required": true,
+        "description": "Pack name."
+      },
+      "revision": {
+        "type": "string",
+        "description": "A revision from history (default: head)."
+      }
+    },
+    "scope": "read",
+    "cliHints": {
+      "name": "get-schema-pack",
+      "positional": []
+    },
+    "area": "schema"
+  },
+  {
     "name": "run_onboard",
     "idempotent": false,
     "outputRedaction": "no_stored_text",
@@ -7702,7 +7864,7 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
     "mutating": false,
     "idempotent": true,
     "outputRedaction": "retrieval",
-    "description": "The open-loop engine's killer output: who is waiting on you, what you promised, and the context needed to respond. Grouped by counterparty (default, ranked; each group shows at most 5 loops, the rest counted in loops_omitted) or flat. Loops that name no counterparty are never ranked as a person: they come back in no_counterparty (null when none). Loops come from the deterministic Gmail thread-state detector and the LLM commitment extractor. Remote callers get redacted evidence (no verbatim quotes); trusted local callers also get quotes, Gmail deep links, entity-card context, and a pre-rendered text digest. Carries google-source freshness (stale flag) and completeness: when it is \"partial\", some mail in the window is held after repeated import failures (or, with no_google_sources: null, the sources could not be read); present the answer as partial and name the held items and their retry command. The grouped view also returns withheld_noise (null when none): open reply-owed loops from senders whose mail the detector now treats as automated, with a per-sender preview_command for closing them.",
+    "description": "The open-loop engine's killer output: who is waiting on you, what you promised, and the context needed to respond. Grouped by counterparty (default, ranked; each group shows at most 5 loops, the rest counted in loops_omitted) or flat. Loops that name no counterparty are never ranked as a person: they come back in no_counterparty (null when none). Loops come from the deterministic Gmail thread-state detector and the LLM commitment extractor. Remote callers get redacted evidence (no verbatim quotes); trusted local callers also get quotes, Gmail deep links, entity-card context, and a pre-rendered text digest. Carries google-source freshness (stale flag) and completeness: when it is \"partial\", some mail in the window is held after repeated import failures (or, with no_google_sources: null, the sources could not be read); present the answer as partial and name the held items and their retry command. The grouped view also returns withheld_noise (null when none): open reply-owed loops from senders whose mail the detector now treats as automated, with a per-sender preview_command for closing them. Every loop carries sender_class (from the counterparty address only: person, unknown, or a machine class no_reply/sign_in/receipt/alert/machine). A reply-owed loop from a machine sender carries label \"machine_mail\": it stays open but is not reply owed, so the grouped view lists it in machine_mail (null when none) instead of groups, and reply_owed_count excludes it. When the label cannot be computed, machine_mail_notice says why and every loop is returned as before with sender_class null.",
     "params": {
       "group_by": {
         "type": "string",
@@ -7761,6 +7923,15 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
       "as_of": {
         "type": "string",
         "description": "Reference time (ISO 8601) for due-date proximity, loop age and rendered ages. Default: now. Pin it to reproduce a ranking."
+      },
+      "machine_mail": {
+        "type": "string",
+        "enum": [
+          "separate",
+          "inline",
+          "only"
+        ],
+        "description": "Machine-mail loops: 'separate' (default; grouped view lists them in machine_mail), 'inline' (left in their counterparty groups, labelled), or 'only' (just them). Senders are classed by address; loops.person_senders and loops.machine_senders in brain config override the built-in rules."
       }
     },
     "scope": "read",
