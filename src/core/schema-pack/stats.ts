@@ -16,6 +16,7 @@
 // the operation envelope.
 
 import type { BrainEngine } from '../engine.ts';
+import { pathPrefixNeedle } from '../path-prefix-needle.ts';
 import { loadActivePackBestEffort } from './best-effort.ts';
 import type { OperationContext } from '../operations.ts';
 import { isMissingSchemaObject } from '../utils.ts';
@@ -195,6 +196,12 @@ async function fetchCountRows(engine: BrainEngine, opts: StatsOpts): Promise<Raw
  * per declared prefix in the active pack. Cheap on small brains;
  * Phase 4 CLI offers a `--no-dead-prefix-scan` flag to opt out on
  * brains where this matters.
+ *
+ * A prefix is live when type inference matches it (`inferTypeFromPack`):
+ * the lower-cased `'/' + slug` CONTAINS `pathPrefixNeedle(prefix)`, so
+ * `decisions/` is live for `projects/x/decisions/0001-a`. The needle is
+ * bound as a plain string and compared with `strpos`, never `LIKE`, so a
+ * `%` or `_` in a prefix is a literal character, not a wildcard.
  */
 async function detectDeadPrefixes(
   engine: BrainEngine,
@@ -217,8 +224,8 @@ async function detectDeadPrefixes(
         const rows = await engine.executeRaw<{ cnt: string }>(
           `SELECT COUNT(*)::text AS cnt FROM pages
            WHERE deleted_at IS NULL
-             AND slug LIKE $1${sourceWhere}`,
-          [`${prefix}%`, ...sourceParam],
+             AND strpos(lower('/' || slug), $1::text) > 0${sourceWhere}`,
+          [pathPrefixNeedle(prefix), ...sourceParam],
         );
         const cnt = parseInt(rows[0]?.cnt ?? '0', 10) || 0;
         if (cnt === 0) {
