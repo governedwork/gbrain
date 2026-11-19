@@ -8,6 +8,7 @@ import {
   TAKES_FENCE_BEGIN,
   TAKES_FENCE_END,
 } from '../src/core/takes-fence.ts';
+import { confidenceNumber } from '../src/core/fence-repair/schema.ts';
 
 const SAMPLE_BODY = `# Alice Example
 
@@ -488,6 +489,13 @@ ${TAKES_FENCE_END}
     const reparsed = parseTakesFence(body);
     expect(reparsed.warnings).toEqual([]);
     expect(reparsed.takes.map(t => [t.rowNum, t.weight])).toEqual([[1, 0.5], [2, 0.6]]);
+  });
+
+  test('L108: a "50 %" weight cell reads as 0.5, the value fence repair reads for it', () => {
+    const { takes, warnings } = parseTakesFence(weightFence('50 %'));
+    expect(warnings).toEqual([]);
+    expect(takes.map(t => t.weight)).toEqual([0.5]);
+    expect(confidenceNumber('50 %')).toBe(0.5);
   });
 
   test('L108 guard: a weight the base parser reads right still reads the same, with no new warning', () => {
