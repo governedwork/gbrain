@@ -50,7 +50,7 @@ async function idArgs(args: readonly string[]): Promise<string[]> {
     if (!/^\d+$/.test(arg)) {
       const { opError } = await import('../core/ops/contract.ts');
       throw opError('invalid_params', `'${arg}' is not a fact id, so nothing was forgotten. A --reason of several words needs quotes.`,
-        'Pass whole-number fact ids, and quote a multi-word value: gbrain forget <id> --reason "<text>".');
+        'Pass whole-number fact ids, and quote a value of several words, as in: gbrain forget 42 --reason "moved to another team".');
     }
     ids.push(arg);
   }
@@ -219,7 +219,7 @@ async function forgetMany(engine: EngineArg, args: string[], ids: string[]): Pro
     flags = await commonFlags(args, ids[0]!);
     if (flags.requestGiven) {
       throw opError('invalid_params', '--request-id names one forget; a run of several ids gives each its own request id, so nothing was forgotten.',
-        'Drop --request-id. The summary prints the request id of every id that failed; retry one with gbrain forget <id> --request-id <uuid>.');
+        `Drop --request-id and run gbrain forget ${ids.join(' ')} again: each id gets its own request id, and the summary prints the request id of any id that fails, so that one id can be resubmitted alone under it.`);
     }
   } catch (error) {
     if (await reportPersistenceCliError(error, json)) return;
