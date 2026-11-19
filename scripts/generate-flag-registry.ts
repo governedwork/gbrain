@@ -54,9 +54,9 @@ const EXTRA_FLAGS: Record<string, string[]> = {
   embed: ['--pace', '--pace-max-concurrency'],
   // sync shares the same pace surface via env/config plus CLI passthrough.
   sync: ['--pace', '--pace-max-concurrency'],
-  // Deferred persistence routing reaches runForget in recall.ts two levels deep;
+  // Deferred persistence routing reaches runForget in forget.ts two levels deep;
   // `forget --purge` hands off from there to src/commands/forget-purge.ts.
-  forget: ['--reason', '--request-id', '--purge', '--dry-run', '--yes', '--match', '--status', '--vacuum', '--all-subjects'],
+  forget: ['--reason', '--request-id', '--purge', '--dry-run', '--yes', '--match', '--status', '--vacuum', '--all-subjects', '--ids-from-stdin'],
   // sources add reads the meetings and slack options as bare names in src/commands/sources-lifecycle-args.ts (its valued set).
   sources: ['--provider', '--transcript', '--lookback-days', '--sync-interval-min', '--record', '--visibility', '--channels', '--timezone', '--max-requests', '--skip'],
 };
@@ -72,7 +72,7 @@ const DELEGATED_MODULES: Record<string, string[]> = {
   // parseRescopeGrantArgs; both parse --dry-run themselves.
   auth: ['src/commands/persistence-admin.ts', 'src/core/grants/cli.ts'],
   // `forget --purge` (and forget --help) hand the argv to runForgetPurge, which
-  // parses --dry-run itself; a plain forget refuses --dry-run (recall.ts).
+  // parses --dry-run itself; a plain forget refuses --dry-run (forget.ts).
   forget: ['src/commands/forget-purge.ts'],
   // `upgrade --restart-only --dry-run` is parsed by restartDryRun in
   // upgrade-restart.ts, which refuses --dry-run without --restart-only;

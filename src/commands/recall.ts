@@ -15,7 +15,7 @@
  *   gbrain recall --json                    # structured output
  *   gbrain recall --question "<q>"          # facts ranked by relevance to the question
  *
- *   gbrain forget <fact-id>                  # durable withdrawal (forget_fact / forget verb)
+ *   gbrain forget <fact-id>...               # durable withdrawal (forget verb; src/commands/forget.ts)
  *   gbrain forget <fact-id> --purge          # owner-only purge (src/commands/forget-purge.ts)
  *
  * v0.32 additions (this file):
@@ -1211,109 +1211,8 @@ function factRowToJson(r: FactRow): Record<string, unknown> {
   };
 }
 
-export async function runForget(engine: BrainEngine | (() => Promise<BrainEngine>), args: string[]): Promise<void> {
-  const purge = await import('./forget-purge.ts');
-  if (purge.routesToForgetPurge(args)) return purge.runForgetPurge(engine, args);
-  const idArg = args.find(a => /^\d+$/.test(a));
-  if (!idArg) {
-    process.stderr.write('Usage: gbrain forget <fact-id> [--reason <text>] [--source <id>] [--request-id <uuid>] [--json]\n');
-    process.exit(1);
-  }
-  const id = parseInt(idArg, 10);
-
-  // Optional --reason <text> passes through to the fence's "forgotten:
-  // <reason>" context cell so the markdown carries the rationale.
-  let reason: string | undefined = undefined;
-  const idx = args.indexOf('--reason');
-  if (idx >= 0 && idx + 1 < args.length) reason = args[idx + 1];
-  const requestIndex = args.findIndex(arg => arg === '--request-id' || arg.startsWith('--request-id='));
-  const sourceIndex = args.findIndex(arg => arg === '--source' || arg.startsWith('--source='));
-  const requestValue = requestIndex < 0 ? undefined : args[requestIndex].startsWith('--request-id=')
-    ? args[requestIndex].slice('--request-id='.length) : args[requestIndex + 1];
-  const sourceValue = sourceIndex < 0 ? undefined : args[sourceIndex].startsWith('--source=')
-    ? args[sourceIndex].slice('--source='.length) : args[sourceIndex + 1];
-  const { parseWriteRequestId } = await import('../core/persistence/preconditions.ts');
-  const { randomUUID } = await import('node:crypto');
-  const { opError, operations } = await import('../core/operations.ts');
-  const { reportPersistenceCliError } = await import('./persistence-delegate.ts');
-  const json = args.includes('--json');
-  let requestId: string;
-  try {
-    if (requestIndex >= 0 && (!requestValue || requestValue.startsWith('--'))) {
-      throw opError('invalid_params', '--request-id requires a UUID.',
-        `Give --request-id the UUID an earlier attempt of this forget printed, or omit it and gbrain forget ${id} generates one.`);
-    }
-    if (sourceIndex >= 0 && (!sourceValue || sourceValue.startsWith('--'))) {
-      throw opError('invalid_params', '--source requires a source ID.', `Give --source the id of the source that holds fact ${id}, e.g. --source default, or omit it to use the default source.`,
-        { fix: { argv: ['gbrain', 'sources', 'list', '--json'], consent: [], actor: 'agent', why: 'Lists the source ids, read-only.', requires_exclusive: false } });
-    }
-    requestId = parseWriteRequestId(requestValue) ?? randomUUID();
-  } catch (error) {
-    if (await reportPersistenceCliError(error, json)) return;
-    throw error;
-  }
-  const params: Record<string, unknown> = { id: String(id), request_id: requestId, ...(reason !== undefined ? { reason } : {}) };
-
-  // v0.33: thin-client routing. Without this, `gbrain forget <id>` on a
-  // thin-client install would call the local fence helper against the empty
-  // local PGLite and report "No fact" while the real fact lives on the
-  // remote brain.
-  const cfg = loadConfig();
-  if (isThinClient(cfg)) {
-    const { callRemoteTool, unpackToolResult } = await import('../core/mcp-client.ts');
-    try {
-      if (sourceValue) throw opError('invalid_params', '--source cannot override the remote memory writer grant.',
-        'Drop --source: on a remote brain the connection\'s memory writer grant decides the source.',
-        { fix: { argv: ['gbrain', 'forget', String(id), ...(reason !== undefined ? ['--reason', reason] : []), '--request-id', requestId], consent: [], actor: 'agent',
-          requires_exclusive: false, why: `The same forget of fact ${id} without --source, under the same request id.` } });
-      const raw = await callRemoteTool(cfg!, 'forget', params, { timeoutMs: 30_000 });
-      const result = unpackToolResult<{ id: string; expired: boolean }>(raw);
-      if (json) console.log(JSON.stringify(result, null, 2));
-      else process.stdout.write(result.expired ? `Forgot fact id=${id}\n` : `Fact id=${id} was already withdrawn\n`);
-    } catch (error) {
-      if (await reportPersistenceCliError(error, json)) return;
-      console.error(error instanceof Error ? error.message : String(error));
-      console.error(`Retry the same forget with --request-id ${requestId}.`);
-      const { setCliExitVerdict } = await import('../core/cli-force-exit.ts');
-      setCliExitVerdict(1);
-    }
-    return;
-  }
-
-  try {
-    const { maybeDelegateLocalOperation } = await import('../core/persistence/local-client.ts');
-    const { getCliOptions } = await import('../core/cli-options.ts');
-    const cli = getCliOptions();
-    const source = sourceValue ?? null;
-    const delegated = await maybeDelegateLocalOperation('forget', params, cfg, {
-      brain: cli.brain, source, timeoutMs: cli.timeoutMs ?? undefined,
-    });
-    let result: { id: string; expired: boolean; similar_active?: { candidates?: Array<{ fact_id: string; similarity: number }>; next?: string } };
-    if (delegated.handled) result = delegated.result as typeof result;
-    else {
-      const connected = typeof engine === 'function' ? await engine() : engine;
-      const sourceId = await resolveSourceId(connected, source);
-      const op = operations.find(operation => operation.name === 'forget')!;
-      result = await op.handler({ engine: connected, config: cfg ?? { engine: 'pglite' }, remote: false,
-        dryRun: false, sourceId, logger: { info: console.log, warn: console.warn, error: console.error } }, params) as typeof result;
-    }
-    if (json) console.log(JSON.stringify(result, null, 2));
-    else {
-      process.stdout.write(result.expired ? `Forgot fact id=${id}\n` : `Fact id=${id} was already withdrawn\n`);
-      const similar = result.similar_active;
-      if (similar?.candidates?.length) {
-        process.stdout.write(`Close matches still active: ${similar.candidates.map(c => `#${c.fact_id} (${c.similarity})`).join(', ')}\n`);
-      }
-      if (similar?.next) {
-        const { agentBlock } = await import('../core/agent-markers.ts');
-        process.stderr.write(agentBlock({ next: similar.next }));
-      }
-    }
-  } catch (error) {
-    if (await reportPersistenceCliError(error, json)) return;
-    throw error;
-  }
-}
+/** `gbrain forget` lives in forget.ts (one id or a batch); re-exported for existing importers. */
+export { runForget } from './forget.ts';
 
 function renderToday(rows: FactRow[]): string {
   if (rows.length === 0) {

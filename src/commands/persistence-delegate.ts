@@ -123,7 +123,7 @@ export async function runDeferredPersistenceCommand(
       const { runCapture } = await import('./capture.ts');
       await runCapture(null, args, { getEngine });
     } else if (command === 'forget') {
-      const { runForget } = await import('./recall.ts');
+      const { runForget } = await import('./forget.ts');
       await runForget(getEngine, args);
     } else {
       const { runCall } = await import('./call.ts');
