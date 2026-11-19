@@ -51,8 +51,9 @@ export function publishGatesFromDisabled(ops: readonly OperationMeta[], disabled
  * there): the exact CLI command as the fix, relayed to the user. `error`
  * keeps the historical `permission_denied`.
  */
-export function cliOnlyRefusal(op: OperationMeta): OperationError {
-  const argv = [...(op.cliOnly?.argv ?? ['gbrain', '--help'])];
+export function cliOnlyRefusal(op: OperationMeta, params?: Record<string, unknown>): OperationError {
+  const when = Object.entries(op.cliOnly?.argvWhen ?? {}).find(([param]) => params?.[param] !== undefined)?.[1];
+  const argv = [...(when ?? op.cliOnly?.argv ?? ['gbrain', '--help'])];
   const inputs = argv.filter(a => /^<[a-z_]+>$/.test(a)).map(a => ({ name: a.slice(1, -1), how: `The ${a.slice(1, -1)} value from your ${op.name} call.` }));
   return opError('trusted_local_only', `${op.name} runs only from the trusted local CLI on the brain host, not over MCP.`,
     `Ask the user to run \`${argv.join(' ')}\` on the brain host.`, {

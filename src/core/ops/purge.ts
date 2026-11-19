@@ -84,9 +84,10 @@ const unpurge_page: Operation = {
  */
 const prune_page_versions: Operation = {
   name: 'prune_page_versions',
-  idempotent: true,
+  // A replay of a pruned id answers not_found: the versions are gone, so the call is not idempotent.
+  idempotent: false,
   outputRedaction: 'no_stored_text',
-  description: 'Owner-only, trusted local CLI on the brain host (`gbrain history prune <slug> --keep <n> | --version <id>...`). Deletes versions from a page\'s history, by id or all but the newest keep, so text a rewrite removed leaves get_versions; the live page is unchanged. Segment text only the pruned versions held is deleted with them. A dry run (the default) lists the version ids it would prune; yes: true prunes. Returns pruned (versions deleted) and the ids.',
+  description: 'Owner-only, trusted local CLI on the brain host (`gbrain history prune <slug> --keep <n> | --version <id>...`). Deletes versions from a page\'s history, by id or all but the newest keep, so text a rewrite removed leaves get_versions; the live page is unchanged. A version an open trust proposal or overwritten-edit restore still needs is kept and listed in held. Segment text only the pruned versions held is released for the regular segment sweep. A dry run (the default) lists the version ids it would prune; yes: true prunes. Returns pruned (versions deleted), the ids and held.',
   params: {
     slug: { type: 'string', required: true, description: 'Slug of the page whose history to prune.' },
     source_id: { type: 'string', description: 'Source of the page (default: the routed source).' },
@@ -97,9 +98,11 @@ const prune_page_versions: Operation = {
   },
   mutating: true,
   scope: 'admin',
-  cliOnly: { argv: ['gbrain', 'history', 'prune', '<slug>', '--keep', '<keep>', '--yes'] },
+  // The refusal names the dry run (it prints the ids and prunes nothing); the user adds --yes after reading it.
+  cliOnly: { argv: ['gbrain', 'history', 'prune', '<slug>', '--keep', '<keep>'],
+    argvWhen: { version_ids: ['gbrain', 'history', 'prune', '<slug>', '--version', '<version_id>'] } },
   handler: async (ctx, p) => {
-    if (ctx.remote !== false) throw (await import('./callable.ts')).cliOnlyRefusal(prune_page_versions);
+    if (ctx.remote !== false) throw (await import('./callable.ts')).cliOnlyRefusal(prune_page_versions, p);
     const { runPrunePageVersions } = await import('../page-state/version-prune.ts');
     return runPrunePageVersions(ctx, p);
   },

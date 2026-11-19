@@ -6392,7 +6392,7 @@
           "annotations?: { title?: string; readOnlyHint?: boolean; destructiveHint?: boolean; idempotentHint?: boolean; } | undefined",
           "area?: string | undefined",
           "cliHints?: { name?: string; aliases?: string[]; positional?: string[]; stdin?: string; hidden?: boolean; } | undefined",
-          "cliOnly?: { argv: readonly string[]; } | undefined",
+          "cliOnly?: { argv: readonly string[]; argvWhen?: Readonly<Record<string, readonly string[]>>; } | undefined",
           "description: string",
           "handler: (ctx: OperationContext, params: Record<string, unknown>) => Promise<unknown>",
           "idempotent?: boolean | undefined",

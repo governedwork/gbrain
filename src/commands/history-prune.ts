@@ -42,7 +42,7 @@ export function parseHistoryPruneArgs(args: readonly string[]): { params: Record
     const flag = eq > 0 ? arg.slice(0, eq) : arg;
     if (VALUE_FLAGS.has(flag)) {
       const value = eq > 0 ? arg.slice(eq + 1) : args[++i];
-      if (value === undefined || value.startsWith('--')) throw usage(`${flag} needs a value.`);
+      if (value === undefined || value === '' || value.startsWith('--')) throw usage(`${flag} needs a value.`);
       if (flag === '--source') source = value;
       else {
         if (!/^\d+$/.test(value)) throw usage(`${flag} takes a whole number, not '${value}'.`);
@@ -93,8 +93,11 @@ export async function runHistoryPrune(connect: () => Promise<BrainEngine>, args:
     }
     if (parsed.json) { process.stdout.write(`${JSON.stringify(result, null, 2)}\n`); return; }
     const ids = (result.version_ids as number[] | undefined) ?? [];
+    const held = (result.held as Array<{ id: number; reason: string; ref: string }> | undefined) ?? [];
     process.stdout.write(`${result.dry_run ? 'Would prune' : 'Pruned'} ${ids.length} version(s) of ${result.slug} (source ${result.source_id})`
-      + `${ids.length ? `: ${ids.join(', ')}` : ''}.\n${String(result.next ?? '')}\n`);
+      + `${ids.length ? `: ${ids.join(', ')}` : ''}.\n`
+      + held.map(h => `Kept version ${h.id}: ${h.reason === 'trust_proposal' ? `trust proposal ${h.ref} reverts to it` : `it holds a database edit a sync overwrote (import ${h.ref})`}.\n`).join('')
+      + `${String(result.next ?? '')}\n`);
   } catch (error) {
     if (await reportPersistenceCliError(error, json)) {
       if ((error as { code?: string }).code === 'invalid_params') setCliExitVerdict(2);

@@ -59,6 +59,8 @@ describe('prune_page_versions (L144)', () => {
     expect(op!.scope).toBe('admin');
     expect(op!.mutating).toBe(true);
     expect(op!.cliOnly).toBeDefined();
+    // A replay of pruned ids answers not_found, so the op is not idempotent.
+    expect(op!.idempotent).toBe(false);
   });
 
   test('L144: pruning one version removes its text from get_versions history and keeps every other version and the live page', async () => {
@@ -97,6 +99,12 @@ describe('prune_page_versions (L144)', () => {
 
     const res = await brain.call('prune_page_versions', { slug, version_ids: [secretId], yes: true }, { remote: true });
     expect(res.isError).toBe(true);
+    // The fix names the dry run of the form the call used (never the irreversible --yes).
+    expect(JSON.stringify(res.body.fix)).toContain('--version');
+    expect(JSON.stringify(res.body.fix)).not.toContain('--yes');
+    const byKeep = await brain.call('prune_page_versions', { slug, keep: 1, yes: true }, { remote: true });
+    expect(JSON.stringify(byKeep.body.fix)).toContain('--keep');
+    expect(JSON.stringify(byKeep.body.fix)).not.toContain('--yes');
     // The canonical code; the wire `error` keeps its legacy name (permission_denied) for every cliOnly op (cliOnlyRefusal).
     expect(res.body.code).toBe('trusted_local_only');
     const after = await history(slug);
@@ -108,14 +116,14 @@ describe('prune_page_versions (L144)', () => {
     const { secretId, ids } = await seededPage(slug);
     const dry = await brain.call('prune_page_versions', { slug, keep: 1 });
     expect(dry.isError, JSON.stringify(dry.body).slice(0, 400)).toBe(false);
-    expect(dry.body).toMatchObject({ dry_run: true, pruned: 0, would_prune: ids.length - 1, version_ids: ids.slice(1) });
+    expect(dry.body).toMatchObject({ dry_run: true, pruned: 0, would_prune: ids.length - 1, version_ids: ids.slice(1), kept: 1 });
     const bad = await brain.call('prune_page_versions', { slug, version_ids: [secretId, 987654321], yes: true });
     expect(bad.isError).toBe(true);
     expect(bad.body.error).toBe('not_found');
     expect((await history(slug)).map(v => Number(v.id))).toEqual(ids);
   }, 60_000);
 
-  test('L144: a pruned segmented version takes the segment text only it held out of page_segment_texts', async () => {
+  test('L144: a pruned segmented version releases the rows only it held; their text leaves page_segment_texts after the standard grace', async () => {
     const slug = 'notes/l144-prune-segmented';
     const secret = 'L144 segmented secret sentence that must leave segment storage.';
     await brain.seed(slug, fm('Segmented') + `Intro.\n\n${secret}\n\n` + conversationBody(1_250_000, { seed: 44 }) + '\n');
@@ -132,6 +140,10 @@ describe('prune_page_versions (L144)', () => {
     const res = await brain.call('prune_page_versions', { slug, keep: 0, yes: true });
     expect(res.isError, JSON.stringify(res.body).slice(0, 400)).toBe(false);
     expect(res.body.pruned).toBe(versions.length);
+    expect(res.body.segment_rows_released).toBeGreaterThan(0);
+    // The standard insert grace still protects the released text (another write of the source may have just deduped onto it).
+    expect(await holding()).toBeGreaterThan(0);
+    await brain.engine.sweepSegments({ sourceId: 'default', now: new Date(Date.now() + 2 * 3_600_000) });
     expect(await holding()).toBe(0);
     expect((await brain.body(slug)).truth).toContain('Replaced.');
   }, 600_000);
@@ -159,8 +171,39 @@ describe('prune_page_versions (L144)', () => {
     expect(parseHistoryPruneArgs(['notes/a', '--version', '7', '--version=9', '--yes', '--source', 'wiki'])).toEqual({
       params: { slug: 'notes/a', version_ids: [7, 9], yes: true }, source: 'wiki', json: false });
     expect(parseHistoryPruneArgs(['notes/a', '--keep', '1', '--yes', '--dry-run']).params.dry_run).toBe(true);
+    // An empty --source is refused, not read as the default source.
+    expect(() => parseHistoryPruneArgs(['notes/a', '--keep', '1', '--source='])).toThrow('--source needs a value');
+    expect(() => parseHistoryPruneArgs(['notes/a', '--keep', '1', '--source', ''])).toThrow('--source needs a value');
     for (const bad of [['notes/a'], ['notes/a', '--keep', '1', '--version', '2'], ['notes/a', '--keep', 'x'], ['--keep', '1'], ['notes/a', '--keep', '1', '--bogus']]) {
       expect(() => parseHistoryPruneArgs(bad)).toThrow();
     }
   });
+  test('L144: a version a pending trust proposal reverts to is kept and listed held, whichever form names it', async () => {
+    const slug = 'notes/l144-prune-held';
+    const { secretId, ids } = await seededPage(slug);
+    const [page] = await brain.engine.executeRaw<{ id: number }>("SELECT id FROM pages WHERE source_id='default' AND slug=$1", [slug]);
+    const [proposal] = await brain.engine.executeRaw<{ id: number }>(`INSERT INTO trust_proposals (action, source_id, target_table, target_id, before_state, proposer)
+      VALUES ('lower_page', 'default', 'pages', $1, jsonb_build_object('slug', $2::text, 'prior_tier', 'owner', 'version_id', $3::int), 'test') RETURNING id`,
+    [Number(page!.id), slug, secretId]);
+    const res = await brain.call('prune_page_versions', { slug, keep: 0, yes: true });
+    expect(res.isError, JSON.stringify(res.body).slice(0, 400)).toBe(false);
+    expect(res.body.held).toEqual([{ id: secretId, reason: 'trust_proposal', ref: `tp${proposal!.id}` }]);
+    expect(res.body.pruned).toBe(ids.length - 1);
+    expect((await history(slug)).map(v => Number(v.id))).toEqual([secretId]);
+    const named = await brain.call('prune_page_versions', { slug, version_ids: [secretId], yes: true });
+    expect(named.body).toMatchObject({ pruned: 0, held: [{ id: secretId, reason: 'trust_proposal' }] });
+    expect((await history(slug)).map(v => Number(v.id))).toEqual([secretId]);
+  }, 60_000);
+
+  test('L144: a registration bound to slug prefixes cannot prune a page outside them', async () => {
+    const slug = 'people/l144-prune-fenced';
+    const { ids } = await seededPage(slug);
+    const op = operations.find(o => o.name === 'prune_page_versions')!;
+    const ctx = { engine: brain.engine, config: { engine: 'pglite' }, remote: false, dryRun: false, sourceId: 'default',
+      auth: { token: '', clientId: 'fenced-cli', scopes: ['read', 'write', 'admin'], sourceId: 'default', boundSlugPrefixes: ['notes'] },
+      logger: { info() {}, warn() {}, error() {} } } as unknown as Parameters<typeof op.handler>[0];
+    const refused = await Promise.resolve(op.handler(ctx, { slug, keep: 0, yes: true })).then(() => null, (e: { code?: string }) => e.code);
+    expect(refused).toBe('permission_denied');
+    expect((await history(slug)).map(v => Number(v.id))).toEqual(ids);
+  }, 60_000);
 });
