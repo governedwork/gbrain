@@ -81,6 +81,7 @@ export const GRADUATION_INVENTORY: Inventory = {
     carry('link_transitions', 'user_data', 'Dated start/end evidence for relationships, including manual add_link dates that exist nowhere else.'),
     carry('loop_suppressions', 'user_data', 'Open-loop mutes the user chose.'),
     carry('mcp_request_log', 'operational', 'MCP request log.'),
+    carry('mcp_request_log_rollup', 'operational', 'Per-token tally of request-log rows the retention prune removed; the dashboard\'s lifetime totals and the usage windows\' pruned-before date read it.'),
     carry('mcp_spend_log', 'operational', 'MCP spend log.'),
     carry('mcp_spend_reservations', 'operational', 'Pending and unresolved MCP charges; admission counts them and late settlement needs them.'),
     carry('mention_gazetteer_entries', 'operational', 'Entity mention index: the linkable names the last mention pass used per source; a name change rescans only affected pages.'),
@@ -122,6 +123,8 @@ export const GRADUATION_INVENTORY: Inventory = {
     carry('page_retrievals', 'operational', 'Retrieval telemetry: when a user-facing read last surfaced each page (stale-page bias, volunteer usage stats).'),
     carry('page_segment_texts', 'user_data', 'Segment texts of segmented page bodies, stored once per source; without them a large page has no body.'),
     carry('page_versions', 'user_data', 'Page revision history with attribution.'),
+    // Ours (governedwork fork, ledger L144).
+    carry('page_version_prunes', 'user_data', 'Text-free record of the version history an owner pruned; the belief ledger reads it so a pruned revision is not a preimage gap.'),
     carry('page_write_guards', 'user_data', 'Page write guards per source incarnation and slug.'),
     carry('pages', 'user_data', 'Pages with ids, knowledge_revision, revision attribution and timestamps.'),
     carry('persistence_counters', 'operational', 'Request admission counters; carried and recomputable from the carried requests.'),

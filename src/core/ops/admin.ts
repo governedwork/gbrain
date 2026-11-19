@@ -14,7 +14,7 @@ import { sanitizeRemoteBody } from '../remote-body.ts';
  */
 
 import type { Operation, OperationContext } from './contract.ts';
-import { opError } from './contract.ts';
+import { OperationError, opError } from './contract.ts';
 import { enforceClientSlugFence, sourceScopeOpts } from './context.ts';
 import { VERSION } from '../../version.ts';
 import { resolveActiveEmbeddingColumnFromEngine } from '../search/embedding-column.ts';
@@ -241,6 +241,8 @@ const get_versions: Operation = {
       if (isSegmentedPage(v)) {
         const sized = await remoteVersionSize(ctx, v);
         const { compiled_truth: _b, timeline: _t, ...rest } = sized;
+        // A version whose rows do not tile has nothing to read: flagged, with no body_ref.
+        if ('body_unreadable' in sized) { out.push(rest); continue; }
         out.push({ ...rest, body_ref: { version_id: v.id, total_bytes: 'total_bytes' in sized ? sized.total_bytes : pageBodyBytes(v),
           read: { tool: 'get_page', arguments: { slug: p.slug, version_id: v.id, body: 'window' } } } });
         continue;
@@ -258,13 +260,20 @@ const get_versions: Operation = {
 /**
  * A segmented version as a remote caller sees it: the size of its read projection (`total_bytes`, what get_page reports
  * for a segmented page), never the stored body_bytes, whose difference would say how much text the projection hides.
+ * A version whose segment rows do not tile its body (readable here) is flagged `body_unreadable: true` with no size,
+ * so one such version never fails the whole history (fork, ledger L152).
  */
 async function remoteVersionSize<V extends { page_id: number; body_storage?: string; body_generation?: number; body_bytes?: number }>(ctx: OperationContext, v: V):
-  Promise<V | Omit<V, 'body_bytes'> & { total_bytes: number }> {
+  Promise<V | Omit<V, 'body_bytes'> & { total_bytes: number } | Omit<V, 'body_bytes'> & { body_unreadable: true }> {
   if (ctx.remote === false || v.body_storage !== 'segmented') return v;
   const { body_bytes: _stored, ...rest } = v;
-  const body = await openSegmentedBody(ctx.engine, { pageId: v.page_id, generation: v.body_generation });
-  return { ...rest, total_bytes: (await segmentedReadDocument(ctx.engine, body)).total };
+  try {
+    const body = await openSegmentedBody(ctx.engine, { pageId: v.page_id, generation: v.body_generation });
+    return { ...rest, total_bytes: (await segmentedReadDocument(ctx.engine, body)).total };
+  } catch (error) {
+    if (error instanceof OperationError && error.code === 'page_body_rows_unreadable') return { ...rest, body_unreadable: true };
+    throw error;
+  }
 }
 
 const revert_version: Operation = {

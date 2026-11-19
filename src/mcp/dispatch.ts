@@ -930,7 +930,7 @@ async function dispatchResolvedCall(
     return unknownToolEnvelope(name, opts, undefined, await grantBlockedNotices(engine, opts, true));
   }
   // F5: an owner-only op is never listed on MCP; a call gets the exact CLI command.
-  if (op.cliOnly && opts.remote !== false) return errorResult(cliOnlyRefusal(op), opts, { op: name });
+  if (op.cliOnly && opts.remote !== false) return errorResult(cliOnlyRefusal(op, params), opts, { op: name });
 
   // --source-guard (plugin lanes): fail-closed write routing. A user-global
   // plugin serve has no per-workspace source binding, so an ambient-tier

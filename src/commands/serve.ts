@@ -13,6 +13,7 @@ import { redirectStdoutLoggingToStderr } from '../core/console-prefix.ts';
 import { startFactsDrainScheduler, type FactsDrainScheduler, type FactsDrainSchedulerOpts } from '../core/facts/drain-scheduler.ts';
 import { startMovementWatch, type MovementWatch } from '../core/persistence/sync-movement.ts';
 import { startServeHeadWatcher } from '../core/serve-head-watcher.ts';
+import { startMcpLogPruneTicker, type McpLogPruneTicker, type McpLogPruneTickerOpts } from '../core/mcp-request-log-retention.ts';
 import { onForwardProgress } from '../core/forward-progress.ts';
 import { graduationHandoffRequested, writeServeGraduationEnvelope } from '../core/persistence/graduation-serve-guard.ts';
 import {
@@ -164,6 +165,8 @@ export interface ServeOptions {
   // Test seam for the automatic facts drain (src/core/facts/drain-scheduler.ts):
   // false disables it; an object overrides its timer and run body.
   factsDrain?: false | Pick<FactsDrainSchedulerOpts, 'run' | 'tickMs' | 'maxGapMs' | 'now'>;
+  // Test seam for the request-log retention ticker (src/core/mcp-request-log-retention.ts): false disables it; an object overrides its timer.
+  mcpLogPrune?: false | Pick<McpLogPruneTickerOpts, 'setInterval' | 'clearInterval' | 'tickMs'>;
 }
 
 /**
@@ -371,12 +374,14 @@ export async function runServe(
     // waited for a hand-run sweep and then for retention GC.
     const { armCorpusDrain } = await import('../core/sweep.ts');
     const corpusDrain = (opts.armCorpusDrain ?? armCorpusDrain)(engine, { sourceId: process.env.GBRAIN_SOURCE || undefined });
+    const mcpLogPrune = installMcpLogPrune(engine, opts, httpLog, () => false);
 
     try {
       await runHttp(engine, { port, tokenTtl, enableDcr, enableDcrInsecure, publicUrl, logFullParams, bind, suppressBootstrapToken, printAdminToken, surface, adoptServer: opts.adoptServer });
     } finally {
       stallWatchdog?.dispose();
       corpusDrain?.cancel();
+      mcpLogPrune?.stop();
     }
 
     await finishHttpServe(engine, opts);
@@ -595,6 +600,13 @@ function installFactsDrain(engine: BrainEngine, opts: ServeOptions, deps: StdioL
   });
 }
 
+/** #6770: the PGLite lock owner's request-log retention prune, hourly (a no-op on Postgres or while retention is off). */
+function installMcpLogPrune(engine: BrainEngine, opts: ServeOptions, log: (line: string) => void, shuttingDown: () => boolean): McpLogPruneTicker | null {
+  if (opts.mcpLogPrune === false) return null;
+  return startMcpLogPruneTicker(engine, { log, ...(opts.mcpLogPrune ?? {}),
+    canRun: async () => !shuttingDown() && !isEngineDegradedForServe(engine) && !(await loadSyncRunner()).isDelegatedSyncRunning() });
+}
+
 /**
  * #6317 (B4): the facts drain plus the movement watch (one `[gbrain notice]`
  * when a managed source's sync data stops moving; reader in
@@ -604,10 +616,11 @@ function installFactsDrain(engine: BrainEngine, opts: ServeOptions, deps: StdioL
  */
 function installResidentTickers(engine: BrainEngine, opts: ServeOptions, deps: StdioLifecycleDeps, shuttingDown: () => boolean): { stop(): Promise<void> } {
   const factsDrain = installFactsDrain(engine, opts, deps, shuttingDown);
+  const mcpLogPrune = installMcpLogPrune(engine, opts, deps.log, shuttingDown);
   // The watch keeps its own unref'd timer: the injected lifecycle timers are the parent watchdog's and the idle sweep's, which tests count.
   const movementWatch: MovementWatch = startMovementWatch(engine, { log: deps.log });
   const headWatcher = startServeHeadWatcher(engine, { log: deps.log });
-  return { stop: async () => { const settled = headWatcher.stop(); movementWatch.stop(); await settled; await factsDrain?.stop(); } };
+  return { stop: async () => { const settled = headWatcher.stop(); movementWatch.stop(); mcpLogPrune?.stop(); await settled; await factsDrain?.stop(); } };
 }
 
 function installStdioLifecycle(

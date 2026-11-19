@@ -117,6 +117,7 @@ import { chatFallbackChainEntry } from './checks/chat-fallback.ts';
 import { providerConsentEntry } from './checks/provider-consent.ts';
 import { behaviorChangesEntry } from './checks/behavior-changes.ts';
 import { fenceIntegrityEntry } from './checks/fence-integrity.ts';
+import { mcpRequestLogRetentionEntry } from './checks/mcp-request-log.ts';
 import { syncConfigKeysEntry } from './checks/sync-config-keys.ts';
 import { ghostPagesEntry } from './checks/ghost-pages.ts';
 import { originTwinsEntry } from './checks/origin-twins.ts';
@@ -271,6 +272,8 @@ export const DOCTOR_CHECK_REGISTRY: readonly DoctorEntry[] = [
   syncConfigKeysEntry,
   // #6712 PR 4a: the read-only convergence shadow (deep tier: a full level read per source).
   managedSyncConvergenceEntry,
+  // #6770: MCP request-log size and the opt-in retention prune (read-only; the enable fix asks the user).
+  mcpRequestLogRetentionEntry,
   fenceIntegrityEntry,
   searchModeEntry,
 ];

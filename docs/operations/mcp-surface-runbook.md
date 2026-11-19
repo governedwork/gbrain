@@ -117,7 +117,9 @@ never argue its way into a wider surface or the starter derivation.
   lists in a long-lived session go stale until it does.
 - An audit row lands in `mcp_request_log` (`operation='surface_change'`,
   params carrying actor/old/new/via) — every surface mutation writes one
-  (rescope CLI, admin endpoint, request_tools persist):
+  (rescope CLI, admin endpoint, request_tools persist). Request-log retention
+  never prunes these rows; other request rows older than its window are gone
+  ([retention](../mcp/ADMIN.md#request-log-retention)):
 
 ```sql
 SELECT created_at, params FROM mcp_request_log

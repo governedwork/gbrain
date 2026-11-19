@@ -105,6 +105,7 @@
       "loop_suppressions.loop_suppressions_source_id_fkey": "f FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE",
       "loop_suppressions.loop_suppressions_uniq": "u UNIQUE (source_id, kind, value)",
       "mcp_request_log.mcp_request_log_pkey": "p PRIMARY KEY (id)",
+      "mcp_request_log_rollup.mcp_request_log_rollup_pkey": "p PRIMARY KEY (token_name)",
       "migration_impact_log.migration_impact_log_job_id_fkey": "f FOREIGN KEY (job_id) REFERENCES minion_jobs(id) ON DELETE SET NULL",
       "migration_impact_log.migration_impact_log_pkey": "p PRIMARY KEY (id)",
       "minion_attachments.chk_attachment_size": "c CHECK ((size_bytes >= 0))",
@@ -191,6 +192,8 @@
       "page_segment_texts.page_segment_texts_pkey": "p PRIMARY KEY (source_id, sha256)",
       "page_segment_texts.page_segment_texts_sha256_check": "c CHECK ((octet_length(sha256) = 32))",
       "page_segment_texts.page_segment_texts_source_id_fkey": "f FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE",
+      "page_version_prunes.page_version_prunes_page_id_fkey": "f FOREIGN KEY (page_id) REFERENCES pages(id) ON DELETE CASCADE",
+      "page_version_prunes.page_version_prunes_pkey": "p PRIMARY KEY (page_id, knowledge_revision)",
       "page_versions.page_versions_page_id_fkey": "f FOREIGN KEY (page_id) REFERENCES pages(id) ON DELETE CASCADE",
       "page_versions.page_versions_pkey": "p PRIMARY KEY (id)",
       "page_view_digests.page_view_digests_audience_check": "c CHECK ((audience = ANY (ARRAY['trusted'::text, 'remote'::text])))",
@@ -519,6 +522,9 @@
       "mcp_request_log": [
         "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
       ],
+      "mcp_request_log_rollup": [
+        "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+      ],
       "migration_impact_log": [
         "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
       ],
@@ -592,6 +598,9 @@
         "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
       ],
       "page_segment_texts": [
+        "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+      ],
+      "page_version_prunes": [
         "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
       ],
       "page_versions": [
@@ -917,6 +926,7 @@
       "loop_suppressions_pkey": "CREATE UNIQUE INDEX loop_suppressions_pkey ON public.loop_suppressions USING btree (id)",
       "loop_suppressions_uniq": "CREATE UNIQUE INDEX loop_suppressions_uniq ON public.loop_suppressions USING btree (source_id, kind, value)",
       "mcp_request_log_pkey": "CREATE UNIQUE INDEX mcp_request_log_pkey ON public.mcp_request_log USING btree (id)",
+      "mcp_request_log_rollup_pkey": "CREATE UNIQUE INDEX mcp_request_log_rollup_pkey ON public.mcp_request_log_rollup USING btree (token_name)",
       "migration_impact_log_attribution_idx": "CREATE INDEX migration_impact_log_attribution_idx ON public.migration_impact_log USING btree (job_id, source_id) WHERE (job_id IS NOT NULL)",
       "migration_impact_log_pkey": "CREATE UNIQUE INDEX migration_impact_log_pkey ON public.migration_impact_log USING btree (id)",
       "migration_impact_log_remediation_idx": "CREATE INDEX migration_impact_log_remediation_idx ON public.migration_impact_log USING btree (remediation_id, applied_at DESC)",
@@ -961,6 +971,7 @@
       "page_purges_pkey": "CREATE UNIQUE INDEX page_purges_pkey ON public.page_purges USING btree (source_id, content_hash)",
       "page_retrievals_pkey": "CREATE UNIQUE INDEX page_retrievals_pkey ON public.page_retrievals USING btree (page_id)",
       "page_segment_texts_pkey": "CREATE UNIQUE INDEX page_segment_texts_pkey ON public.page_segment_texts USING btree (source_id, sha256)",
+      "page_version_prunes_pkey": "CREATE UNIQUE INDEX page_version_prunes_pkey ON public.page_version_prunes USING btree (page_id, knowledge_revision)",
       "page_versions_pkey": "CREATE UNIQUE INDEX page_versions_pkey ON public.page_versions USING btree (id)",
       "page_view_digests_pkey": "CREATE UNIQUE INDEX page_view_digests_pkey ON public.page_view_digests USING btree (page_id, revision, view, audience)",
       "page_write_guards_pkey": "CREATE UNIQUE INDEX page_write_guards_pkey ON public.page_write_guards USING btree (source_incarnation, slug)",
@@ -1845,6 +1856,15 @@
         ],
         "flags": "relkind=r rls=false force_rls=false"
       },
+      "mcp_request_log_rollup": {
+        "columns": [
+          "1 token_name text/text NOT NULL",
+          "2 requests bigint/int8 NOT NULL DEFAULT 0",
+          "3 last_used_at timestamp with time zone/timestamptz NULL",
+          "4 pruned_through timestamp with time zone/timestamptz NULL"
+        ],
+        "flags": "relkind=r rls=true force_rls=false"
+      },
       "migration_impact_log": {
         "columns": [
           "1 id bigint/int8 NOT NULL DEFAULT nextval('migration_impact_log_id_seq'::regclass)",
@@ -2223,6 +2243,14 @@
           "6 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
         "flags": "relkind=r rls=false force_rls=false"
+      },
+      "page_version_prunes": {
+        "columns": [
+          "1 page_id integer/int4 NOT NULL",
+          "2 knowledge_revision uuid/uuid NOT NULL",
+          "3 pruned_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
+        ],
+        "flags": "relkind=r rls=true force_rls=false"
       },
       "page_versions": {
         "columns": [

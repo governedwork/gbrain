@@ -204,6 +204,7 @@ export const OPERATION_LOADERS: Record<string, readonly [() => Promise<Record<st
   "purge_fact": [load_purge, "purgeOperations"],
   "list_page_purges": [load_purge, "purgeOperations"],
   "unpurge_page": [load_purge, "purgeOperations"],
+  "prune_page_versions": [load_purge, "purgeOperations"],
   "find_contradictions": [load_insights, "find_contradictions"],
   "find_experts": [load_insights, "find_experts"],
   "find_trajectory": [load_insights, "find_trajectory"],

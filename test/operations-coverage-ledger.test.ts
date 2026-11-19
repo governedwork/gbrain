@@ -45,6 +45,7 @@ const LEDGER: Record<string, string> = {
   confirm_memory: 'test/trust-owner-actions.test.ts',
   list_page_purges: 'test/page-purge.test.ts',
   unpurge_page: 'test/page-purge.test.ts',
+  prune_page_versions: 'test/versions.test.ts',
   capture: 'test/capture-op.test.ts',
   edit_page: 'test/edit-page.test.ts',
   append_page: 'test/large-pages/append-concurrency.test.ts',

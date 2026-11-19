@@ -170,7 +170,8 @@
       "argv": "forget fact-1",
       "exitCode": 1,
       "stderr": [
-        "Usage: gbrain forget <fact-id> [--reason <text>] [--source <id>] [--request-id <uuid>] [--json]"
+        "Error [invalid_params]: 'fact-1' is not a fact id, so nothing was forgotten. A --reason of several words needs quotes.",
+        "Fix: Pass whole-number fact ids, and quote a multi-word value: gbrain forget <id> --reason \"<text>\"."
       ],
       "stdout": []
     },

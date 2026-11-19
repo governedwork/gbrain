@@ -5912,6 +5912,69 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
     }
   },
   {
+    "name": "prune_page_versions",
+    "idempotent": false,
+    "outputRedaction": "no_stored_text",
+    "description": "Owner-only, trusted local CLI on the brain host (`gbrain history prune <slug> --keep <n>`, or `--version <id>` instead of `--keep`). Deletes versions from a page's history, by id or all but the newest keep, so text a rewrite removed leaves get_versions; the live page is unchanged. A version an open trust proposal or overwritten-edit restore still needs is kept and listed in held. Segment text only the pruned versions held is released for the regular segment sweep. A dry run (the default) lists the version ids it would prune; yes: true prunes. Returns pruned (versions deleted), the ids and held.",
+    "params": {
+      "slug": {
+        "type": "string",
+        "required": true,
+        "description": "Slug of the page whose history to prune."
+      },
+      "source_id": {
+        "type": "string",
+        "description": "Source of the page (default: the routed source)."
+      },
+      "version_ids": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        },
+        "description": "Version ids to prune (from get_versions). Exactly one of version_ids or keep."
+      },
+      "keep": {
+        "type": "number",
+        "description": "Prune all but the newest keep versions (0 prunes the whole history). Exactly one of version_ids or keep."
+      },
+      "dry_run": {
+        "type": "boolean",
+        "description": "List the versions that would be pruned and change nothing (the default unless yes is true)."
+      },
+      "yes": {
+        "type": "boolean",
+        "description": "Confirm the prune: true deletes the versions; pruned versions cannot be restored."
+      }
+    },
+    "mutating": true,
+    "scope": "admin",
+    "cliOnly": {
+      "argv": [
+        "gbrain",
+        "history",
+        "prune",
+        "<slug>",
+        "--keep",
+        "<keep>"
+      ],
+      "argvWhen": {
+        "version_ids": [
+          "gbrain",
+          "history",
+          "prune",
+          "<slug>",
+          "--version",
+          "<version_id>"
+        ]
+      }
+    },
+    "area": "pages",
+    "cliHints": {
+      "name": "prune-page-versions",
+      "hidden": true
+    }
+  },
+  {
     "name": "find_contradictions",
     "mutating": false,
     "idempotent": true,

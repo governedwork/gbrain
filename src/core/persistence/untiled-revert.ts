@@ -6,8 +6,9 @@
  * segmented version's body, streamed from the version's own generation (whose rows must tile its recorded body_bytes),
  * one segment batch at a time. The page takes the version's title, type, frontmatter and tags, as a revert does.
  *
- * Nothing is re-projected: the write versions the page (a reference to the unreadable generation, kept as history),
- * flips the generation, sets the tags and reseals. Facts, takes, links and timeline rows stay as they are, so a fact,
+ * Nothing is re-projected: the write versions the page (a reference to the unreadable generation, kept as history: it
+ * roots the generation's surviving rows and keeps the pre-revert title, type, frontmatter and tags; a remote get_versions
+ * flags it `body_unreadable`), flips the generation, sets the tags and reseals. Facts, takes, links and timeline rows stay as they are, so a fact,
  * take or timeline row the version's fences do not show stays in the database, as the database-canonical record.
  * Refused: a version of the unreadable generation itself, an inline version, a core-marked page or version, a page with
  * a canonical file (its file is the repair: sync or import it), and an external_untrusted writer under the write gate.

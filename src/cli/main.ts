@@ -379,6 +379,9 @@ async function main() {
     markShortLivedCliProcess();
   }
 
+  // Ours (governedwork fork, ledger L144): `gbrain history prune` (owner prune of a page's versions; its own help and flags).
+  if (command === 'history' && subArgs[0] === 'prune') return (await import('../commands/history-prune.ts')).runHistoryPrune(connectEngine, subArgs.slice(1));
+
   // Per-command --help; the scan stops at `--` (`agent run -- --help` submits the prompt). Router
   // commands print usage here, so `<cmd> <sub> --help` never reaches the subcommand (#6114).
   if (helpRequested) {
