@@ -149,7 +149,7 @@ export const ALLOWED: Record<FenceKind, Readonly<Record<string, readonly string[
   takes: {
     kind: [...TAKE_KIND_VALUES],
     who: ['world', 'brain', 'people/<slug>', 'companies/<slug>'],
-    weight: ['a number from 0 to 1'],
+    weight: ['a number from 0 to 1, or a percent such as `70%`'],
     '#': ['a positive whole number'],
   },
 };
