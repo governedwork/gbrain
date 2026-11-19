@@ -459,3 +459,40 @@ ${TAKES_FENCE_END}\n`;
     expect(oldRow.resolvedEvidence).toBe('Series A closed');
   });
 });
+
+// A hand-written `50%` weight parsed as 50 (parseFloat reads the numeric
+// prefix), so the next takes write re-rendered the row as `50.0`. A whole-cell
+// percent now reads as hundredths; every other shape still reads as parseFloat
+// reads it, so rows an older edit wrote stay readable (a rebuild or purge
+// overlay never drops them).
+describe('weight cell parsing', () => {
+  const weightFence = (...weights: string[]) => `# Alice Example
+
+${TAKES_FENCE_BEGIN}
+| # | claim | kind | who | weight | since | source |
+|---|-------|------|-----|--------|-------|--------|
+${weights.map((weight, i) => `| ${i + 1} | Acme-example claim ${i + 1} | bet | world | ${weight} | 2026-01 | call |`).join('\n')}
+${TAKES_FENCE_END}
+`;
+
+  test('L108: a "50%" weight cell reads as 0.5 with no warnings', () => {
+    const { takes, warnings } = parseTakesFence(weightFence('50%'));
+    expect(warnings).toEqual([]);
+    expect(takes).toHaveLength(1);
+    expect(takes[0].weight).toBe(0.5);
+  });
+
+  test('L108: upsertTakeRow never re-renders a "50%" cell as 50.0', () => {
+    const { body } = upsertTakeRow(weightFence('50%'), { claim: 'A second take', kind: 'take', holder: 'world', weight: 0.6, active: true });
+    expect(body).not.toContain('| 50.0 |');
+    const reparsed = parseTakesFence(body);
+    expect(reparsed.warnings).toEqual([]);
+    expect(reparsed.takes.map(t => [t.rowNum, t.weight])).toEqual([[1, 0.5], [2, 0.6]]);
+  });
+
+  test('L108 guard: a weight the base parser reads right still reads the same, with no new warning', () => {
+    const { takes, warnings } = parseTakesFence(weightFence('0.7 (high)', '1.', '0.85'));
+    expect(warnings).toEqual([]);
+    expect(takes.map(t => [t.rowNum, t.weight])).toEqual([[1, 0.7], [2, 1], [3, 0.85]]);
+  });
+});

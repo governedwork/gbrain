@@ -58,7 +58,7 @@ const TAKES_TEXT: Record<(typeof TAKES_COLUMNS)[number], string> = {
   claim: 'The position, free text. `~~claim~~` marks a row that is no longer active.',
   kind: 'What the take is.',
   who: 'Who holds the position (see [holders](#holders)): who said or clearly implied it, not who it is about.',
-  weight: 'How strongly it is held; stored on the 0.05 grid. There is no default.',
+  weight: 'How strongly it is held: a number, or a percent (`70%` reads as 0.7); stored on the 0.05 grid. There is no default.',
   since: 'When the holder took the position (`YYYY-MM-DD` or `YYYY-MM`; `start → end` for a range).',
   source: 'Where it came from. `superseded by #N` names the row that replaced a struck row.',
   resolved: 'When the take was resolved.',
