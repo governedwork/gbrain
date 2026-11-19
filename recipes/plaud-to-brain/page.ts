@@ -127,7 +127,9 @@ export function renderMeetingPage(record: PlaudMeetingRecord): { slug: string; c
     `source: ${q(record.source)}`,
     `source_id: ${q(record.source_id)}`,
     `attendees: [${attendees.map(q).join(', ')}]`,
-    ...(calendarEvent === '' ? [] : [`invitees: [${invitees.map(q).join(', ')}]`, `calendar_event: ${q(calendarEvent)}`]),
+    // A runner may keep the roster but not name its event (one filed where that calendar page does not live).
+    ...(calendarEvent === '' && invitees.length === 0 ? [] : [`invitees: [${invitees.map(q).join(', ')}]`]),
+    ...(calendarEvent === '' ? [] : [`calendar_event: ${q(calendarEvent)}`]),
     ...(tags.length === 0 ? [] : [`tags: [${tags.map(q).join(', ')}]`]),
     'facts_backstop: false',
     '---',
@@ -135,9 +137,11 @@ export function renderMeetingPage(record: PlaudMeetingRecord): { slug: string; c
   // The Attendees line is GBrain's bare link list (attendance evidence), so it carries exactly the frontmatter's people.
   const present = attendees.length === 0 ? 'Attendees: none confirmed yet.' : `Attendees: ${linked(attendees)}`;
   const invited =
-    calendarEvent === ''
-      ? 'Invited: unknown (no calendar event overlapped the recording).'
-      : `Invited (from [[${calendarEvent}]], not confirmed present): ${linked(invitees) || 'none listed'}.`;
+    calendarEvent !== ''
+      ? `Invited (from [[${calendarEvent}]], not confirmed present): ${linked(invitees) || 'none listed'}.`
+      : invitees.length > 0
+        ? `Invited (from the calendar, not confirmed present): ${linked(invitees)}.`
+        : 'Invited: unknown (no calendar event overlapped the recording).';
   const body = [
     `# ${record.title}`,
     '',
