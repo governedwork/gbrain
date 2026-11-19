@@ -408,11 +408,11 @@
     "traversePathsDetailed#out+sourceId+linkType": {},
     "updatePageContextualRetrievalState#default": {},
     "updateSlug#moved": {
-      "raw": 13,
+      "raw": 19,
       "tx": 1
     },
     "updateSlug#noop": {
-      "raw": 2,
+      "raw": 5,
       "tx": 1
     },
     "updateSourceConfig#default": {},

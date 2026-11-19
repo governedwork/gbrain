@@ -390,6 +390,16 @@ describe('extractExistingTakesForDedup', () => {
     expect(out[1]!.weight).toBe(0.8);
   });
 
+  test('L108: a percent weight cell reads as hundredths, as the takes parser reads it', () => {
+    const body = `<!-- gbrain:takes:begin -->
+| # | claim | kind | who | weight |
+|---|-------|------|-----|--------|
+| 1 | percent claim | take | brain | 70% |
+| 2 | spaced percent claim | take | brain | 50 % |
+<!-- gbrain:takes:end -->`;
+    expect(extractExistingTakesForDedup(body).map(t => t.weight)).toEqual([0.7, 0.5]);
+  });
+
   test('skips strikethrough rows', () => {
     const body = `<!-- gbrain:takes:begin -->
 | # | claim | kind | who | weight |
