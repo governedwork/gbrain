@@ -38,6 +38,7 @@ import { renderFragment, sqlFragment, trustedSql } from './fragment.ts';
 import { frontmatterWhereFragment } from '../search/frontmatter-where.ts';
 import { quoteIdentifier, resolveWriteColumnFromConfigRows } from '../search/embedding-column.ts';
 import { pickCanonicalOrigin } from '../persistence/origin-guard.ts';
+import { withTrustKeep } from '../persistence/context.ts';
 
 /**
  * PGLite can return zero rows from `INSERT ... ON CONFLICT DO UPDATE ...
@@ -1070,19 +1071,28 @@ export async function revertToVersion(
  * sweep up same-slug rows in sources B/C/D. The move advances the page's
  * knowledge revision, so it first versions the page as it stood: page-at-time
  * (belief ledger W2) reads the body before the rename from that preimage.
+ *
+ * A move authors nothing, but the trust triggers count the page's `slug` as
+ * a content column. The keep scope holds the page at its stored tier whatever
+ * tier the mover declares (an owner-tier sync must not raise it, an
+ * undeclared mover must not lower it), for every caller of the move;
+ * moveSlugBindings keeps the facts it re-keys the same way.
  */
 export async function updateSlug(exec: SqlExecutor, tx: BrainEngine, oldSlug: string, newSlug: string, sourceId: string): Promise<number> {
       const preimage = await tx.readPageSnapshot(oldSlug, { sourceId, includeDeleted: true });
       if (preimage) await createPageVersion(tx, oldSlug, sourceId, preimage);
-      // origin-guard-ok: the moved row keeps its own origin and liveness, so it adds no claimant (#6948); callers that record a new path bind it with bindOrigin
-      const moved = await exec.executeRaw(
-        `UPDATE pages SET slug = $1, updated_at = now() WHERE slug = $2 AND source_id = $3 RETURNING id`,
-        [newSlug, oldSlug, sourceId],
-      );
-      if (moved.length > 0) {
-        await recordRenameAlias(tx, sourceId, oldSlug, newSlug);
-        await moveSlugBindings(tx, sourceId, oldSlug, newSlug);
-      }
+      const moved = await withTrustKeep(tx, ['pages'], async () => {
+        // origin-guard-ok: the moved row keeps its own origin and liveness, so it adds no claimant (#6948); callers that record a new path bind it with bindOrigin
+        const rows = await exec.executeRaw(
+          `UPDATE pages SET slug = $1, updated_at = now() WHERE slug = $2 AND source_id = $3 RETURNING id`,
+          [newSlug, oldSlug, sourceId],
+        );
+        if (rows.length > 0) {
+          await recordRenameAlias(tx, sourceId, oldSlug, newSlug);
+          await moveSlugBindings(tx, sourceId, oldSlug, newSlug);
+        }
+        return rows;
+      });
       // #3056: rows moved — a zero-row UPDATE does not throw, so the count is
       // the only way callers can see the no-op.
       return moved.length;

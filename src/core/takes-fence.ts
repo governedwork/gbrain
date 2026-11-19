@@ -24,7 +24,8 @@
  * - Strikethrough `~~claim~~` → active=false; the inner text is parsed.
  * - Date ranges in `since` (`2022-01 → 2026-06` or `2022-01 -> 2026-06`)
  *   split into `since_date` + `until_date`.
- * - Weight is parsed as float; out-of-range values [0,1] are clamped at the
+ * - Weight is parsed as float (`parseWeightCell`, fence-shared.ts: a whole-cell
+ *   percent such as `70%` or `70 %` reads as 0.7); out-of-range values [0,1] are clamped at the
  *   engine layer (TAKES_WEIGHT_CLAMPED), not here.
  * - Malformed rows (wrong cell count, non-numeric weight, unknown kind) are
  *   skipped. The fence parser returns the parsed-OK rows + a `warnings` list
@@ -239,6 +240,7 @@ import {
   stripStrikethrough,
   escapeFenceCell as safeFenceCell,
   assertFenceRewritable,
+  parseWeightCell,
 } from './fence-shared.ts';
 import { indexOfOutsideCode, locateOutsideCode, protectedRegions, unclosedCodeFenceStart } from './fence-scan.ts';
 
@@ -361,7 +363,7 @@ export function parseTakesFence(body: string): ParseResult {
       // Fall through — row is still parsed and stored.
     }
 
-    const weight = parseFloat(weightRaw);
+    const weight = parseWeightCell(weightRaw);
     if (!Number.isFinite(weight)) {
       warnings.push(`TAKES_TABLE_MALFORMED: non-numeric weight "${weightRaw}"`);
       continue;
