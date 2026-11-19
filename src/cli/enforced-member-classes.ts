@@ -51,6 +51,8 @@ const REFUSED_OPS = [
   'capture', 'list_page_purges', 'list_watches', 'purge_fact', 'unpurge_page', 'unwatch', 'watch_job', 'watch_write_request', 'watch_cron', 'accept_wakeshift_terms', 'connectors_status',
   'get_recent_transcripts', 'sources_inspect', 'sources_add', 'sources_remove', 'connector_sync',
   'code_traversal_cache_clear', 'migrate_embeddings', 'purge_deleted_pages', 'sync_brain',
+  // ours (governedwork fork): brain-resident schema packs read without a no-trace test; publishing is admin below
+  'get_schema_pack',
   // writes outside the checked set: batch, upload, label, history, fact and queue writes
   'abort_page_upload', 'begin_page_upload', 'commit_page_upload', 'get_page_upload', 'upload_page_part', 'put_pages',
   'put_raw_data', 'put_skill', 'delete_skill', 'delete_page', 'restore_page', 'revert_version', 'cancel_write_request',
@@ -59,6 +61,9 @@ const REFUSED_OPS = [
   'memory_write', 'mute_notice', 'ontology_propose', 'questions_pin', 'questions_refresh', 'questions_unpin', 'rate_answer',
   'takes_add', 'takes_resolve', 'takes_supersede', 'takes_update', 'entity_identity_link', 'entity_identity_unlink',
   'extraction_review', 'takes_rebuild', 'takes_remove',
+  // ours (governedwork fork): a rename moves the page to new_slug, where other folder rules decide who reads it; the
+  // write gate checks only the target page the member reads, never the destination's readers
+  'rename_page',
   // admin, agent and local-only
   'cache_stats', 'cancel_job', 'get_health', 'get_job', 'get_job_progress', 'get_job_stats', 'get_skill_policy',
   'get_status_snapshot', 'get_usage', 'get_write_attribution', 'list_jobs', 'pause_job', 'quarantine_list',
@@ -66,7 +71,7 @@ const REFUSED_OPS = [
   'schema_apply_mutations', 'search_stats', 'search_tune', 'send_job_message', 'set_memory_writeback', 'set_skill_policy',
   'submit_job', 'wait_job', 'chronicle_backfill', 'file_list', 'file_register', 'file_upload', 'file_url', 'file_verify',
   'get_skill_retention', 'import_skill_proposal', 'prune_skill_revisions', 'retain_skill_revision', 'get_agent_job',
-  'submit_agent', 'storage_register', 'storage_update',
+  'submit_agent', 'storage_register', 'storage_update', 'put_schema_pack',
 ] as const;
 
 export const OPERATION_CLASSES: Readonly<Record<string, EnforcedClass>> = Object.freeze(Object.fromEntries([

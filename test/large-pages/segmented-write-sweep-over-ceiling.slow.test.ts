@@ -52,7 +52,9 @@ const OVER_CEILING_REFUSALS: Record<string, { why: string; via: 'ceiling' | 'get
   put_page: { via: 'getter', why: 'whole-body rewrite: the local put reads the old body for its non-empty check (remote puts refuse page_shrink_refused first)' },
   capture: { via: 'getter', why: 'whole-body rewrite of the page' },
   begin_page_upload: { via: 'getter', why: 'whole-body replace upload (remote uploads refuse page_shrink_refused first)' },
-  confirm_memory: { via: 'getter', why: 'rewrites the body whole to drop the unconfirmed marker' },
+  // Ours (governedwork fork, F16): the unmanaged put path (trust/page-handlers.ts markerMarkdown) reads the body back
+  // whole through wholeBodySnapshot, which refuses over the ceiling before reading; a managed brain flips the frontmatter.
+  confirm_memory: { via: 'ceiling', why: 'on this unmanaged brain rewrites the body whole to drop the unconfirmed marker, read back whole up to the ceiling' },
   extraction_review: { via: 'getter', why: 'records the review by editing the body as one string' },
 };
 

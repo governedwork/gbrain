@@ -166,6 +166,8 @@ export const NO_PAGE_TARGET: Record<string, string> = {
   memory_write: 'writes only to the caller\'s member page or memory/scope; the segmented scope page is pinned in remember-segmented-entity-9213',
   set_memory_writeback: 'config', memory_conversation_mode: 'config', mute_notice: 'config',
   code_traversal_cache_clear: 'cache', migrate_embeddings: 'embeddings', schema_apply_mutations: 'schema pack',
+  // Ours (governedwork fork): a brain-resident pack revision lives in schema_pack_revisions/heads, never in a page
+  put_schema_pack: 'brain-resident schema pack rows (schema-pack/db-store.ts), not pages',
   run_onboard: 'onboarding job', run_skillopt: 'skill optimizer',
   loops_close: 'open-loop rows', loops_mute: 'open-loop rows', loops_unmute: 'open-loop rows',
   questions_pin: 'pinned questions', questions_refresh: 'pinned questions', questions_unpin: 'pinned questions',
