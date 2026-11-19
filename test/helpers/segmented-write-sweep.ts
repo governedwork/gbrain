@@ -163,6 +163,8 @@ export const NO_PAGE_TARGET: Record<string, string> = {
   entity_identity_unlink: 'removes an identity row by entity id and slug; no page read',
   purge_fact: 'admin purge of fact rows; a segmented fence read is pinned by the withdrawal suites',
   unpurge_page: 'clears a purge tombstone; the page no longer exists',
+  // Ours (governedwork fork, L144): the page id is read by SQL under the page key lock; no Page object is loaded
+  prune_page_versions: 'deletes page_versions rows of one page by id; no Page object; its segmented-version sweep is pinned in test/versions.test.ts',
   memory_write: 'writes only to the caller\'s member page or memory/scope; the segmented scope page is pinned in remember-segmented-entity-9213',
   set_memory_writeback: 'config', memory_conversation_mode: 'config', mute_notice: 'config',
   code_traversal_cache_clear: 'cache', migrate_embeddings: 'embeddings', schema_apply_mutations: 'schema pack',

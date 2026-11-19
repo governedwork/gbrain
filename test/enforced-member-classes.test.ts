@@ -67,5 +67,8 @@ describe('enforced member allow-list', () => {
     expect(enforcedClassOf('search', ['modes'], 'search')).toBe('refused');
     expect(enforcedClassOf('sync', ['status'], undefined)).toBe('refused');
     expect(enforcedClassOf('git', ['commit-push'], undefined)).toBe('write');
+    // Ours (governedwork fork, L144): the history read stays a read; its prune subcommand is the owner's.
+    expect(enforcedClassOf('history', ['notes/x-example'], 'get_versions')).toBe('read');
+    expect(enforcedClassOf('history', ['prune', 'notes/x-example', '--keep', '0', '--yes'], 'get_versions')).toBe('refused');
   });
 });

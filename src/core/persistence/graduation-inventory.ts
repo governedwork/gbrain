@@ -149,6 +149,8 @@ export const GRADUATION_INVENTORY: Inventory = {
     carry('page_segment_derivation_purges', 'operational', 'Recorded purge sweeps of segment derivation rows still in progress, with their cursor and claim; without them a graduated brain stops refusing claimed text and never finishes sweeping it out of copied derivation rows.'),
     carry('page_segment_texts', 'user_data', 'Segment texts of segmented page bodies, stored once per source; without them a large page has no body.'),
     carry('page_versions', 'user_data', 'Page revision history with attribution.'),
+    // Ours (governedwork fork, ledger L144).
+    carry('page_version_prunes', 'user_data', 'Text-free record of the version history an owner pruned; the belief ledger reads it so a pruned revision is not a preimage gap.'),
     carry('page_write_guards', 'user_data', 'Page write guards per source incarnation and slug.'),
     carry('pages', 'user_data', 'Pages with ids, knowledge_revision, revision attribution and timestamps.'),
     carry('persistence_counters', 'operational', 'Request admission counters; carried and recomputable from the carried requests.'),

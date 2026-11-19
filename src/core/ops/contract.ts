@@ -876,7 +876,11 @@ export interface Operation {
    * lists it on MCP, and a call returns `cli_only` whose fix is this exact
    * command (`<name>` tokens are inputs the agent fills from its call).
    */
-  cliOnly?: { argv: readonly string[] };
+  cliOnly?: {
+    argv: readonly string[];
+    /** Ours (governedwork fork): the command to name instead when the refused call carried this param (first match wins). */
+    argvWhen?: Readonly<Record<string, readonly string[]>>;
+  };
   /**
    * WP1 honest catalog: the op is callable by remote callers only when this
    * config gate resolves true (dual-plane, DB > file > absent=false). Network

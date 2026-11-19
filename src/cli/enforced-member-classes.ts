@@ -48,7 +48,7 @@ const REFUSED_OPS = [
   // hidden operations: no CLI path reaches them (their CLI names are CLI-only commands or gbrain call)
   'advisor', 'code_blast', 'code_callees', 'code_callers', 'code_def', 'code_flow', 'code_refs', 'find_anomalies',
   'find_experts', 'find_orphans', 'get_recent_salience', 'sources_list', 'sources_resolve_path', 'sources_status', 'think',
-  'capture', 'list_page_purges', 'list_watches', 'purge_fact', 'unpurge_page', 'unwatch', 'watch_job', 'watch_write_request', 'watch_cron', 'accept_wakeshift_terms', 'connectors_status',
+  'capture', 'list_page_purges', 'list_watches', 'purge_fact', 'unpurge_page', 'prune_page_versions', 'unwatch', 'watch_job', 'watch_write_request', 'watch_cron', 'accept_wakeshift_terms', 'connectors_status',
   'get_recent_transcripts', 'sources_inspect', 'sources_add', 'sources_remove', 'connector_sync',
   'code_traversal_cache_clear', 'migrate_embeddings', 'purge_deleted_pages', 'sync_brain',
   // ours (governedwork fork): brain-resident schema packs read without a no-trace test; publishing is admin below
@@ -128,6 +128,8 @@ export const CLI_COMMAND_CLASSES: Readonly<Record<string, EnforcedClass | Enforc
 /** Subcommands of operation-backed commands that run something other than the operation. */
 export const OPERATION_SUBCOMMANDS: Readonly<Record<string, EnforcedSubcommands>> = {
   search: { default: 'read', sub: { modes: 'refused', stats: 'refused', tune: 'refused', diagnose: 'refused' } },
+  // Ours (governedwork fork, L144): `gbrain history prune` runs the owner-only prune_page_versions as the trusted local CLI.
+  history: { default: 'read', sub: { prune: 'refused' } },
 };
 
 function subcommandClass(spec: EnforcedClass | EnforcedSubcommands, args: readonly string[]): EnforcedClass {

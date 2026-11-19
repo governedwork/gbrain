@@ -54,6 +54,7 @@ import { BELIEF_LEDGER_SCHEMA_SQL } from '../src/core/belief/schema.ts';
 import { GIT_CANONICAL_SCHEMA_SQL } from '../src/core/persistence/git-canonical-schema.ts';
 import { FUNCTION_SEARCH_PATH_HARDENING_SQL } from '../src/core/function-search-path.ts';
 import { BRAIN_PACK_SCHEMA_SQL } from '../src/core/schema-pack/brain-pack-schema.ts';
+import { PAGE_VERSION_PRUNES_SCHEMA_SQL } from '../src/core/page-state/version-prune-schema.ts';
 import { forkSchemaEpoch, forkSchemaEpochSql } from '../src/core/fork-schema.ts';
 
 const REPO = resolve(import.meta.dir, '..');
@@ -131,6 +132,8 @@ const BASE_FRAGMENTS: readonly Fragment[] = [
   { source: 'src/core/belief/schema.ts', expr: 'BELIEF_LEDGER_SCHEMA_SQL', postgres: BELIEF_LEDGER_SCHEMA_SQL, pglite: BELIEF_LEDGER_SCHEMA_SQL },
   // Ours (governedwork fork): brain-resident schema packs.
   { source: 'src/core/schema-pack/brain-pack-schema.ts', expr: 'BRAIN_PACK_SCHEMA_SQL', postgres: BRAIN_PACK_SCHEMA_SQL, pglite: BRAIN_PACK_SCHEMA_SQL, fork: true },
+  // Ours (governedwork fork): the record of version history an owner pruned (prune_page_versions).
+  { source: 'src/core/page-state/version-prune-schema.ts', expr: 'PAGE_VERSION_PRUNES_SCHEMA_SQL', postgres: PAGE_VERSION_PRUNES_SCHEMA_SQL, pglite: PAGE_VERSION_PRUNES_SCHEMA_SQL, fork: true },
 ];
 
 /** Ours (governedwork fork): the hash of every fork fragment's text, both engines, in FRAGMENTS order. */

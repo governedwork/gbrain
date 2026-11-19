@@ -131,7 +131,7 @@ export async function pruneHoldingPageVersions(tx: BrainEngine, pageId: number):
  * so a remote reader is never shown its reason: the successor's visibility can no longer be checked), and the page has
  * lost history (`version_history_gap_at`, read by valid-time answers).
  */
-async function markPrunedHistory(tx: BrainEngine, pageId: number, pruned: number[]): Promise<void> {
+export async function markPrunedHistory(tx: BrainEngine, pageId: number, pruned: number[]): Promise<void> {
   if (!pruned.length) return;
   await tx.executeRaw(`UPDATE page_versions SET successor_pruned = true WHERE page_id = $1 AND id IN (
       SELECT (SELECT max(k.id) FROM page_versions k WHERE k.page_id = $1 AND k.id < d.id) FROM unnest($2::int[]) AS d(id))`, [pageId, pruned]);
