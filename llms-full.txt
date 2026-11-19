@@ -1525,8 +1525,9 @@ never a watch loop.
 The lander's check has two steps. Per PR: `bun run typecheck`, then the test files the change names — a
 changed `test/*.test.ts`, and `test/<name>.test.ts` of each changed `src/**/<name>.ts`. Once per base: the
 whole unit suite (`bun run test`); a red it finds holds the queue until the base is fixed. Both run with
-`GBRAIN_TEST_SKIP_LAUNCHD=1`. The whole suite on Linux, PostgreSQL arms included, is the `fork-suite`
-workflow, required beside `lander/verdict`. Run the tests your change can break beyond the ones it names,
+`GBRAIN_TEST_SKIP_LAUNCHD=1`. The whole suite on Linux, the PostgreSQL arms and E2E corpus included, is the
+`fork-suite` workflow, required beside `lander/verdict` (what it runs: the header of
+`.github/workflows/fork-suite.yml`). Run the tests your change can break beyond the ones it names,
 `bun run verify`, and anything else it needs yourself, and say in the PR what you ran.
 
 ---
