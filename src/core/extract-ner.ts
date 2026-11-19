@@ -22,6 +22,7 @@ import { isCrossSourceLinksEnabled } from './link-extraction.ts';
 import { inferLinkTypeFromPack } from './schema-pack/link-inference.ts';
 import { loadActivePackForLocalEngine, packSupportsNerInference } from './schema-pack/best-effort.ts';
 import { isQuarantined } from './quarantine.ts';
+import { dropSuppressedMentions } from './mentions/suppressions.ts';
 import { renderFragment, sqlFragment } from './engine-sql/fragment.ts';
 import { entityTypePredicateSql, resolveEntityTypes } from './schema-pack/entity-types.ts';
 
@@ -173,11 +174,12 @@ export async function extractNerLinks(
     const body = page.compiled_truth + '\n\n' + (page.timeline ?? '');
     if (!body.trim()) continue;
 
-    const mentions = findMentionedEntities(body, gazetteer, {
+    // A pair remove_link took stays removed (mentions/suppressions.ts).
+    const mentions = await dropSuppressedMentions(engine, Number(page.id), findMentionedEntities(body, gazetteer, {
       fromSlug: slug,
       fromSourceId: source_id,
       allowCrossSource,
-    });
+    }));
     if (mentions.length === 0) continue;
 
     for (const m of mentions) {

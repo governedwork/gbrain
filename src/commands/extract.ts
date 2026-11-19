@@ -89,6 +89,7 @@ export { withRetry };
 export type { WithRetryOpts } from '../core/retry.ts';
 import { buildGazetteer, findMentionedEntities, hashGazetteer } from '../core/by-mention.ts';
 import { pageMentions, runMentionPass, type MentionPassResult } from '../core/mentions/pass.ts';
+import { dropSuppressedMentions } from '../core/mentions/suppressions.ts';
 import type { LinkExtractionFailure, LinkExtractionSystemic } from '../core/persistence/links-maintenance.ts';
 import { formatMentionSummary, linkPhaseDeadline, mentionJsonFields, previewMentionPass } from '../core/mentions/stale.ts';
 // #4611: the cross-source link fallback follows the configured
@@ -2552,8 +2553,8 @@ async function extractMentionsFromDb(
     // A segmented body is scanned block by block (mentions/pass.ts pageMentions).
     const body = isSegmentedPage(page) ? null : (page.title ?? '') + '\n\n' + page.compiled_truth + '\n\n' + (page.timeline ?? '');
     const mentionOpts = { fromSlug: slug, fromSourceId: source_id, allowCrossSource };
-    const mentions = body === null ? await pageMentions(engine, { ...withoutBody(page), id: Number(page.id), source_id }, gazetteer, mentionOpts)
-      : body.trim() ? findMentionedEntities(body, gazetteer, mentionOpts) : [];
+    const mentions = await dropSuppressedMentions(engine, Number(page.id), body === null ? await pageMentions(engine, { ...withoutBody(page), id: Number(page.id), source_id }, gazetteer, mentionOpts)
+      : body.trim() ? findMentionedEntities(body, gazetteer, mentionOpts) : []); // a pair remove_link took stays removed (mentions/suppressions.ts)
 
     // #3674 --rebuild: per-page delete-then-insert in ONE transaction. The
     // delete sweeps the page's link_source='mentions' rows — INCLUDING pages

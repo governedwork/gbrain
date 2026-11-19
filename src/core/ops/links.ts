@@ -182,7 +182,7 @@ const remove_link: Operation = {
   name: 'remove_link',
   idempotent: false,
   outputRedaction: 'no_stored_text',
-  description: 'Remove a link between two pages (optionally only one link_type or link_source). Use when a relationship was recorded wrongly. Needs write scope. On page_not_found: resolve both slugs with resolve_slugs.',
+  description: 'Remove a link between two pages (optionally only one link_type or link_source). Use when a relationship was recorded wrongly. Removing a derived mention (link_source mentions, without a link_type or with link_type mentions) keeps it removed: mention extraction does not derive that page pair again. Needs write scope. On page_not_found: resolve both slugs with resolve_slugs.',
   params: {
     from: { type: 'string', required: true, description: 'Slug of the page the link originates from (same endpoint order as add_link).' },
     to: { type: 'string', required: true, description: 'Slug of the page the link points to.' },
@@ -199,7 +199,7 @@ const remove_link: Operation = {
       ? { fromSourceId: ctx.sourceId, toSourceId: ctx.sourceId }
       : undefined;
     const remove = async (engine: typeof ctx.engine, opts: typeof linkOpts) => {
-      // Ours (governedwork fork): a removed derived mention stays removed; the mention pass skips its suppressed pair.
+      // Ours (governedwork fork): a removed plain mention stays removed; no mention extraction derives its pair again.
       const derived = await derivedMentionPair(engine, { from: p.from as string, to: p.to as string, fromSourceId: opts?.fromSourceId ?? 'default',
         toSourceId: opts?.toSourceId ?? 'default', linkType: (p.link_type as string) || undefined, linkSource: (p.link_source as string) || undefined });
       const removed = await engine.removeLink(

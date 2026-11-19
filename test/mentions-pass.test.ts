@@ -15,7 +15,8 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 import type { PGLiteEngine } from '../src/core/pglite-engine.ts';
-import { extractStaleFromDB } from '../src/commands/extract.ts';
+import { extractStaleFromDB, runExtract } from '../src/commands/extract.ts';
+import { extractNerLinks } from '../src/core/extract-ner.ts';
 import { MENTION_EXTRACTOR_VERSION, countMentionDuePages, runMentionPass } from '../src/core/mentions/pass.ts';
 import { buildGazetteer } from '../src/core/by-mention.ts';
 import { readMentionCoverage } from '../src/core/mentions/coverage.ts';
@@ -453,4 +454,50 @@ test('L159: remove_link records a suppression only when it removes a derived men
   expect(await suppressions()).toEqual(['notes/n1 -> companies/acme-example']);
   await engine.executeRaw("DELETE FROM pages WHERE slug = 'notes/n1'");
   expect(await suppressions()).toEqual([]);
+});
+
+const removeMention = (from: string, to: string, params: Record<string, string> = {}) =>
+  operationsByName.remove_link!.handler(ctxFor(engine, false), { from, to, ...params });
+async function quietly<T>(fn: () => Promise<T>): Promise<T> {
+  const log = console.log, err = console.error;
+  console.log = () => {}; console.error = () => {};
+  try { return await fn(); } finally { console.log = log; console.error = err; }
+}
+
+test('L159: extract links --by-mention, with and without --rebuild, does not derive again a mention remove_link took', async () => {
+  await page(engine, 'companies/acme-example', 'company', 'Acme Example', 'A company.');
+  await page(engine, 'notes/n1', 'note', 'n1', 'Talked to Acme Example about the rollout.');
+  await page(engine, 'notes/n2', 'note', 'n2', 'Acme Example called back.');
+  await runMentionPass(engine);
+  expect(await removeMention('notes/n1', 'companies/acme-example')).toMatchObject({ status: 'ok', removed: 1 });
+  for (const args of [['links', '--by-mention', '--source', 'db'], ['links', '--by-mention', '--rebuild', '--source', 'db']]) {
+    // The control page's link goes too, so its return proves the run scanned the pages.
+    await engine.executeRaw("DELETE FROM links WHERE from_page_id = (SELECT id FROM pages WHERE slug = 'notes/n2')");
+    await engine.executeRaw('DELETE FROM op_checkpoints');
+    await quietly(() => runExtract(engine, args));
+    expect(await mentionLinks(engine)).toEqual(['notes/n2 -> companies/acme-example']);
+  }
+});
+
+test('L159: extract links --ner does not type a mention remove_link took', async () => {
+  await page(engine, 'companies/acme-example', 'company', 'Acme Example', 'Acme Example builds widgets.');
+  await page(engine, 'people/dana-example', 'person', 'Dana Example', 'Dana Example works at Acme Example.');
+  await page(engine, 'people/erin-example', 'person', 'Erin Example', 'Erin Example works at Acme Example.');
+  await runMentionPass(engine);
+  expect(await removeMention('people/dana-example', 'companies/acme-example')).toMatchObject({ status: 'ok', removed: 1 });
+  expect(await extractNerLinks(engine)).toMatchObject({ pack_unavailable: false });
+  expect(await mentionLinks(engine)).toEqual(['people/erin-example -> companies/acme-example (typed_ner)', 'people/erin-example -> companies/acme-example']);
+});
+
+test('L159: removing only a typed derived edge records no suppression, and the pair\'s plain mention is derived', async () => {
+  await page(engine, 'companies/acme-example', 'company', 'Acme Example', 'A company.');
+  await page(engine, 'notes/n1', 'note', 'n1', 'Talked to Acme Example about the rollout.');
+  await engine.addLinksBatch([{ from_slug: 'notes/n1', to_slug: 'companies/acme-example', link_type: 'works_at', link_source: 'mentions', link_kind: 'typed_ner', context: '' } as never]);
+  await runMentionPass(engine);
+  expect(await mentionLinks(engine)).toEqual(['notes/n1 -> companies/acme-example (typed_ner)']);
+  expect(await removeMention('notes/n1', 'companies/acme-example', { link_type: 'works_at' })).toMatchObject({ status: 'ok', removed: 1 });
+  expect(await suppressions()).toEqual([]);
+  await engine.executeRaw('UPDATE page_mention_state SET mention_revision = NULL');
+  await runMentionPass(engine);
+  expect(await mentionLinks(engine)).toEqual(['notes/n1 -> companies/acme-example']);
 });

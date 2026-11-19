@@ -14,14 +14,14 @@
  */
 
 import type { BrainEngine } from '../core/engine.ts';
-import { buildGazetteer, findMentionedEntities, tokenizeTitle, type DroppedName, type GazetteerEntry } from '../core/by-mention.ts';
+import { buildGazetteer, findMentionedEntities, mentionScanText, tokenizeTitle, type DroppedName, type GazetteerEntry } from '../core/by-mention.ts';
 import { isCrossSourceLinksEnabled } from '../core/link-extraction.ts';
 import { linkableTypesFor, loadSourcePack, parseNameList, readMentionPolicy } from '../core/mentions/policy.ts';
 import { deriveEntityAliases, type RejectedAlias } from '../core/mentions/aliases.ts';
 import { aliasOptsOf } from '../core/mentions/pass.ts';
 import { readIdentitySiblings } from '../core/mentions/siblings.ts';
 import { MENTION_EXTRACTOR_VERSION } from '../core/mentions/pass.ts';
-import { suppressedMentionKeys } from '../core/mentions/suppressions.ts';
+import { isMentionSuppressed } from '../core/mentions/suppressions.ts';
 
 export type ExplainReason = 'ambiguous_first_word' | 'below_min_length' | 'generic_token' | 'alias_collision' | 'case_mismatch'
   | 'type_not_linkable' | 'linking_disabled' | 'pending' | 'ignored_by_page' | 'ignored_by_config' | 'excluded_by_config' | 'denied_by_config' | 'not_a_known_name'
@@ -123,13 +123,13 @@ export async function explainMention(engine: BrainEngine, query: string, opts: {
   const linked = Number(link?.n ?? 0) > 0;
   const withPage = (r: ExplainReason | null, message?: string) => ({ ...done(base, r, message), page: { slug: page.slug, linked } });
   if (found && !linked) {
-    const suppressed = await suppressedMentionKeys(engine, [Number(page.id)]);
-    if ([...targets].some(slug => suppressed.has(`${page.id}\0${sourceId}\0${slug}`))) return withPage('removed_by_link');
+    if (await isMentionSuppressed(engine, Number(page.id), sourceId, [...targets])) return withPage('removed_by_link');
     return { ...withPage('pending'), next: 'gbrain extract --stale' };
   }
   if (found) return withPage(null, 'The page names this entity with this name and links to it.');
   const cased = entries.find(e => e.caseTokens);
-  if (cased && text.toLowerCase().includes(cased.caseTokens!.join(' ').toLowerCase())) return withPage('case_mismatch');
+  // The text the scanner reads (code, comments and link targets masked): a name only inside a URL is not a case mismatch.
+  if (cased && mentionScanText(text).toLowerCase().includes(cased.caseTokens!.join(' ').toLowerCase())) return withPage('case_mismatch');
   if (page.due && linked) return { ...withPage('pending'), next: 'gbrain extract --stale' };
   return withPage('not_a_known_name', linked ? 'The page links to this entity through another of its names, not this one.'
     : 'The page text does not contain this name.');

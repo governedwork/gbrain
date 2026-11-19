@@ -8,7 +8,7 @@
  *      relationship state of every touched key is recomputed;
  *   2. timeline rows and timeline events that name the twin, raw data, file attachments, user-added tags (a survivor tag
  *      the import owns becomes user-added when the twin's was), free-text page aliases and facts other pages assert
- *      about the twin;
+ *      about the twin, and (ours, governedwork fork) the twin's `mention_suppressions` pairs, either end;
  *   3. the twin's slug becomes a `slug_aliases` row for the survivor, so links written against it keep resolving;
  *   4. the twin forgets its recorded file (`source_path`, `source_uri` cleared, marked `origin_twin`) and is soft-deleted:
  *      the file stays, the 72 h retention purge removes the twin database-only, and a restored twin writes or removes
@@ -29,6 +29,7 @@ import { recordRenameAlias } from '../page-state/rename-alias.ts';
 import { refreshRelationships, type RelationshipKey } from '../link-relationships.ts';
 import { SYNC_IMPORT_PROVENANCE_OP } from './sync-holds.ts';
 import { ORIGIN_TWIN_REASON } from './origin-twins.ts';
+import { moveMentionSuppressions } from '../mentions/suppressions.ts';
 
 /** Link provenances re-derived from page bodies and frontmatter: a survivor with the same body re-derives each one. */
 export const DERIVED_LINK_SOURCES = ['markdown', 'frontmatter', 'mentions', 'wikilink-resolved'];
@@ -128,6 +129,8 @@ export async function mergeTwinInto(tx: BrainEngine, input: { sourceId: string; 
   const factIds = (await tx.executeRaw<{ id: number }>(`UPDATE facts SET entity_slug=$3 WHERE source_id=$1 AND entity_slug=$2
     AND source_markdown_slug IS DISTINCT FROM $2 RETURNING id`, [sourceId, twin.slug, survivor.slug])).map(row => Number(row.id));
   await recordRenameAlias(tx, sourceId, twin.slug, survivor.slug);
+  // Ours (governedwork fork): a mention a person removed from or to the twin stays removed from or to the survivor.
+  await moveMentionSuppressions(tx, twin.page_id, survivor.page_id);
   const after = [...await relationshipKeys(tx, 'links', [survivor.page_id]), ...await relationshipKeys(tx, 'link_transitions', [survivor.page_id])];
   await refreshRelationships(tx, [...before, ...after]);
   noteBelief({ kind: 'transferred', fromSlug: twin.slug, table: 'links', ids: movedLinks });

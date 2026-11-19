@@ -155,6 +155,23 @@ for (const backend of testBackends()) describe(`[${backend}] #6948 mergeTwinInto
     expect((await engine.executeRaw<{ source_path: string }>('SELECT source_path FROM pages WHERE id=$1', [t.survivor.page_id]))[0]!.source_path).toBe(t.origin);
   });
 
+  test('L159: the twin\'s mention suppressions move to the survivor at either end, deduplicated, and none points a page at itself', async () => {
+    const t = await trio();
+    const other = await put(`people/bob-example-${t.tag}`, { body: 'Bob, a person.' });
+    const suppress = (from: number, to: number) => write(tx => tx.executeRaw('INSERT INTO mention_suppressions (from_page_id, to_page_id) VALUES ($1, $2)', [from, to]));
+    await suppress(t.twin.page_id, t.third);
+    await suppress(t.survivor.page_id, t.third);
+    await suppress(other, t.twin.page_id);
+    await suppress(t.twin.page_id, other);
+    await suppress(t.survivor.page_id, t.twin.page_id);
+    await merge(t);
+    const pages = [t.survivor.page_id, t.twin.page_id, t.third, other];
+    const rows = await engine.executeRaw<{ f: number; t: number }>(
+      'SELECT from_page_id AS f, to_page_id AS t FROM mention_suppressions WHERE from_page_id = ANY($1::int[]) OR to_page_id = ANY($1::int[])', [pages]);
+    const pairs = rows.map(r => `${Number(r.f)}>${Number(r.t)}`).sort();
+    expect(pairs).toEqual([`${other}>${t.survivor.page_id}`, `${t.survivor.page_id}>${other}`, `${t.survivor.page_id}>${t.third}`].sort());
+  });
+
   test('distinct evidence on the same unique key refuses the merge before any write: link context, raw payload, timeline detail, relationship date precision', async () => {
     const cases: Array<[string, (t: Awaited<ReturnType<typeof trio>>) => Promise<unknown>]> = [
       ['links', async t => { await link(t.third, t.twin.page_id, 'knows', 'manual', 'context A'); await link(t.third, t.survivor.page_id, 'knows', 'manual', 'context B'); }],
