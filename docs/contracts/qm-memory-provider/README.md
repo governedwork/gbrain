@@ -40,6 +40,11 @@ carry that same `source_id`, and `entity_refs` without `source_id`, an entry in
 another source, or `session_id` is refused with `invalid_params` before anything
 is read.
 
+`v6.json` (ours, governedwork fork) keeps all of v5 and publishes `volunteer_context` as the fork serves it:
+`format` (`json`, `text` or `hook`, the shape a harness prompt hook reads) and `session_id` deduping, so a page
+already volunteered to that session in the last 12 hours is not volunteered again. Its `deferred_ops` also list the
+operations deferred after v5 (`promote_guest_note`, and the fork's `rename_page`). v1 to v5 are unchanged.
+
 They are generated from the live operation registry by
 `bun scripts/build-qm-memory-contract.ts` (part of `bun run regen:all`), and
 `test/qm-memory-contract.test.ts` fails when a committed file drifts.

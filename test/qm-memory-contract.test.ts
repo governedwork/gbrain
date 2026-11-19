@@ -32,6 +32,8 @@ const V3_SHA256 = 'cf4e3f514c57bcd381c1bc0846a0de105dd2a0fbbf361aaa08175cd8bfe07
 const V4_SHA256 = '51f2ee77f0925f6ac19ecc116eeb6d7527d00b8a2962ebbad939f61d0afa3b2f';
 /** The v5 bytes as they landed on master (GST-2407); an operation deferred later (GBRA-504 promote_guest_note) stays out. */
 const V5_SHA256 = '524b3d62fcf2a30c5c2a08d08467461b0995f0503069c84356d15a08724129f2';
+/** Ours (governedwork fork, F5): the v6 bytes as the fork line publishes them. */
+const V6_SHA256 = 'fdca84bc4b8779e3fe9c3bdb54501fc555f4c8a3c382871e57a418194c3ada05';
 
 describe('QM memory-provider contract v1', () => {
   const fixture = JSON.parse(readFileSync(QM_CONTRACT_PATH, 'utf8'));
@@ -197,14 +199,20 @@ describe('QM memory-provider contract v3 (GST-1158 F1: personal tools, frozen re
     expect(JSON.stringify(fixture.memory_recall)).not.toContain('score');
   });
 
-  test('it lists every personal tool, personal-only and opt-in, with the schema MCP serves', () => {
+  // Ours (governedwork fork, F5): the fork's volunteer_context takes `format` and dedupes per session, which v6 publishes;
+  // v3 keeps what it published, so its schemas are the served ones restricted to v3's arguments (as v1's and v2's are).
+  test('it lists every personal tool, personal-only and opt-in, with the schema MCP serves restricted to what v3 published (v6 adds volunteer_context\'s format and session dedupe)', () => {
     const names = fixture.personal_tools.tools.map((t: { name: string }) => t.name);
     expect(names).toEqual([...QM_PERSONAL_OPS].sort());
     expect(names).toEqual(['context_pack', 'entity', 'find_experts', 'forget_fact', 'get_backlinks', 'get_page', 'get_timeline', 'get_write_request', 'query', 'volunteer_context', 'whois']);
     const served = buildToolDefs(operations.filter(o => QM_PERSONAL_OPS.has(o.name)));
     for (const tool of fixture.personal_tools.tools) {
       const def = served.find(d => d.name === tool.name)!;
-      expect({ description: tool.description, ...tool.input_schema }).toEqual({ description: def.description, ...def.inputSchema });
+      const servedProperties = def.inputSchema.properties as Record<string, Record<string, unknown>>;
+      expect(Object.keys(servedProperties).filter(k => !(k in tool.input_schema.properties))).toEqual(tool.name === 'volunteer_context' ? ['format'] : []);
+      const properties = Object.fromEntries(Object.entries(servedProperties).filter(([k]) => k in tool.input_schema.properties)
+        .map(([k, v]) => [k, tool.name === 'volunteer_context' && k === 'session_id' ? { ...v, description: 'Optional caller session id, logged for attribution.' } : v]));
+      expect({ description: tool.description, ...tool.input_schema }).toEqual({ description: def.description, ...def.inputSchema, properties });
       expect(tool.personal_only).toBe(true);
       expect(tool.result.structured_content).toBeDefined();
     }
@@ -386,5 +394,51 @@ describe('QM memory-provider contract v5 (GST-2407: context_pack reads its named
     expect(marks).toEqual({ context_pack: true, entity: true, find_experts: true, forget_fact: false, get_backlinks: true, get_page: true, get_timeline: true, get_write_request: false, query: true, volunteer_context: true, whois: true });
     for (const name of Object.keys(marks)) expect(marks[name]).toBe(SCOPE_READ_OPS.has(name));
     for (const op of SCOPE_READ_OPS) expect(op === 'memory_recall' || marks[op] === true).toBe(true);
+  });
+});
+
+// Ours (governedwork fork, F5; ruling (a) of the gbrain-737 wave-2 drive): the fork's volunteer_context hook shape
+// (`format`, output-format.ts) and per-session dedupe change the served schema of a personal tool, so they are a new
+// version; v1 to v5 stay as published. Operations the fork defers after v5 (F1 rename_page) are listed from v6 on.
+describe('QM memory-provider contract v6 (governedwork fork F5: volunteer_context format and session dedupe)', () => {
+  const fixture = JSON.parse(readFileSync(QM_CONTRACT_PATHS[6], 'utf8'));
+  const v5 = JSON.parse(readFileSync(QM_CONTRACT_PATHS[5], 'utf8'));
+  const sha = (bytes: string | Buffer) => createHash('sha256').update(bytes).digest('hex');
+
+  test('the committed fixture matches the live registry (regenerate with bun scripts/build-qm-memory-contract.ts)', () => {
+    expect(QM_CONTRACT_PATHS[6].endsWith(join('docs', 'contracts', 'qm-memory-provider', 'v6.json'))).toBe(true);
+    expect(readFileSync(QM_CONTRACT_PATHS[6], 'utf8')).toBe(renderQmMemoryContract(6));
+  });
+
+  test('v1 to v6 stay byte for byte as published, on disk and as the builder renders them', () => {
+    for (const [version, want] of [[1, V1_SHA256], [2, V2_SHA256], [3, V3_SHA256], [4, V4_SHA256], [5, V5_SHA256], [6, V6_SHA256]] as const) {
+      expect({ version, disk: sha(readFileSync(QM_CONTRACT_PATHS[version])), built: sha(renderQmMemoryContract(version)) }).toEqual({ version, disk: want, built: want });
+    }
+  });
+
+  test('every personal tool carries the schema MCP serves, unrestricted', () => {
+    const served = buildToolDefs(operations.filter(o => QM_PERSONAL_OPS.has(o.name)));
+    for (const tool of fixture.personal_tools.tools) {
+      const def = served.find(d => d.name === tool.name)!;
+      expect({ description: tool.description, ...tool.input_schema }).toEqual({ description: def.description, ...def.inputSchema });
+    }
+    const volunteer = fixture.personal_tools.tools.find((t: { name: string }) => t.name === 'volunteer_context');
+    expect(volunteer.input_schema.properties.format.enum).toEqual(['json', 'text', 'hook']);
+    expect(volunteer.input_schema.properties.session_id.description).toContain('not volunteered again');
+  });
+
+  test('it keeps everything v5 has; only the version, volunteer_context\'s schema and the deferred operations change', () => {
+    expect(fixture.version).toBe(6);
+    for (const key of Object.keys(v5)) if (key !== 'version' && key !== 'personal_tools' && key !== 'actor') expect(fixture[key]).toEqual(v5[key]);
+    const { tools, ...rest } = fixture.personal_tools;
+    const { tools: v5Tools, ...v5Rest } = v5.personal_tools;
+    expect(rest).toEqual(v5Rest);
+    const withoutVolunteer = (list: { name: string }[]) => list.filter(t => t.name !== 'volunteer_context');
+    expect(withoutVolunteer(tools)).toEqual(withoutVolunteer(v5Tools));
+    const { deferred_ops: deferred, ...actorRest } = fixture.actor;
+    const { deferred_ops: v5Deferred, ...v5ActorRest } = v5.actor;
+    expect(actorRest).toEqual(v5ActorRest);
+    expect(deferred.filter((op: string) => !v5Deferred.includes(op))).toEqual(['promote_guest_note', 'rename_page']);
+    expect(v5Deferred.filter((op: string) => !deferred.includes(op))).toEqual([]);
   });
 });
