@@ -71,8 +71,8 @@ export function stripCodeBlocks(content: string, opts: { onHtmlComment?: (start:
 }
 
 /**
- * Link syntax, in one left-to-right scan: an embed (`![[file]]`), a wikilink
- * (`[[target]]`, `[[target|display]]`; groups 1-2), an inline link's or image's
+ * Link syntax, in one left-to-right scan: a wikilink or embed (`[[target]]`,
+ * `![[target]]`, `[[target|display]]`; groups 1-2), an inline link's or image's
  * `(destination "title")` after its `]`, a whole reference definition line
  * `[label]: destination "title"` (groups 3-5; never a footnote definition
  * `[^x]: …`), a scheme autolink `<scheme:…>`, and a bare URL (`scheme://…`,
@@ -80,18 +80,19 @@ export function stripCodeBlocks(content: string, opts: { onHtmlComment?: (start:
  * repeat, so matching stays linear.
  */
 const LINK_SYNTAX_RE = new RegExp([
-  /!\[\[[^[\]\n]*\]\]/.source,
-  /\[\[([^[\]\n|]*)(?:\|([^[\]\n]*))?\]\]/.source,
+  /!?\[\[([^[\]\n|]*)(?:\|([^[\]\n]*))?\]\]/.source,
   /(?<=\])\([ \t]*(?:<[^>\n]*>|[^\s()]*(?:\([^\s()]*\)[^\s()]*)*)(?:[ \t]+(?:"[^"\n]*"|'[^'\n]*'))?[ \t]*\)/.source,
   /^( {0,3}\[(?!\^)[^\]\n]+\]:[ \t]*)(<[^>\n]*>|\S+)([ \t]+(?:"[^"\n]*"|'[^'\n]*'|\([^)\n]*\)))?[ \t]*\r?$/.source,
   /<[A-Za-z][A-Za-z0-9+.-]{1,31}:[^\s<>]*>/.source,
-  /(\b(?:[A-Za-z][A-Za-z0-9+.-]{1,31}:\/\/|www\.)[^\s<>"|]+)/.source,
+  /(\b(?:[A-Za-z][A-Za-z0-9+.-]{1,31}:\/\/|www\.)[^\s<>"|\u3000-\u303f\uff00-\uff65]+)/.source,
 ].join('|'), 'gm');
 
 /**
  * Where a bare URL ends, as a GFM extended autolink ends: at whitespace or `<` (and at `>`, `"` or `|`, which are
- * no URL's characters: an HTML attribute's quote, a table cell's edge), with trailing punctuation (`?!.,:*_~'"`) and an
- * unbalanced `)` not part of it. Non-ASCII text, commas and brackets inside a URL are part of it: a renderer links them.
+ * no URL's characters: an HTML attribute's quote, a table cell's edge, and at CJK punctuation, U+3000-U+303F and the
+ * fullwidth forms U+FF00-U+FF65 such as `。、，：`, which end a URL in CJK prose that has no spaces), with trailing
+ * punctuation (`?!.,:*_~'"`) and an unbalanced `)` not part of it. Other non-ASCII text (a katakana path), commas and
+ * brackets inside a URL are part of it: a renderer links them.
  */
 function urlEnd(url: string): number {
   let end = url.length;
@@ -103,6 +104,7 @@ function urlEnd(url: string): number {
   }
 }
 
+const ATTACHMENT = /\.(?:txt|pdf|png|jpe?g|gif|webp|svg|csv|json|html?|canvas|mp3|mp4|m4a|mov|wav)$/i;
 const FILE_NAME = /\.(?:md|markdown|txt|pdf|png|jpe?g|gif|webp|svg|csv|json|html?|canvas|mp3|mp4|m4a|mov|wav)$/i;
 
 /**
@@ -122,9 +124,10 @@ const blank = (s: string) => s.replace(/[^\r\n]/g, ' ');
 /**
  * Mask link syntax but keep the text a reader sees, replacing every masked
  * character but CR/LF with a space, so UTF-16 offsets hold (like
- * `stripCodeBlocks`): an embed (`![[Acme Example logo.png]]`) is masked whole,
- * since a reader sees the attachment; `[[Acme Example]]` keeps `Acme Example`
- * (only the brackets go) unless its target is address-shaped
+ * `stripCodeBlocks`): an attachment embed (`![[Acme Example logo.png]]`, a
+ * file extension) is masked whole, since a reader sees the attachment;
+ * `[[Acme Example]]` and a note transclusion `![[Acme Example]]` keep
+ * `Acme Example` (only the brackets go) unless the target is address-shaped
  * (`[[notes/widget-co-launch]]`: masked whole); `[[target|display]]` keeps
  * `display`; a markdown link or image keeps its bracketed text and loses its
  * `(destination)`; a reference definition line loses its title (a tooltip) and
@@ -137,6 +140,7 @@ export function maskLinkSyntax(content: string): string {
   if (!/[[<]|:\/\/|www\./.test(content)) return content;
   return content.replace(LINK_SYNTAX_RE, (match: string, target?: string, display?: string, label?: string, destination?: string, title?: string, url?: string) => {
     if (target !== undefined) {
+      if (match.startsWith('!') && ATTACHMENT.test(target.replace(/#.*$/, '').trim())) return blank(match);
       const open = match.indexOf('[[') + 2;
       if (display !== undefined) {
         const at = open + target.length + 1;

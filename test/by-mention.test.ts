@@ -430,11 +430,12 @@ test('L159: a wikilink to an entity\'s own slug or basename is link syntax, not 
   expect(l159Scan('Agenda: [[projects/acme-example]] then [[widget-co]] and [[notes/widget-co-launch]].')).toEqual([]);
 });
 
-// A reader sees an embed's attachment, not its file name.
-test('L159: an embed is masked whole: ![[Acme Example logo.png]] and ![[Widget Co roadmap 2024.pdf]] mention nothing', () => {
+// A reader sees an attachment embed's attachment, not its file name; a note transclusion shows the note's name.
+test('L159: an attachment embed is masked whole; a note transclusion ![[Widget Co]] is scanned like a bare wikilink', () => {
   const body = 'Logo: ![[Acme Example logo.png]] Roadmap: ![[Widget Co roadmap 2024.pdf]] Note: ![[Widget Co]]';
-  expect(maskLinkSyntax(body)).toBe(`Logo: ${' '.repeat('![[Acme Example logo.png]]'.length)} Roadmap: ${' '.repeat('![[Widget Co roadmap 2024.pdf]]'.length)} Note: ${' '.repeat('![[Widget Co]]'.length)}`);
-  expect(l159Scan(body)).toEqual([]);
+  expect(maskLinkSyntax(body)).toBe(`Logo: ${' '.repeat('![[Acme Example logo.png]]'.length)} Roadmap: ${' '.repeat('![[Widget Co roadmap 2024.pdf]]'.length)} Note:    Widget Co  `);
+  expect(l159Scan(body)).toEqual([['products/widget-co', body.indexOf('Widget Co]]')]]);
+  expect(l159Scan('See ![[notes/widget-co-call]].')).toEqual([]);
 });
 
 test('L159: [[target|display]] masks target| and keeps display; [text](url) keeps text', () => {
@@ -474,6 +475,22 @@ test('L159: a bare URL keeps non-ASCII text, commas and brackets, and ends at wh
   expect(scan(table)).toEqual([['projects/acme-example', table.indexOf('Acme Example')]]);
   expect(maskLinkSyntax('Read https://x.com/wiki/Foo_(bar). Then Acme Example.')).toBe(`Read ${' '.repeat('https://x.com/wiki/Foo_(bar)'.length)}. Then Acme Example.`);
   expect(maskLinkSyntax('(see https://x.com/a), "https://x.com/b"!')).toBe(`(see ${' '.repeat('https://x.com/a'.length)}), "${' '.repeat('https://x.com/b'.length)}"!`);
+});
+
+// CJK prose has no spaces: CJK punctuation (U+3000-U+303F, fullwidth U+FF00-U+FF65) ends a bare URL.
+test('L159: a bare URL in CJK prose ends at CJK punctuation, so the names after it are found', () => {
+  const gaz = gazetteerFromEntries([
+    { slug: 'people/tanaka', source_id: 'default', title: '田中太郎' },
+    { slug: 'people/zhang-wei', source_id: 'default', title: '张伟' },
+    { slug: 'people/li-na', source_id: 'default', title: '李娜' },
+  ]);
+  const scan = (body: string) => findMentionedEntities(body, gaz, { fromSlug: 'notes/n1', fromSourceId: 'default' }).map(m => [m.slug, m.offset]);
+  const ja = '詳細はhttps://example.com/を参照。田中太郎さんが来た。';
+  expect(maskLinkSyntax(ja)).toBe(`詳細は${' '.repeat('https://example.com/を参照'.length)}。田中太郎さんが来た。`);
+  expect(scan(ja)).toEqual([['people/tanaka', ja.indexOf('田中太郎')]]);
+  const zh = '会议链接：https://zoom.example/j/123，参会者张伟、李娜。';
+  expect(maskLinkSyntax(zh)).toBe(`会议链接：${' '.repeat('https://zoom.example/j/123'.length)}，参会者张伟、李娜。`);
+  expect(scan(zh)).toEqual([['people/zhang-wei', zh.indexOf('张伟')], ['people/li-na', zh.indexOf('李娜')]]);
 });
 
 // ============================================================
