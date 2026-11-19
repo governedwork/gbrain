@@ -3422,8 +3422,9 @@ END \$rls\$;
 CREATE TABLE IF NOT EXISTS mention_suppressions (
   from_page_id integer NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
   to_page_id integer NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+  link_type text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (from_page_id, to_page_id)
+  PRIMARY KEY (from_page_id, to_page_id, link_type)
 );
 CREATE INDEX IF NOT EXISTS mention_suppressions_to_page_idx ON mention_suppressions(to_page_id);
 DO \$rls\$ BEGIN
@@ -3435,7 +3436,7 @@ END \$rls\$;
 
 -- Ours (governedwork fork): stamps the fork schema epoch; stays after every fork fragment.
 -- BEGIN GENERATED from src/core/fork-schema.ts (forkSchemaEpochSql). Edit that file, then run: bun run build:schema
-INSERT INTO config (key, value) VALUES ('fork_schema_epoch', 'b7fc06d6c2983c1d')
+INSERT INTO config (key, value) VALUES ('fork_schema_epoch', '77d599073de3d731')
   ON CONFLICT (key) DO UPDATE SET value = CASE
     WHEN position(',' || EXCLUDED.value || ',' IN ',' || config.value || ',') > 0 THEN config.value
     ELSE config.value || ',' || EXCLUDED.value END;

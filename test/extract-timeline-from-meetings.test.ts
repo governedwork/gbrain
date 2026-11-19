@@ -98,6 +98,18 @@ describe('extractTimelineFromMeetings', () => {
     expect(await discussed('people/bob-example')).toEqual(['Discussed in By Name']);
   });
 
+  it('L159: a mention a person removed from the meeting with remove_link is not discussed there', async () => {
+    await seedEntity('people/alice-example', 'Alice Example');
+    await seedEntity('people/bob-example', 'Bob Example');
+    await seedNote('meetings/sync', { title: 'Sync', legacyType: 'meeting', body: 'Talked with Alice Example and Bob Example.' });
+    await engine.executeRaw(`INSERT INTO mention_suppressions (from_page_id, to_page_id, link_type)
+      SELECT m.id, p.id, 'mentions' FROM pages m, pages p WHERE m.slug = 'meetings/sync' AND p.slug = 'people/alice-example'`);
+    const result = await extractTimelineFromMeetings(engine, { gazetteer: await buildGazetteer(engine) });
+    expect(result).toMatchObject({ meetings_scanned: 1, entries_created: 1 });
+    expect(await engine.getTimeline('people/alice-example', { sourceId: 'default' })).toEqual([]);
+    expect((await engine.getTimeline('people/bob-example', { sourceId: 'default' })).map(e => e.summary)).toEqual(['Discussed in Sync']);
+  });
+
   it('does not scan ordinary note pages as meetings', async () => {
     await seedEntity('people/alice-example', 'Alice Example');
     await seedNote('notes/team-sync', { title: 'Team Sync' });

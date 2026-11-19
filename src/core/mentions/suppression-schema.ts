@@ -1,12 +1,13 @@
 /**
- * Ours (governedwork fork), not upstream GBrain: derived mentions a person
+ * Ours (governedwork fork), not upstream GBrain: derived mention edges a person
  * removed.
  *
- * `remove_link` of a `link_source='mentions'` edge records its page pair here,
- * and the mention pass never derives that pair again, so a rescan without a
- * page write (a gazetteer change, an extractor version bump) does not bring
- * the removed mention back. Page ids only (no slug, name or text); both ends
- * cascade with their page.
+ * `remove_link` of a `link_source='mentions'` edge records its page pair and
+ * link type here (`mentions` for the plain mention, the verb for a typed NER
+ * edge), and no derive path writes that edge again, so a rescan without a page
+ * write (a gazetteer change, an extractor version bump) does not bring it back.
+ * Page ids and a link type name only (no slug, name or text); both ends cascade
+ * with their page.
  *
  * One canonical copy, reaching fresh installs and every upgrade as a fork
  * fragment of scripts/build-schema.ts FRAGMENTS (how a connect knows to replay
@@ -17,8 +18,9 @@ export const MENTION_SUPPRESSION_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS mention_suppressions (
   from_page_id integer NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
   to_page_id integer NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+  link_type text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (from_page_id, to_page_id)
+  PRIMARY KEY (from_page_id, to_page_id, link_type)
 );
 CREATE INDEX IF NOT EXISTS mention_suppressions_to_page_idx ON mention_suppressions(to_page_id);
 DO $rls$ BEGIN

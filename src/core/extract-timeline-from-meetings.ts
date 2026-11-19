@@ -13,6 +13,7 @@
 import type { BrainEngine } from './engine.ts';
 import type { TimelineBatchInput } from './engine.ts';
 import { buildGazetteer, findMentionedEntities, type Gazetteer } from './by-mention.ts';
+import { loadMentionSuppressions, PLAIN_MENTION_LINK_TYPE } from './mentions/suppressions.ts';
 import { isCrossSourceLinksEnabled } from './link-extraction.ts';
 import { computeEffectiveDate } from './effective-date.ts';
 import { parseFrontmatter } from './backfill-effective-date.ts';
@@ -162,6 +163,8 @@ export async function extractTimelineFromMeetings(
   // The meeting's own resolved links (markdown and wikilinks, written by the link extractor) to linkable entity pages
   // join its attendees: the mention scan masks link syntax, so one written only as `[[companies/acme-example]]` is here.
   const entityPages = new Set([...gazetteer.values()].flat().map(e => `${e.source_id}::${e.slug}`));
+  // A plain mention a person removed with remove_link is not a discussed entity (mentions/suppressions.ts); one read.
+  const suppressed = await loadMentionSuppressions(engine, meetings.map(m => Number(m.id)));
   if (entityPages.size) {
     const linked = await engine.executeRaw<AttendedEdgeRow>(
       `SELECT meeting.slug AS meeting_slug, meeting.source_id AS meeting_source_id, target.slug AS attendee_slug, target.source_id AS attendee_source_id
@@ -290,6 +293,7 @@ export async function extractTimelineFromMeetings(
         allowCrossSource,
       });
       for (const m of mentions) {
+        if (suppressed.has(Number(meeting.id), m, PLAIN_MENTION_LINK_TYPE)) continue;
         targets.set(`${m.source_id}::${m.slug}`, {
           slug: m.slug,
           source_id: m.source_id,

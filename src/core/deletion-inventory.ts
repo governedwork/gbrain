@@ -92,6 +92,7 @@ const ROWS: readonly Row[] = [
   ['mcp_spend_reservations', 'out_of_scope', 'no_memory_text', 'client_id model provider status usage_unknown_reason budget_key'],
   ['mention_gazetteer_entries', 'out_of_scope', 'no_memory_text', 'source_id name_norm target_slug'],
   ['mention_index_status', 'out_of_scope', 'no_memory_text', 'source_id state policy_fingerprint error'],
+  ['mention_suppressions', 'out_of_scope', 'no_memory_text', 'link_type'],
   ['migration_impact_log', 'out_of_scope', 'probed_reported', 'remediation_id metric_name source_id brain_id idempotency_key applied_by details', 'details'],
   ['minion_attachments', 'out_of_scope', 'probed_reported', 'filename content_type content storage_uri sha256', 'content'],
   ['minion_budget_log', 'out_of_scope', 'no_memory_text', 'event_type model'],

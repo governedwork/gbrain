@@ -8,7 +8,8 @@
  *      relationship state of every touched key is recomputed;
  *   2. timeline rows and timeline events that name the twin, raw data, file attachments, user-added tags (a survivor tag
  *      the import owns becomes user-added when the twin's was), free-text page aliases and facts other pages assert
- *      about the twin, and (ours, governedwork fork) the twin's `mention_suppressions` pairs, either end;
+ *      about the twin, and (ours, governedwork fork) the twin's `mention_suppressions` rows, either end, dropping a
+ *      moved derived mention edge they cover;
  *   3. the twin's slug becomes a `slug_aliases` row for the survivor, so links written against it keep resolving;
  *   4. the twin forgets its recorded file (`source_path`, `source_uri` cleared, marked `origin_twin`) and is soft-deleted:
  *      the file stays, the 72 h retention purge removes the twin database-only, and a restored twin writes or removes
@@ -110,6 +111,8 @@ export async function mergeTwinInto(tx: BrainEngine, input: { sourceId: string; 
     WHERE ${MOVING} AND ${PAIR} RETURNING id`, params)).map(row => Number(row.id));
   const movedTransitions = await tx.executeRaw(`UPDATE link_transitions SET from_page_id=${MAP('from_page_id')}, to_page_id=${MAP('to_page_id')}, origin_page_id=${MAP('origin_page_id')}
     WHERE ${MOVING} AND ${PAIR} RETURNING id`, params);
+  // Ours (governedwork fork): the twin's suppressions move too, and a moved derived mention edge they cover is dropped.
+  const suppressedDropped = await moveMentionSuppressions(tx, twin.page_id, survivor.page_id);
   const statements: Array<[string, unknown[]]> = [
     [`DELETE FROM timeline_entries s WHERE s.page_id=$1 AND EXISTS (SELECT 1 FROM timeline_entries o WHERE o.page_id=$2 AND o.date=s.date
         AND md5(o.summary)=md5(s.summary) AND o.source=s.source)`, params],
@@ -129,10 +132,8 @@ export async function mergeTwinInto(tx: BrainEngine, input: { sourceId: string; 
   const factIds = (await tx.executeRaw<{ id: number }>(`UPDATE facts SET entity_slug=$3 WHERE source_id=$1 AND entity_slug=$2
     AND source_markdown_slug IS DISTINCT FROM $2 RETURNING id`, [sourceId, twin.slug, survivor.slug])).map(row => Number(row.id));
   await recordRenameAlias(tx, sourceId, twin.slug, survivor.slug);
-  // Ours (governedwork fork): a mention a person removed from or to the twin stays removed from or to the survivor.
-  await moveMentionSuppressions(tx, twin.page_id, survivor.page_id);
   const after = [...await relationshipKeys(tx, 'links', [survivor.page_id]), ...await relationshipKeys(tx, 'link_transitions', [survivor.page_id])];
-  await refreshRelationships(tx, [...before, ...after]);
+  await refreshRelationships(tx, [...before, ...after, ...suppressedDropped]);
   noteBelief({ kind: 'transferred', fromSlug: twin.slug, table: 'links', ids: movedLinks });
   noteBelief({ kind: 'transferred', fromSlug: twin.slug, table: 'facts', ids: factIds });
   await tx.softDeletePage(twin.slug, { sourceId });

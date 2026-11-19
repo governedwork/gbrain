@@ -22,7 +22,7 @@ import { isCrossSourceLinksEnabled } from './link-extraction.ts';
 import { inferLinkTypeFromPack } from './schema-pack/link-inference.ts';
 import { loadActivePackForLocalEngine, packSupportsNerInference } from './schema-pack/best-effort.ts';
 import { isQuarantined } from './quarantine.ts';
-import { dropSuppressedMentions } from './mentions/suppressions.ts';
+import { loadMentionSuppressions } from './mentions/suppressions.ts';
 import { renderFragment, sqlFragment } from './engine-sql/fragment.ts';
 import { entityTypePredicateSql, resolveEntityTypes } from './schema-pack/entity-types.ts';
 
@@ -142,6 +142,7 @@ export async function extractNerLinks(
 
   let processed = 0;
   let created = 0;
+  const suppressed = await loadMentionSuppressions(engine);
   const batch: LinkBatchInput[] = [];
   const BATCH_SIZE = 500;
   const sinceMs = opts.since ? new Date(opts.since).getTime() : null;
@@ -174,19 +175,19 @@ export async function extractNerLinks(
     const body = page.compiled_truth + '\n\n' + (page.timeline ?? '');
     if (!body.trim()) continue;
 
-    // A pair remove_link took stays removed (mentions/suppressions.ts).
-    const mentions = await dropSuppressedMentions(engine, Number(page.id), findMentionedEntities(body, gazetteer, {
+    const mentions = findMentionedEntities(body, gazetteer, {
       fromSlug: slug,
       fromSourceId: source_id,
       allowCrossSource,
-    }));
+    });
     if (mentions.length === 0) continue;
 
     for (const m of mentions) {
       const targetType = targetTypeMap.get(`${m.source_id}::${m.slug}`);
       const context = getContextWindow(body, m.offset, m.name.length);
       const verb = inferNerLinkType(pack.manifest, targetType, context);
-      if (!verb) continue;
+      // A typed edge remove_link took stays removed (mentions/suppressions.ts).
+      if (!verb || suppressed.has(Number(page.id), m, verb)) continue;
 
       batch.push({
         from_slug: slug,

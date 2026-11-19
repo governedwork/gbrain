@@ -2,6 +2,8 @@ import type { BrainEngine } from '../engine.ts';
 import { isMissingSchemaObject } from '../utils.ts';
 import { MOVE_WITHDRAWAL_SUBJECT_SQL } from '../facts/withdrawal-schema.ts';
 import { dropRekeyDuplicates } from '../facts/ontology-rekey.ts';
+import { refreshRelationships } from '../link-relationships.ts';
+import { moveMentionSuppressions } from '../mentions/suppressions.ts';
 
 /**
  * Record `old -> new` in slug_aliases when a page is renamed, inside the
@@ -97,7 +99,8 @@ export async function moveSlugBindings(
  * Move the page-id-keyed rows of a page whose rename fell back to add
  * semantics (#5431) onto the row that materialized at the destination, before
  * the stale row is soft-deleted: edges where it is the source, target or
- * origin, its timeline entries and its version history. Rows the surviving
+ * origin, its timeline entries, its version history and (ours) its
+ * `mention_suppressions` rows. Rows the surviving
  * page already holds under the same unique key (`links` composite key,
  * timeline dedup indexes) are dropped from the stale side, never duplicated.
  * Runs inside the caller's transaction and is idempotent.
@@ -126,4 +129,6 @@ export async function movePageIdReferences(
     [`UPDATE page_versions SET page_id = $2 WHERE page_id = $1`, [fromPageId, toPageId]],
   ];
   for (const [sql, params] of statements) await tx.executeRaw(sql, params);
+  // Ours (governedwork fork): its removed-mention suppressions move too; a moved derived edge they cover is dropped.
+  await refreshRelationships(tx, await moveMentionSuppressions(tx, fromPageId, toPageId));
 }

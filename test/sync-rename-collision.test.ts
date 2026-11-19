@@ -172,6 +172,23 @@ for (const kind of backends) describe(`sync rename onto an occupied slug (${kind
     expect((await page(f.source, 'people/boom')).compiled_truth).toContain('Alice is a person');
   }), 120_000);
 
+  test('L159: movePageIdReferences carries mention suppressions and drops the derived edges they now cover', () => fixture(async f => {
+    const alice = await page(f.source, 'people/alice'), carol = await page(f.source, 'people/carol');
+    await engine.putPage('people/dup', { type: 'person', title: 'Dup', compiled_truth: 'the surviving row' }, { sourceId: f.source });
+    const dup = await page(f.source, 'people/dup');
+    await engine.executeRaw("INSERT INTO mention_suppressions(from_page_id, to_page_id, link_type) VALUES($1, $2, 'mentions'), ($2, $1, 'works_at')", [alice.id, carol.id]);
+    await engine.executeRaw("INSERT INTO links(from_page_id, to_page_id, link_type, link_source) VALUES($1, $2, 'mentions', 'mentions'), ($1, $2, 'knows', 'test')", [dup.id, carol.id]);
+
+    await maintenanceTransaction(engine, tx => movePageIdReferences(tx, alice.id, dup.id));
+
+    const rows = await engine.executeRaw<{ f: number; t: number; k: string }>(
+      'SELECT from_page_id AS f, to_page_id AS t, link_type AS k FROM mention_suppressions WHERE from_page_id = ANY($1::int[]) OR to_page_id = ANY($1::int[]) ORDER BY 3',
+      [[alice.id, dup.id, carol.id]]);
+    expect(rows.map(r => [Number(r.f), Number(r.t), r.k])).toEqual([[dup.id, carol.id, 'mentions'], [carol.id, dup.id, 'works_at']]);
+    const kept = await engine.executeRaw<{ k: string }>('SELECT link_type AS k FROM links WHERE from_page_id = $1 AND to_page_id = $2 ORDER BY 1', [dup.id, carol.id]);
+    expect(kept.map(r => r.k)).toEqual(['knows']);
+  }), 120_000);
+
   test('movePageIdReferences carries edges, timeline and versions to the surviving row and deduplicates on the links key', () => fixture(async f => {
     const alice = await page(f.source, 'people/alice'), carol = await page(f.source, 'people/carol');
     await engine.putPage('people/dup', { type: 'person', title: 'Dup', compiled_truth: 'the surviving row' }, { sourceId: f.source });

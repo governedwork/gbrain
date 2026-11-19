@@ -89,7 +89,7 @@ export { withRetry };
 export type { WithRetryOpts } from '../core/retry.ts';
 import { buildGazetteer, findMentionedEntities, hashGazetteer } from '../core/by-mention.ts';
 import { pageMentions, runMentionPass, type MentionPassResult } from '../core/mentions/pass.ts';
-import { dropSuppressedMentions } from '../core/mentions/suppressions.ts';
+import { loadMentionSuppressions, PLAIN_MENTION_LINK_TYPE } from '../core/mentions/suppressions.ts';
 import type { LinkExtractionFailure, LinkExtractionSystemic } from '../core/persistence/links-maintenance.ts';
 import { formatMentionSummary, linkPhaseDeadline, mentionJsonFields, previewMentionPass } from '../core/mentions/stale.ts';
 // #4611: the cross-source link fallback follows the configured
@@ -2531,6 +2531,7 @@ async function extractMentionsFromDb(
     }
   }
 
+  const suppressed = await loadMentionSuppressions(engine); // one read per run: a plain mention remove_link took stays removed
   for (const { slug, source_id } of remaining) {
     const page = await engine.getPage(slug, { sourceId: source_id });
     // v0.41.19.0 (T5 — codex fix #4): even when we skip a page (filter
@@ -2553,8 +2554,9 @@ async function extractMentionsFromDb(
     // A segmented body is scanned block by block (mentions/pass.ts pageMentions).
     const body = isSegmentedPage(page) ? null : (page.title ?? '') + '\n\n' + page.compiled_truth + '\n\n' + (page.timeline ?? '');
     const mentionOpts = { fromSlug: slug, fromSourceId: source_id, allowCrossSource };
-    const mentions = await dropSuppressedMentions(engine, Number(page.id), body === null ? await pageMentions(engine, { ...withoutBody(page), id: Number(page.id), source_id }, gazetteer, mentionOpts)
-      : body.trim() ? findMentionedEntities(body, gazetteer, mentionOpts) : []); // a pair remove_link took stays removed (mentions/suppressions.ts)
+    const mentions = body === null ? await pageMentions(engine, { ...withoutBody(page), id: Number(page.id), source_id }, gazetteer, mentionOpts)
+      : body.trim() ? findMentionedEntities(body, gazetteer, mentionOpts) : [];
+    const plain = mentions.filter(m => !suppressed.has(Number(page.id), m, PLAIN_MENTION_LINK_TYPE)); // --rebuild keeps typed rows by `mentions`
 
     // #3674 --rebuild: per-page delete-then-insert in ONE transaction. The
     // delete sweeps the page's link_source='mentions' rows — INCLUDING pages
@@ -2564,7 +2566,7 @@ async function extractMentionsFromDb(
     // failed page stays UN-checkpointed so resume retries it instead of
     // marking a half-applied sweep complete.
     if (rebuild) {
-      const linkRows: LinkBatchInput[] = mentions.map((m) => ({
+      const linkRows: LinkBatchInput[] = plain.map((m) => ({
         from_slug: slug,
         to_slug: m.slug,
         link_type: 'mentions',
@@ -2612,13 +2614,13 @@ async function extractMentionsFromDb(
       continue;
     }
 
-    if (mentions.length === 0) {
+    if (plain.length === 0) {
       pendingForFlush.push(key);
       unpersistedCount++;
       continue;
     }
 
-    for (const m of mentions) {
+    for (const m of plain) {
       if (dryRun) {
         if (jsonMode) {
           process.stdout.write(JSON.stringify({

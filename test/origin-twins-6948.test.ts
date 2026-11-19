@@ -155,21 +155,28 @@ for (const backend of testBackends()) describe(`[${backend}] #6948 mergeTwinInto
     expect((await engine.executeRaw<{ source_path: string }>('SELECT source_path FROM pages WHERE id=$1', [t.survivor.page_id]))[0]!.source_path).toBe(t.origin);
   });
 
-  test('L159: the twin\'s mention suppressions move to the survivor at either end, deduplicated, and none points a page at itself', async () => {
+  test('L159: the twin\'s mention suppressions move to the survivor at either end, deduplicated, never a page to itself, and drop the derived edges they cover', async () => {
     const t = await trio();
     const other = await put(`people/bob-example-${t.tag}`, { body: 'Bob, a person.' });
-    const suppress = (from: number, to: number) => write(tx => tx.executeRaw('INSERT INTO mention_suppressions (from_page_id, to_page_id) VALUES ($1, $2)', [from, to]));
+    const suppress = (from: number, to: number, type = 'mentions') =>
+      write(tx => tx.executeRaw('INSERT INTO mention_suppressions (from_page_id, to_page_id, link_type) VALUES ($1, $2, $3)', [from, to, type]));
     await suppress(t.twin.page_id, t.third);
     await suppress(t.survivor.page_id, t.third);
     await suppress(other, t.twin.page_id);
-    await suppress(t.twin.page_id, other);
+    await suppress(t.twin.page_id, other, 'works_at');
     await suppress(t.survivor.page_id, t.twin.page_id);
+    // A derived mention edge the twin holds toward `other`, of a type the survivor's suppression covers once it moves.
+    await link(t.twin.page_id, other, 'works_at', 'mentions');
+    await link(t.twin.page_id, other, 'mentions', 'mentions');
     await merge(t);
     const pages = [t.survivor.page_id, t.twin.page_id, t.third, other];
-    const rows = await engine.executeRaw<{ f: number; t: number }>(
-      'SELECT from_page_id AS f, to_page_id AS t FROM mention_suppressions WHERE from_page_id = ANY($1::int[]) OR to_page_id = ANY($1::int[])', [pages]);
-    const pairs = rows.map(r => `${Number(r.f)}>${Number(r.t)}`).sort();
-    expect(pairs).toEqual([`${other}>${t.survivor.page_id}`, `${t.survivor.page_id}>${other}`, `${t.survivor.page_id}>${t.third}`].sort());
+    const rows = await engine.executeRaw<{ f: number; t: number; k: string }>(
+      'SELECT from_page_id AS f, to_page_id AS t, link_type AS k FROM mention_suppressions WHERE from_page_id = ANY($1::int[]) OR to_page_id = ANY($1::int[])', [pages]);
+    expect(rows.map(r => `${Number(r.f)}>${Number(r.t)}:${r.k}`).sort()).toEqual(
+      [`${other}>${t.survivor.page_id}:mentions`, `${t.survivor.page_id}>${other}:works_at`, `${t.survivor.page_id}>${t.third}:mentions`].sort());
+    const derived = await engine.executeRaw<{ k: string }>(
+      "SELECT link_type AS k FROM links WHERE from_page_id = $1 AND to_page_id = $2 AND link_source = 'mentions' ORDER BY 1", [t.survivor.page_id, other]);
+    expect(derived.map(r => r.k)).toEqual(['mentions']);
   });
 
   test('distinct evidence on the same unique key refuses the merge before any write: link context, raw payload, timeline detail, relationship date precision', async () => {

@@ -106,7 +106,7 @@
       "loop_suppressions.loop_suppressions_uniq": "u UNIQUE (source_id, kind, value)",
       "mcp_request_log.mcp_request_log_pkey": "p PRIMARY KEY (id)",
       "mention_suppressions.mention_suppressions_from_page_id_fkey": "f FOREIGN KEY (from_page_id) REFERENCES pages(id) ON DELETE CASCADE",
-      "mention_suppressions.mention_suppressions_pkey": "p PRIMARY KEY (from_page_id, to_page_id)",
+      "mention_suppressions.mention_suppressions_pkey": "p PRIMARY KEY (from_page_id, to_page_id, link_type)",
       "mention_suppressions.mention_suppressions_to_page_id_fkey": "f FOREIGN KEY (to_page_id) REFERENCES pages(id) ON DELETE CASCADE",
       "migration_impact_log.migration_impact_log_job_id_fkey": "f FOREIGN KEY (job_id) REFERENCES minion_jobs(id) ON DELETE SET NULL",
       "migration_impact_log.migration_impact_log_pkey": "p PRIMARY KEY (id)",
@@ -924,7 +924,7 @@
       "loop_suppressions_pkey": "CREATE UNIQUE INDEX loop_suppressions_pkey ON public.loop_suppressions USING btree (id)",
       "loop_suppressions_uniq": "CREATE UNIQUE INDEX loop_suppressions_uniq ON public.loop_suppressions USING btree (source_id, kind, value)",
       "mcp_request_log_pkey": "CREATE UNIQUE INDEX mcp_request_log_pkey ON public.mcp_request_log USING btree (id)",
-      "mention_suppressions_pkey": "CREATE UNIQUE INDEX mention_suppressions_pkey ON public.mention_suppressions USING btree (from_page_id, to_page_id)",
+      "mention_suppressions_pkey": "CREATE UNIQUE INDEX mention_suppressions_pkey ON public.mention_suppressions USING btree (from_page_id, to_page_id, link_type)",
       "mention_suppressions_to_page_idx": "CREATE INDEX mention_suppressions_to_page_idx ON public.mention_suppressions USING btree (to_page_id)",
       "migration_impact_log_attribution_idx": "CREATE INDEX migration_impact_log_attribution_idx ON public.migration_impact_log USING btree (job_id, source_id) WHERE (job_id IS NOT NULL)",
       "migration_impact_log_pkey": "CREATE UNIQUE INDEX migration_impact_log_pkey ON public.migration_impact_log USING btree (id)",
@@ -1858,7 +1858,8 @@
         "columns": [
           "1 from_page_id integer/int4 NOT NULL",
           "2 to_page_id integer/int4 NOT NULL",
-          "3 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
+          "3 link_type text/text NOT NULL",
+          "4 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
         "flags": "relkind=r rls=true force_rls=false"
       },
