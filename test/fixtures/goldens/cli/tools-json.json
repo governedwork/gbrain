@@ -2,8 +2,8 @@
   "golden": {
     "exitCode": 0,
     "stderr": "",
-    "stdoutBytes": 266661,
-    "stdoutSha256": "1c57d98793934be13b35ce3d6857e97f3ecde5a12c6125a42120490e4deede7e",
+    "stdoutBytes": 266682,
+    "stdoutSha256": "6014dcc54020230ad67dea2c315113c07368001a45f91d2865e797d2288a22b7",
     "toolNames": [
       "remember",
       "entity",
@@ -6963,7 +6963,7 @@
         "scope": "admin"
       },
       {
-        "description": "Owner-only, trusted local CLI on the brain host (`gbrain history prune <slug> --keep <n> | --version <id>...`). Deletes versions from a page's history, by id or all but the newest keep, so text a rewrite removed leaves get_versions; the live page is unchanged. A version an open trust proposal or overwritten-edit restore still needs is kept and listed in held. Segment text only the pruned versions held is released for the regular segment sweep. A dry run (the default) lists the version ids it would prune; yes: true prunes. Returns pruned (versions deleted), the ids and held.",
+        "description": "Owner-only, trusted local CLI on the brain host (`gbrain history prune <slug> --keep <n>`, or `--version <id>` instead of `--keep`). Deletes versions from a page's history, by id or all but the newest keep, so text a rewrite removed leaves get_versions; the live page is unchanged. A version an open trust proposal or overwritten-edit restore still needs is kept and listed in held. Segment text only the pruned versions held is released for the regular segment sweep. A dry run (the default) lists the version ids it would prune; yes: true prunes. Returns pruned (versions deleted), the ids and held.",
         "idempotent": false,
         "local_only": false,
         "mutating": true,

@@ -5915,7 +5915,7 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
     "name": "prune_page_versions",
     "idempotent": false,
     "outputRedaction": "no_stored_text",
-    "description": "Owner-only, trusted local CLI on the brain host (`gbrain history prune <slug> --keep <n> | --version <id>...`). Deletes versions from a page's history, by id or all but the newest keep, so text a rewrite removed leaves get_versions; the live page is unchanged. A version an open trust proposal or overwritten-edit restore still needs is kept and listed in held. Segment text only the pruned versions held is released for the regular segment sweep. A dry run (the default) lists the version ids it would prune; yes: true prunes. Returns pruned (versions deleted), the ids and held.",
+    "description": "Owner-only, trusted local CLI on the brain host (`gbrain history prune <slug> --keep <n>`, or `--version <id>` instead of `--keep`). Deletes versions from a page's history, by id or all but the newest keep, so text a rewrite removed leaves get_versions; the live page is unchanged. A version an open trust proposal or overwritten-edit restore still needs is kept and listed in held. Segment text only the pruned versions held is released for the regular segment sweep. A dry run (the default) lists the version ids it would prune; yes: true prunes. Returns pruned (versions deleted), the ids and held.",
     "params": {
       "slug": {
         "type": "string",

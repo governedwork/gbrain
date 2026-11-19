@@ -272,9 +272,9 @@ export const DOCTOR_CHECK_REGISTRY: readonly DoctorEntry[] = [
   syncConfigKeysEntry,
   // #6712 PR 4a: the read-only convergence shadow (deep tier: a full level read per source).
   managedSyncConvergenceEntry,
-  fenceIntegrityEntry,
   // #6770: MCP request-log size and the opt-in retention prune (read-only; the enable fix asks the user).
   mcpRequestLogRetentionEntry,
+  fenceIntegrityEntry,
   searchModeEntry,
 ];
 

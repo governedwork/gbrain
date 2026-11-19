@@ -2142,6 +2142,18 @@
       },
       {
         "commands": [
+          "history"
+        ],
+        "condition": "command === 'history' && subArgs[0] === 'prune'",
+        "connectsEngine": true,
+        "refusesThinClient": false,
+        "routesThinClient": false,
+        "terminates": true,
+        "thinClientCheck": false,
+        "unconditionalFor": []
+      },
+      {
+        "commands": [
           "search"
         ],
         "condition": "command === 'search' && ['modes', 'stats', 'tune', 'diagnose'].includes(subArgs[0] ?? '')",
