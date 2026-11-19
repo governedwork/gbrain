@@ -48,7 +48,6 @@ src/commands/jobs.ts	JOBS_HELP	sql	NONE	not the page body: help text
 src/commands/lint.ts	lintContent	field	STREAM	
 src/commands/migrate-engine.ts	copyPageToTarget	call:putPage	SEGW	
 src/commands/migrate-engine.ts	copyPageToTarget	field	STREAM	
-src/commands/migrations/v0_32_2.ts	phaseCVerify	call:serializePageToMarkdown	SEGW	
 src/commands/quarantine.ts	runClear	call:serializeMarkdown	SEGW	
 src/commands/quarantine.ts	runClear	field	SEGW	
 src/commands/quarantine.ts	runScan	call:serializePageToMarkdown	SEGW	
@@ -267,10 +266,8 @@ src/core/facts/relink-publish.ts	prepareRelinkMutation	field	SEGW
 src/core/facts/retire.ts	retireFactsFromPage	call:serializePageToMarkdown	INLINE	a segmented page is skipped (its rows counted failed) before its body is read
 src/core/facts/retire.ts	retireFactsFromPage	field	INLINE	a segmented page is skipped (its rows counted failed) before its body is read
 src/core/facts/subject-infer-write.ts	targetFenceClean	field	INLINE	the body materializedSnapshot read back within PAGE_MAX_BYTES on the managed path; a segmented page over the ceiling or on the unmanaged path is refused before any read
-src/core/facts/unfenced-facts.ts	auditUnadoptableFacts	call:serializePageToMarkdown	SEGW	
-src/core/facts/unfenced-facts.ts	fenceDatabaseOnlyPage	call:serializePageToMarkdown	SEGW	
 src/core/facts/unfenced-facts.ts	planFence	field	NONE	reads compiled_truth from the object withHeldFactsFence returns for the body string its caller passed; no stored page body is read here
-src/core/facts/unfenced-facts.ts	planPageFence	call:serializePageToMarkdown	SEGW	
+src/core/facts/unfenced-facts.ts	storedPageMarkdown	call:serializePageToMarkdown	SEGW	the fence planners' and the v0.32.2 verify's one reader: wholeBodySnapshot reads a segmented page back whole up to PAGE_MAX_BYTES and refuses page_body_segmented above it
 src/core/facts/unfenced-facts.ts	withHeldFactsFence	field	NONE	the body object its caller passes (file text or an inline snapshot); no stored page body is read here
 src/core/facts/withdrawal-discovery.ts	discoverWithdrawalTargets	field	STREAM	inline rows only
 src/core/facts/withdrawal-discovery.ts	discoverWithdrawalTargets	sql	STREAM	page scan reads inline bodies (NULL never matches); segmented pages are found by the chunk scan and their mirror writers refuse or skip (per-segment discovery, PR 2)
