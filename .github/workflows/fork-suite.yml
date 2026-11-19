@@ -11,6 +11,15 @@
 # scripts/postgres-unit-arms.ts) by the `plan` job, so a rebase that re-weights upstream's lanes cannot leave this
 # matrix splitting the suite differently from the weights it was packed for. The serial lane keeps upstream's 4
 # (test.yml `serial-tests`, a literal there too).
+#
+# Lanes: the unit and serial shards; postgres-e2e (8 shards of scripts/run-e2e.sh against a pgvector pg16 service;
+# scripts/e2e-live-key-only.txt files skip, scripts/e2e-backend-matrix.txt files get their direct pass only,
+# scripts/fork-e2e-exclusions.txt files — fork divergences, each with its reason — not at all); postgres-arms.
+# The heavy files scripts/test-shard.sh excludes, which upstream runs in dedicated jobs, run in none of them.
+# A red unit shard goes to scripts/fork-retry-known-flakes.ts with its JUnit receipts and log: it stays red on any error
+# outside a test, any failure not listed in scripts/fork-known-flakes.txt, or receipts naming no failed test; a listed
+# failure is re-run once, alone, and counts only if its own JUnit report shows it passed (annotated ::warning::).
+# Pinned by test/fork-suite-workflow.test.ts.
 name: fork-suite
 
 on:
@@ -74,7 +83,11 @@ jobs:
         timeout-minutes: 8
         run: bun scripts/ci-bun-install.ts --frozen-lockfile
       - name: Unit shard ${{ matrix.shard }}/${{ needs.plan.outputs.unit_total }}
-        run: bash scripts/test-shard.sh ${{ matrix.shard }} ${{ needs.plan.outputs.unit_total }}
+        env:
+          GBRAIN_TEST_RECEIPT_DIR: ${{ runner.temp }}/receipts
+        run: |
+          set -o pipefail
+          bash scripts/test-shard.sh ${{ matrix.shard }} ${{ needs.plan.outputs.unit_total }} 2>&1 | tee "$RUNNER_TEMP/unit-shard.log" || bun scripts/fork-retry-known-flakes.ts "$GBRAIN_TEST_RECEIPT_DIR" "$RUNNER_TEMP/unit-shard.log"
 
   serial:
     runs-on: ubuntu-24.04
@@ -95,6 +108,45 @@ jobs:
         run: bun run test:serial
         env:
           SHARD: ${{ matrix.shard }}/4
+
+  # Upstream's E2E corpus against PostgreSQL + pgvector, sequential per file (scripts/run-e2e.sh). Upstream runs it in
+  # e2e.yml's diff-selected and nightly full-corpus lanes on Ubicloud; the fork runs the whole corpus on every PR.
+  postgres-e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: gbrain_test
+        ports: ['5432:5432']
+        options: >-
+          --shm-size=1g
+          --health-cmd pg_isready
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - name: Install dependencies
+        timeout-minutes: 8
+        run: bun scripts/ci-bun-install.ts --frozen-lockfile
+      - name: E2E shard ${{ matrix.shard }}/8
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/gbrain_test
+          SHARD: ${{ matrix.shard }}/8
+        # The default corpus minus the fork's reasoned exclusions (scripts/fork-e2e-exclusions.txt); run-e2e.sh shards
+        # an explicit list the same way.
+        run: |
+          mapfile -t files < <(SHARD='' bash scripts/run-e2e.sh --dry-run-list | grep -vxF -f <(grep -v '^#' scripts/fork-e2e-exclusions.txt | cut -f1))
+          bash scripts/run-e2e.sh "${files[@]}"
 
   # The PostgreSQL arms of unit-lane suites (test/postgres-unit-arms.txt), as upstream's persistence-validation
   # `unit-postgres-arms` runs them: two workers per shard, each against its own service. The unit shards run only the
@@ -145,14 +197,15 @@ jobs:
           GBRAIN_TEST_ALLOW_DATABASE_URL: '1'
         run: bun scripts/postgres-unit-arms.ts run ${{ matrix.shard }} ${{ needs.plan.outputs.arms_total }}
 
-  # The one required context: green only when the plan and every unit, serial and PostgreSQL-arm shard passed.
+  # The one required context: green only when the plan and every unit, serial, E2E and PostgreSQL-arm shard passed.
   fork-suite:
     if: always()
-    needs: [plan, unit, serial, postgres-arms]
+    needs: [plan, unit, serial, postgres-e2e, postgres-arms]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Every shard passed
         run: |
-          echo "plan: ${{ needs.plan.result }}  unit: ${{ needs.unit.result }}  serial: ${{ needs.serial.result }}  postgres-arms: ${{ needs.postgres-arms.result }}"
-          test "${{ needs.plan.result }}" = success && test "${{ needs.unit.result }}" = success && test "${{ needs.serial.result }}" = success && test "${{ needs.postgres-arms.result }}" = success
+          echo "plan: ${{ needs.plan.result }}  unit: ${{ needs.unit.result }}  serial: ${{ needs.serial.result }}  postgres-e2e: ${{ needs.postgres-e2e.result }}  postgres-arms: ${{ needs.postgres-arms.result }}"
+          test "${{ needs.plan.result }}" = success && test "${{ needs.unit.result }}" = success && test "${{ needs.serial.result }}" = success \
+            && test "${{ needs.postgres-e2e.result }}" = success && test "${{ needs.postgres-arms.result }}" = success
