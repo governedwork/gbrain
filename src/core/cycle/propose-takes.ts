@@ -57,6 +57,7 @@ import { isConfigTruthy } from '../config.ts';
 import { matchingCloseBracket } from '../llm-json.ts';
 import { TAKE_KIND_VALUES } from '../takes-fence.ts';
 import { publicBody } from '../mentions/aliases.ts';
+import { parseWeightCell } from '../fence-shared.ts';
 import { attributionChecksEnabled } from './attribution-checks.ts';
 import { downgradeAssistantOnlyHolders } from './propose-takes-attribution.ts';
 import { ProposeTakesFailures, PROPOSE_TAKES_HOLD_RUNS, type FailedPage } from './propose-takes-failures.ts';
@@ -410,7 +411,7 @@ export function extractExistingTakesForDedup(pageBody: string): Array<{
     if (!claim || claim.startsWith('~~')) continue; // strikethrough = inactive, doesn't count for dedup
     const kind = cells[2] ?? 'take';
     const holder = cells[3] ?? 'brain';
-    const weight = Number.parseFloat(cells[4] ?? '0.5');
+    const weight = parseWeightCell(cells[4] ?? '0.5');
     rows.push({
       claim: claim.replace(/^~~|~~$/g, ''),
       kind,

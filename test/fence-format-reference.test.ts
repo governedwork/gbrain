@@ -24,6 +24,7 @@ import { FENCE_FORMAT_PATH, renderFenceFormatDoc } from '../scripts/build-fence-
 import { parseFactsFence } from '../src/core/facts-fence.ts';
 import { parseTakesFence } from '../src/core/takes-fence.ts';
 import { FENCE_REASON_CODES, FENCE_REASONS } from '../src/core/fence-repair/reasons.ts';
+import { ALLOWED } from '../src/core/fence-repair/schema.ts';
 
 const REGEN = 'Regenerate: bun run scripts/build-fence-format.ts';
 const reference = readFileSync(join(import.meta.dir, '..', 'docs/guides/fence-format.md'), 'utf8');
@@ -40,6 +41,14 @@ function markdownBlocks(markdown: string): string[] {
 describe('docs/guides/fence-format.md', () => {
   test('the generated region matches a fresh render from the constants', () => {
     expect(renderFenceFormatDoc(reference), REGEN).toBe(reference);
+  });
+
+  test('L108: the takes weight\'s allowed values name the percent form the parser reads', () => {
+    expect(ALLOWED.takes.weight!.join(' ')).toContain('percent');
+    expect(reference).toMatch(/^\| 5 \| `weight` \| [^|]*percent[^|]*\|/m);
+    const fence = ['<!--- gbrain:takes:begin -->', '| # | claim | kind | who | weight | since | source |', '|---|---|---|---|---|---|---|',
+      '| 1 | A claim | take | brain | 70% | 2026-01 | call |', '<!--- gbrain:takes:end -->'].join('\n');
+    expect(parseTakesFence(fence).takes[0]!.weight).toBe(0.7);
   });
 
   test('the facts and takes examples parse with no warnings', () => {

@@ -10,6 +10,7 @@
  * recompute what a rule may output for a given before value.
  */
 import { isValidHolder, rewriteSupersessionCitation, supersessionCitation, TAKE_KIND_VALUES } from '../takes-fence.ts';
+import { percentCellValue } from '../fence-shared.ts';
 import type { FenceKind } from './types.ts';
 
 export const FACTS_COLUMNS = [
@@ -147,7 +148,7 @@ export const ALLOWED: Record<FenceKind, Readonly<Record<string, readonly string[
   takes: {
     kind: [...TAKE_KIND_VALUES],
     who: ['world', 'brain', 'people/<slug>', 'companies/<slug>'],
-    weight: ['a number from 0 to 1'],
+    weight: ['a number from 0 to 1, or a percent such as `70%`'],
     '#': ['a positive whole number'],
   },
 };
@@ -245,8 +246,8 @@ export function holderAlias(holder: string): 'brain' | 'world' | null {
  */
 export function confidenceNumber(text: string): number | null {
   const compact = text.replace(/\s+/g, '');
-  const percent = /^([+-]?(?:\d+(?:\.\d+)?|\.\d+))%$/.exec(compact);
-  if (percent) return Number(percent[1]) / 100;
+  const percent = percentCellValue(compact);
+  if (percent !== null) return percent;
   return PLAIN_NUMBER_RE.test(compact) ? Number(compact) : null;
 }
 
