@@ -526,7 +526,8 @@ against the current base on the wardrobe, posts the required `lander/verdict` an
 session on the presence board when the PR bounces, is held or merges. Never `gh pr merge`, never `--auto`,
 never a watch loop.
 
-The fork runs no CI of its own, so the lander's check is its only gate, in two steps. Per PR:
+Two checks gate a PR: the lander's verdict and `fork-suite`, the fork's Linux CI (what it runs: the header of
+`.github/workflows/fork-suite.yml`). The lander's check, in two steps. Per PR:
 `bun run typecheck`, then the test files the change names — a changed `test/*.test.ts`, and
 `test/<name>.test.ts` of each changed `src/**/<name>.ts`. Once per base: the whole unit suite (`bun run test`,
 sharded to the run's CPU budget); a red it finds holds the queue until the base is fixed. Both run with

@@ -47,7 +47,7 @@ Facts cells are read by the column the header names, in any order. A header with
 | 7 | `valid_from` | free text | no | - | When it became true (`YYYY-MM-DD`), or empty. |
 | 8 | `valid_until` | free text | no | - | When it stopped being true, or empty. |
 | 9 | `source` | free text | no | - | Where it came from, free text. |
-| 10 | `context` | free text | yes | - | Free text. `superseded by #N` names the row that replaced a struck row; `forgotten: ...` marks a row withdrawn with `forget`. |
+| 10 | `context` | free text | yes | - | Free text. On a struck row, `superseded by #N` names the row that replaced it and `forgotten: ...` marks it withdrawn with `forget`. On a live row both are plain text. |
 | 11 | `claim_metric` | free text | yes | - | Metric of a typed claim (`mrr`, `team_size`, ...), or empty. |
 | 12 | `claim_value` | a number, optionally with 1,234 separators or a k/M/B suffix | yes | - | Value of a typed claim. |
 | 13 | `claim_unit` | free text | yes | - | Unit (`USD`, `people`, ...), or empty. |
@@ -89,7 +89,7 @@ Takes cells are read by position, except `resolved`, `quality`, `evidence`, `val
 | 2 | `claim` | free text | no | - | The position, free text. `~~claim~~` marks a row that is no longer active. |
 | 3 | `kind` | `fact`, `take`, `bet`, `hunch` | no | - | What the take is. |
 | 4 | `who` | `world`, `brain`, `people/<slug>`, `companies/<slug>` | no | - | Who holds the position (see [holders](#holders)): who said or clearly implied it, not who it is about. |
-| 5 | `weight` | a number from 0 to 1 | no | - | How strongly it is held; stored on the 0.05 grid. There is no default. |
+| 5 | `weight` | a number from 0 to 1, or a percent such as `70%` | no | - | How strongly it is held (`70%` and `70 %` read as 0.7); stored on the 0.05 grid. There is no default. |
 | 6 | `since` | free text | no | - | When the holder took the position (`YYYY-MM-DD` or `YYYY-MM`; `start → end` for a range). |
 | 7 | `source` | free text | yes | - | Where it came from. `superseded by #N` names the row that replaced a struck row. |
 | 8 | `resolved` | free text | yes | - | When the take was resolved. Read by header name. |

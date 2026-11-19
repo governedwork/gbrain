@@ -164,6 +164,15 @@ describe('merge_fences', () => {
     expect(old).toMatchObject({ active: false, supersededBy: 1, kind: 'fact', context: 'superseded by #1; original kind: signal' });
   });
 
+  test('L109: a merge leaves a live facts row\'s "superseded by #N" prose as written', () => {
+    const body = [facts(FIRST), facts([factsRow(40, 'Alpha claim'), factsRow(41, 'Live claim', { ctx: 'superseded by #40 in an old memo' })])].join('\n');
+    const r = run(page(body));
+    expectRepaired(r);
+    const live = parseFactsFence(r.page.compiled_truth).facts.find(f => f.claim === 'Live claim')!;
+    expect(live).toMatchObject({ active: true, context: 'superseded by #40 in an old memo' });
+    expect(live.supersededBy).toBeUndefined();
+  });
+
   test('near-duplicates (same claim, different confidence) are both kept', () => {
     const body = [facts([factsRow(1, 'Alpha claim')]), facts([factsRow(1, 'Alpha claim', { conf: '0.7' })])].join('\n');
     const r = run(page(body));
