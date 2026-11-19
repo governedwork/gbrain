@@ -48,11 +48,10 @@ import { createEngine } from '../../core/engine-factory.ts';
 import { parseFactsFence } from '../../core/facts-fence.ts';
 import { duplicateActiveFenceRows } from '../../core/facts/extract-from-fence.ts';
 import { isWriteThroughDisabled, resolvePageWriteTarget } from '../../core/write-through.ts';
-import { serializePageToMarkdown } from '../../core/markdown.ts';
 import { managedPersistenceEnabled } from '../../core/persistence/ownership.ts';
 import { isSourceDbOnlySlug } from '../../core/persistence/source-storage.ts';
 import { OperationError } from '../../core/ops/contract.ts';
-import { fenceableRowCount, fenceUnfencedFacts, planUnfencedFacts, type UnfencedFactsOutcome } from '../../core/facts/unfenced-facts.ts';
+import { fenceableRowCount, fenceUnfencedFacts, planUnfencedFacts, storedPageMarkdown, type UnfencedFactsOutcome } from '../../core/facts/unfenced-facts.ts';
 
 let testEngineOverride: BrainEngine | null = null;
 export function __setTestEngineOverride(engine: BrainEngine | null): void {
@@ -277,17 +276,21 @@ async function phaseCVerify(
         databaseOnly = !!page && !page.source_path?.trim() && !page.source_uri?.trim();
       }
       if (databaseOnly) {
-        const snapshot = await engine.readPageSnapshot(g.source_markdown_slug, { sourceId: g.source_id });
-        if (!snapshot) {
+        // The body the fence step planned on: a segmented page reads back whole up to PAGE_MAX_BYTES.
+        const stored = await storedPageMarkdown(engine, g.source_id, g.source_markdown_slug).catch((error: unknown) => {
+          if (error instanceof OperationError && error.code === 'page_body_segmented') return 'over_ceiling' as const;
+          throw error;
+        });
+        if (!stored) {
           if (g.all_expired) skippedExpiredNoPage += 1;
           else mismatches.push(`${g.source_markdown_slug} (page missing)`);
           continue;
         }
-        if (snapshot.page.body_storage === 'segmented') {
+        if (stored === 'over_ceiling') {
           mismatches.push(`${g.source_markdown_slug} (page_body_segmented: verify cannot read its whole body; read it with gbrain get --source ${g.source_id} --body auto -- ${g.source_markdown_slug})`);
           continue;
         }
-        body = serializePageToMarkdown(snapshot.page, snapshot.tags);
+        body = stored.markdown;
       } else {
         if (!target?.ok || !fileExists) {
           // Skip only an absent file; an unresolvable target is still drift.

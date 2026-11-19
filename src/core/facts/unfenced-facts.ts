@@ -249,7 +249,7 @@ export function fenceableRowCount(plan: UnfencedFactsPlan): number {
  * stored in segments reads back whole up to PAGE_MAX_BYTES (`wholeBodySnapshot`, under the snapshot's withdrawal
  * ledger as an inline page's body is); one over it refuses with `page_body_segmented`. Null: no live page.
  */
-async function storedPageMarkdown(engine: BrainEngine, sourceId: string, slug: string): Promise<{ snapshot: PageSnapshot; markdown: string } | null> {
+export async function storedPageMarkdown(engine: BrainEngine, sourceId: string, slug: string): Promise<{ snapshot: PageSnapshot; markdown: string } | null> {
   const snapshot = await wholeBodySnapshot(engine, await engine.readPageSnapshot(slug, { sourceId }), 'facts fence adoption');
   return snapshot && { snapshot, markdown: serializePageToMarkdown(snapshot.page, snapshot.tags) };
 }
