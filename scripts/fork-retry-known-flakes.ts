@@ -12,9 +12,11 @@
  *     never reach the JUnit report, so the shard stays red;
  *   - no failed test in the receipts (a crash, a timeout, no receipt at all), or a report that does not parse: red;
  *   - any failed test is not listed in scripts/fork-known-flakes.txt: it is printed and the shard stays red;
- *   - every failed test is listed: each is re-run once, alone, under its own JUnit report, and the shard passes only
- *     if that report shows the test passed (a re-run that skips it, or never reaches it, is not a pass). A shard that
- *     passes this way is annotated in the job summary, so a known flake that starts failing often stays visible.
+ *   - every failed test is listed: each file holding one is re-run once, whole (a listed test can depend on what its
+ *     file sets up, so run alone it may fail where the file passes), under its own JUnit report, and the shard passes
+ *     only if that report shows every listed test passed (a re-run that skips one, or never reaches it, is not a pass)
+ *     and nothing else in the file failed. A shard that passes this way is annotated in the job summary, so a known
+ *     flake that starts failing often stays visible.
  * FORK_RETRY_RUNNER replaces `bun` as the re-run command (the test seam).
  */
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
@@ -51,9 +53,7 @@ export function shardLogErrors(log: string): number {
   return errors;
 }
 
-const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-function rerun(runner: string, row: { file: string; name: string }): boolean {
+function rerun(runner: string, file: string, names: string[]): boolean {
   const dir = mkdtempSync(join(tmpdir(), 'fork-retry-'));
   const report = join(dir, 'rerun.junit.xml');
   try {
@@ -61,13 +61,16 @@ function rerun(runner: string, row: { file: string; name: string }): boolean {
     const env = { ...process.env };
     delete env.GBRAIN_TEST_RECEIPT_DIR;
     delete env.GBRAIN_TEST_RECEIPT_LANE;
-    const res = spawnSync(runner, ['test', '--timeout=60000', '--reporter=junit', `--reporter-outfile=${report}`,
-      `./${row.file}`, '-t', escapeRegex(row.name)], { cwd: ROOT, stdio: 'inherit', env, timeout: RERUN_TIMEOUT_MS });
+    const res = spawnSync(runner, ['test', '--timeout=60000', '--reporter=junit', `--reporter-outfile=${report}`, `./${file}`],
+      { cwd: ROOT, stdio: 'inherit', env, timeout: RERUN_TIMEOUT_MS });
     if (res.status !== 0 || !existsSync(report)) return false;
     let cases: TestCase[];
     try { cases = parseJUnit(readFileSync(report, 'utf8')); } catch { return false; }
-    const ran = cases.filter((c) => c.test === row.name || c.test.endsWith(` > ${row.name}`));
-    return ran.length > 0 && ran.every((c) => c.status === 'pass');
+    if (cases.some((c) => c.status === 'fail')) return false;
+    return names.every((name) => {
+      const ran = cases.filter((c) => c.test === name || c.test.endsWith(` > ${name}`));
+      return ran.length > 0 && ran.every((c) => c.status === 'pass');
+    });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -103,11 +106,15 @@ function main(dir: string | undefined, logPath: string | undefined): number {
     return 1;
   }
   const runner = process.env.FORK_RETRY_RUNNER || 'bun';
-  let rc = 0;
+  const byFile = new Map<string, Set<string>>();
   for (const t of failed) {
     const row = listed(rows, t)!;
-    console.error(`fork-retry: re-running listed known flake once: ${row.file} > ${row.name}`);
-    if (!rerun(runner, row)) { console.error(`fork-retry: it did not pass on its re-run: ${row.file} > ${row.name}`); rc = 1; }
+    byFile.set(row.file, (byFile.get(row.file) ?? new Set()).add(row.name));
+  }
+  let rc = 0;
+  for (const [file, names] of byFile) {
+    console.error(`fork-retry: re-running ${file} once for its listed known flake(s): ${[...names].join('; ')}`);
+    if (!rerun(runner, file, [...names])) { console.error(`fork-retry: ${file} did not pass on its re-run`); rc = 1; }
   }
   if (rc === 0) {
     console.log(`::warning title=fork-suite retry::passed only after re-running listed known flake(s): ${failed.map((t) => t.test).join('; ')}`);

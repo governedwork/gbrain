@@ -125,7 +125,7 @@ function junit(cases: Array<{ file: string; name: string; failed: boolean; skipp
  * its own JUnit report (the probe as `rerun`: passed, skipped or absent) and exits `rerunExit`. `log` is the shard
  * log handed to the script. Returns the script's exit status and every argv the stub saw.
  */
-function retry(report: string | null, rerunExit: number, opts: { rerun?: 'pass' | 'skip' | 'none'; log?: string } = {}): { status: number | null; reruns: string[]; output: string } {
+function retry(report: string | null, rerunExit: number, opts: { rerun?: 'pass' | 'skip' | 'none' | 'other-fails'; log?: string } = {}): { status: number | null; reruns: string[]; output: string } {
   const dir = mkdtempSync(join(tmpdir(), 'fork-retry-'));
   try {
     const receipts = join(dir, 'receipts');
@@ -133,7 +133,8 @@ function retry(report: string | null, rerunExit: number, opts: { rerun?: 'pass' 
     if (report !== null) writeFileSync(join(receipts, 'unit--s1of12--primary.junit.xml'), report);
     const calls = join(dir, 'calls.log');
     const rerunCase = opts.rerun === 'none' ? []
-      : [{ file: PROBE_13_FILE, name: PROBE_13_NAME, failed: rerunExit !== 0, skipped: opts.rerun === 'skip' }];
+      : [{ file: PROBE_13_FILE, name: PROBE_13_NAME, failed: rerunExit !== 0, skipped: opts.rerun === 'skip' },
+        ...(opts.rerun === 'other-fails' ? [{ file: PROBE_13_FILE, name: 'probe 12: a neighbour', failed: true }] : [])];
     const rerunReport = join(dir, 'rerun-template.xml');
     writeFileSync(rerunReport, junit(rerunCase));
     const stub = join(dir, 'stub-runner.sh');
@@ -178,6 +179,8 @@ describe('fork-suite known-flake retry before red (ledger 105)', () => {
     expect(r.status).toBe(0);
     expect(r.reruns).toHaveLength(1);
     expect(r.reruns[0]).toContain(`./${PROBE_13_FILE}`);
+    // The whole file is re-run: a listed test can depend on what its file sets up.
+    expect(r.reruns[0]).not.toContain(' -t ');
   });
 
   test('flake: a listed flake that fails its re-run stays red', () => {
@@ -206,6 +209,10 @@ describe('fork-suite known-flake retry before red (ledger 105)', () => {
       { log: ' 120 pass\n 1 fail\n 1 error\nRan 121 tests across 12 files.\n' });
     expect(r.status).toBe(1);
     expect(r.reruns).toHaveLength(0);
+  });
+
+  test('flake: a re-run of the file in which another test fails stays red', () => {
+    expect(retry(junit([{ file: PROBE_13_FILE, name: PROBE_13_NAME, failed: true }]), 0, { rerun: 'other-fails' }).status).toBe(1);
   });
 
   test('flake: a re-run that exits 0 but skips the test, or never reaches it, is not a pass', () => {
