@@ -3022,8 +3022,21 @@ DO \$rls\$ BEGIN
   END IF;
 END \$rls\$;
 
+-- Ours (governedwork fork): the record of version history an owner pruned (prune_page_versions).
+CREATE TABLE IF NOT EXISTS page_version_prunes (
+  page_id INTEGER NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+  knowledge_revision UUID NOT NULL,
+  pruned_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (page_id, knowledge_revision)
+);
+DO \$rls\$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles pr WHERE pg_has_role(current_user, pr.oid, 'USAGE') AND (pr.rolbypassrls OR pr.rolsuper)) THEN
+    ALTER TABLE page_version_prunes ENABLE ROW LEVEL SECURITY;
+  END IF;
+END \$rls\$;
+
 -- Ours (governedwork fork): stamps the fork schema epoch; stays after every fork fragment and before the hardening.
-INSERT INTO config (key, value) VALUES ('fork_schema_epoch', '90e46d26b4e88d2d')
+INSERT INTO config (key, value) VALUES ('fork_schema_epoch', '6f820dbefe7a2c40')
   ON CONFLICT (key) DO UPDATE SET value = CASE
     WHEN position(',' || EXCLUDED.value || ',' IN ',' || config.value || ',') > 0 THEN config.value
     ELSE config.value || ',' || EXCLUDED.value END;

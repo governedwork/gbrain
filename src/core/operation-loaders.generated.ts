@@ -231,6 +231,7 @@ export const OPERATION_LOADERS: Record<string, readonly [() => Promise<Record<st
   "purge_fact": [load_purge, "purgeOperations"],
   "list_page_purges": [load_purge, "purgeOperations"],
   "unpurge_page": [load_purge, "purgeOperations"],
+  "prune_page_versions": [load_purge, "purgeOperations"],
   "memory_recall": [load_qm_memory, "qmMemoryOperations"],
   "memory_write": [load_qm_memory, "qmMemoryOperations"],
   "memory_propose": [load_qm_memory, "qmMemoryOperations"],

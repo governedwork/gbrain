@@ -2,8 +2,8 @@
   "golden": {
     "exitCode": 0,
     "stderr": "",
-    "stdoutBytes": 309595,
-    "stdoutSha256": "28bad058fe5ece885d103e8eeff16f515e7909b28088b165959762a46c953ef7",
+    "stdoutBytes": 311722,
+    "stdoutSha256": "31225b822af0a1f32461d6a5cc4e40c72a9d41006f9a4a41304f31fc1293046b",
     "toolNames": [
       "remember",
       "entity",
@@ -172,6 +172,7 @@
       "purge_fact",
       "list_page_purges",
       "unpurge_page",
+      "prune_page_versions",
       "memory_recall",
       "memory_write",
       "memory_propose",
@@ -7917,6 +7918,58 @@
             "source_id": {
               "description": "Source of the purged page (default: the routed source).",
               "type": "string"
+            }
+          },
+          "required": [
+            "slug"
+          ],
+          "type": "object"
+        },
+        "scope": "admin"
+      },
+      {
+        "description": "Owner-only, trusted local CLI on the brain host (`gbrain history prune <slug> --keep <n>`, or `--version <id>` instead of `--keep`). Deletes versions from a page's history, by id or all but the newest keep, so text a rewrite removed leaves get_versions; the live page is unchanged. A version an open trust proposal or overwritten-edit restore still needs is kept and listed in held. Segment text only the pruned versions held is released for the regular segment sweep. A dry run (the default) lists the version ids it would prune; yes: true prunes. Returns pruned (versions deleted), the ids and held.",
+        "idempotent": false,
+        "local_only": false,
+        "mutating": true,
+        "name": "prune_page_versions",
+        "parameters": {
+          "dry_run": "boolean?",
+          "keep": "number?",
+          "slug": "string",
+          "source_id": "string?",
+          "version_ids": "array?",
+          "yes": "boolean?"
+        },
+        "required_scopes": [],
+        "schema": {
+          "properties": {
+            "dry_run": {
+              "description": "List the versions that would be pruned and change nothing (the default unless yes is true).",
+              "type": "boolean"
+            },
+            "keep": {
+              "description": "Prune all but the newest keep versions (0 prunes the whole history). Exactly one of version_ids or keep.",
+              "type": "number"
+            },
+            "slug": {
+              "description": "Slug of the page whose history to prune.",
+              "type": "string"
+            },
+            "source_id": {
+              "description": "Source of the page (default: the routed source).",
+              "type": "string"
+            },
+            "version_ids": {
+              "description": "Version ids to prune (from get_versions). Exactly one of version_ids or keep.",
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "yes": {
+              "description": "Confirm the prune: true deletes the versions; pruned versions cannot be restored.",
+              "type": "boolean"
             }
           },
           "required": [
