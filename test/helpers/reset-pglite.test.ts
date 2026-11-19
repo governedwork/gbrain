@@ -1,3 +1,4 @@
+import { FORK_SCHEMA_EPOCH_KEY } from '../../src/core/fork-schema.ts';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 import { PGLiteEngine } from '../../src/core/pglite-engine.ts';
 import { resetPgliteState } from './reset-pglite.ts';
@@ -86,6 +87,12 @@ describe('resetPgliteState', () => {
       const tables = await engine.executeRaw<{ tablename: string }>("SELECT tablename FROM pg_tables WHERE schemaname='public'");
       for (const { tablename } of tables) {
         if (['schema_version', 'page_generation_clock', 'persistence_brain', 'sources'].includes(tablename)) continue;
+        if (tablename === 'config') {
+          // Ours (governedwork fork): the reset keeps only the fork schema stamp, as it keeps schema_version.
+          const keys = (await engine.executeRaw<{ key: string }>('SELECT key FROM config')).map(r => r.key);
+          expect(keys.filter(k => k !== FORK_SCHEMA_EPOCH_KEY)).toEqual([]);
+          continue;
+        }
         const rows = await engine.executeRaw(`SELECT count(*)::int AS n FROM public."${tablename.replaceAll('"', '""')}"`);
         expect(rows).toEqual([{ n: 0 }]);
       }
