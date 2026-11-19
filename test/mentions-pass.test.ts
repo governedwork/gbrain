@@ -451,7 +451,7 @@ test('L159: remove_link records a suppression only when it removes a derived men
   expect(await suppressions()).toEqual([]);
   expect(await mentionLinks(engine)).toEqual(['notes/n1 -> companies/acme-example']);
   expect(await remove({ link_source: 'mentions' })).toMatchObject({ status: 'ok', removed: 1 });
-  expect(await suppressions()).toEqual(['notes/n1 -> companies/acme-example (mentions)']);
+  expect(await suppressions()).toEqual(['notes/n1 -> companies/acme-example (*)']);
   await engine.executeRaw("DELETE FROM pages WHERE slug = 'notes/n1'");
   expect(await suppressions()).toEqual([]);
 });
@@ -516,4 +516,31 @@ test('L159: --rebuild keeps a typed edge whose own type is not suppressed when t
   await engine.executeRaw('DELETE FROM op_checkpoints');
   await quietly(() => runExtract(engine, ['links', '--by-mention', '--rebuild', '--source', 'db']));
   expect(await mentionLinks(engine)).toEqual(['notes/n1 -> companies/acme-example (typed_ner)']);
+});
+
+// remove_link without a link_type ("omit = all types") suppresses the pair for every derived type.
+test('L159: the plain mention removed with no link_type stays removed when extract links --ner would type the pair', async () => {
+  await page(engine, 'companies/acme-example', 'company', 'Acme Example', 'Acme Example builds widgets.');
+  await page(engine, 'people/dana-example', 'person', 'Dana Example', 'Dana Example works at Acme Example.');
+  await runMentionPass(engine);
+  expect(await mentionLinks(engine)).toEqual(['people/dana-example -> companies/acme-example']);
+  expect(await removeMention('people/dana-example', 'companies/acme-example')).toMatchObject({ status: 'ok', removed: 1 });
+  expect(await suppressions()).toEqual(['people/dana-example -> companies/acme-example (*)']);
+  expect(await extractNerLinks(engine)).toMatchObject({ pack_unavailable: false });
+  await engine.executeRaw('UPDATE page_mention_state SET mention_revision = NULL');
+  await runMentionPass(engine);
+  expect(await mentionLinks(engine)).toEqual([]);
+});
+
+test('L159: a typed edge removed with no link_type stays removed when the pass would derive the pair\'s plain mention', async () => {
+  await page(engine, 'companies/acme-example', 'company', 'Acme Example', 'A company.');
+  await page(engine, 'notes/n1', 'note', 'n1', 'Talked to Acme Example about the rollout.');
+  await engine.addLinksBatch([{ from_slug: 'notes/n1', to_slug: 'companies/acme-example', link_type: 'works_at', link_source: 'mentions', link_kind: 'typed_ner', context: '' } as never]);
+  await runMentionPass(engine);
+  expect(await mentionLinks(engine)).toEqual(['notes/n1 -> companies/acme-example (typed_ner)']);
+  expect(await removeMention('notes/n1', 'companies/acme-example')).toMatchObject({ status: 'ok', removed: 1 });
+  expect(await suppressions()).toEqual(['notes/n1 -> companies/acme-example (*)']);
+  await engine.executeRaw('UPDATE page_mention_state SET mention_revision = NULL');
+  await runMentionPass(engine);
+  expect(await mentionLinks(engine)).toEqual([]);
 });

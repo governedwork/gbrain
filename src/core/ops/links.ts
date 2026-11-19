@@ -182,7 +182,7 @@ const remove_link: Operation = {
   name: 'remove_link',
   idempotent: false,
   outputRedaction: 'no_stored_text',
-  description: 'Remove a link between two pages (optionally only one link_type or link_source). Use when a relationship was recorded wrongly. Removing a derived mention edge (link_source mentions) keeps it removed: mention extraction does not write that page pair with that link_type again. Needs write scope. On page_not_found: resolve both slugs with resolve_slugs.',
+  description: 'Remove a link between two pages (optionally only one link_type or link_source). Use when a relationship was recorded wrongly. Removing a derived mention edge (link_source mentions) keeps it removed: mention extraction does not link that page pair again (with link_type, only that type). Needs write scope. On page_not_found: resolve both slugs with resolve_slugs.',
   params: {
     from: { type: 'string', required: true, description: 'Slug of the page the link originates from (same endpoint order as add_link).' },
     to: { type: 'string', required: true, description: 'Slug of the page the link points to.' },

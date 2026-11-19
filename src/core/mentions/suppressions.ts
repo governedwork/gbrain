@@ -5,9 +5,10 @@
  *
  * `remove_link` reads, before its delete and in the same transaction, every
  * derived mention edge (`link_source='mentions'`) its filters match
- * (`derivedMentionEdges`) and records each one's (from, to, link_type) once the
- * delete removed an edge (`recordMentionSuppressions`): removing the plain
- * mention records type `mentions`, removing a typed NER edge records its verb.
+ * (`derivedMentionEdges`) and records them once the delete removed an edge
+ * (`recordMentionSuppressions`): without a `link_type` filter ("all types") one
+ * pair-wide row (`PAIR_WIDE_LINK_TYPE`, every derived type), with one the
+ * removed edge's type (`mentions` for the plain mention, a typed NER edge's verb).
  * Each derive path leaves out only the edge type it writes, from one read per
  * run or batch (`loadMentionSuppressions`): the mention pass and `extract links
  * --by-mention` the plain mention (`--rebuild` keeps a typed edge whose own type
@@ -25,21 +26,25 @@ export interface MentionSuppression { from_page_id: number; to_page_id: number; 
 
 /** The `link_type` of a plain mention edge (the mention pass and `extract links --by-mention` write it). */
 export const PLAIN_MENTION_LINK_TYPE = 'mentions';
+/** The suppression row of a `remove_link` without a `link_type` filter: the pair, for every derived link type. */
+export const PAIR_WIDE_LINK_TYPE = '*';
 
 /**
- * The derived mention edges from `from` to `to` (one per link type) that a `remove_link` with these filters deletes;
- * none when a `link_source` filter names another producer.
+ * The suppressions a `remove_link` with these filters records for the derived mention edges (`link_source='mentions'`)
+ * from `from` to `to` it deletes: one pair-wide row without a `link_type` filter, else one for that type; none when no
+ * derived edge matches or a `link_source` filter names another producer.
  */
 export async function derivedMentionEdges(engine: Pick<BrainEngine, 'executeRaw'>, link: { from: string; to: string; fromSourceId: string; toSourceId: string;
   linkType?: string; linkSource?: string }): Promise<MentionSuppression[]> {
   if (link.linkSource !== undefined && link.linkSource !== 'mentions') return [];
-  const rows = await engine.executeRaw<MentionSuppression>(
-    `SELECT DISTINCT l.from_page_id, l.to_page_id, l.link_type FROM links l
+  const [row] = await engine.executeRaw<MentionSuppression>(
+    `SELECT l.from_page_id, l.to_page_id, l.link_type FROM links l
        JOIN pages f ON f.id = l.from_page_id AND f.slug = $1 AND f.source_id = $2
        JOIN pages t ON t.id = l.to_page_id AND t.slug = $3 AND t.source_id = $4
-      WHERE l.link_source = 'mentions' AND ($5::text IS NULL OR l.link_type = $5)`,
+      WHERE l.link_source = 'mentions' AND ($5::text IS NULL OR l.link_type = $5)
+      LIMIT 1`,
     [link.from, link.fromSourceId, link.to, link.toSourceId, link.linkType ?? null]);
-  return rows.map(r => ({ from_page_id: Number(r.from_page_id), to_page_id: Number(r.to_page_id), link_type: r.link_type }));
+  return row ? [{ from_page_id: Number(row.from_page_id), to_page_id: Number(row.to_page_id), link_type: link.linkType ?? PAIR_WIDE_LINK_TYPE }] : [];
 }
 
 /** Record that no derive path may write these edges again (idempotent). */
@@ -53,6 +58,7 @@ export async function recordMentionSuppressions(engine: Pick<BrainEngine, 'execu
 
 /** The suppressed edges of a run or batch, by source page id, target page and link type. */
 export interface MentionSuppressions {
+  /** Whether the edge of `linkType` is suppressed, by its own row or the pair-wide one. */
   has(fromPageId: number, target: { source_id: string; slug: string }, linkType: string): boolean;
 }
 
@@ -63,7 +69,8 @@ export async function loadMentionSuppressions(engine: Pick<BrainEngine, 'execute
     `SELECT s.from_page_id, t.source_id, t.slug, s.link_type FROM mention_suppressions s JOIN pages t ON t.id = s.to_page_id
       ${fromPageIds ? 'WHERE s.from_page_id = ANY($1::int[])' : ''}`, fromPageIds ? [fromPageIds] : []);
   const keys = new Set(rows.map(r => key(Number(r.from_page_id), r.source_id, r.slug, r.link_type)));
-  return { has: (fromPageId, target, linkType) => keys.has(key(fromPageId, target.source_id, target.slug, linkType)) };
+  return { has: (fromPageId, target, linkType) => keys.has(key(fromPageId, target.source_id, target.slug, linkType))
+    || keys.has(key(fromPageId, target.source_id, target.slug, PAIR_WIDE_LINK_TYPE)) };
 }
 
 /** Whether a person removed the plain mention from page `fromPageId` to any of `slugs` in `sourceId`. */
@@ -90,7 +97,8 @@ export async function moveMentionSuppressions(tx: Pick<BrainEngine, 'executeRaw'
   await tx.executeRaw('DELETE FROM mention_suppressions WHERE from_page_id = $1 OR to_page_id = $1', [fromPageId]);
   const dropped = await tx.executeRaw<RelationshipKey>(
     `DELETE FROM links l USING mention_suppressions s
-      WHERE l.link_source = 'mentions' AND l.from_page_id = s.from_page_id AND l.to_page_id = s.to_page_id AND l.link_type = s.link_type
+      WHERE l.link_source = 'mentions' AND l.from_page_id = s.from_page_id AND l.to_page_id = s.to_page_id
+        AND (s.link_type = l.link_type OR s.link_type = '*')
         AND (s.from_page_id = $1 OR s.to_page_id = $1)
       RETURNING l.from_page_id, l.to_page_id, l.link_type`, [toPageId]);
   return dropped.map(r => ({ from_page_id: Number(r.from_page_id), to_page_id: Number(r.to_page_id), link_type: r.link_type }));

@@ -3,8 +3,9 @@
  * removed.
  *
  * `remove_link` of a `link_source='mentions'` edge records its page pair and
- * link type here (`mentions` for the plain mention, the verb for a typed NER
- * edge), and no derive path writes that edge again, so a rescan without a page
+ * link type here (`*` for the whole pair when the removal names no link type,
+ * else `mentions` for the plain mention or a typed NER edge's verb), and no
+ * derive path writes such an edge again, so a rescan without a page
  * write (a gazetteer change, an extractor version bump) does not bring it back.
  * Page ids and a link type name only (no slug, name or text); both ends cascade
  * with their page.

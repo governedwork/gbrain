@@ -2,8 +2,8 @@
   "golden": {
     "exitCode": 0,
     "stderr": "",
-    "stdoutBytes": 264704,
-    "stdoutSha256": "521eb2b81e625a9773e2f04a721df6bf4d0f8acde1e7eb08cc748aec5283cd5d",
+    "stdoutBytes": 264716,
+    "stdoutSha256": "4feb7b1bdc6d2e011d7a7dbf263a66e375f3a1a424756d23e97de153fcd79e3b",
     "toolNames": [
       "remember",
       "entity",
@@ -2387,7 +2387,7 @@
         "scope": "write"
       },
       {
-        "description": "Remove a link between two pages (optionally only one link_type or link_source). Use when a relationship was recorded wrongly. Removing a derived mention edge (link_source mentions) keeps it removed: mention extraction does not write that page pair with that link_type again. Needs write scope. On page_not_found: resolve both slugs with resolve_slugs.",
+        "description": "Remove a link between two pages (optionally only one link_type or link_source). Use when a relationship was recorded wrongly. Removing a derived mention edge (link_source mentions) keeps it removed: mention extraction does not link that page pair again (with link_type, only that type). Needs write scope. On page_not_found: resolve both slugs with resolve_slugs.",
         "idempotent": false,
         "local_only": false,
         "mutating": true,
