@@ -92,7 +92,8 @@ export interface ParsedFact {
   /**
    * v0.32.2 strikethrough semantics. Both are mutually exclusive with `active=true`.
    *   - `supersededBy` set: the row was superseded by another fence row;
-   *     `context` matches `/superseded by #(\d+)/i`.
+   *     `context` starts with `superseded by #N`, in any case
+   *     (`factsSupersessionCitation`).
    *   - `forgotten` true: the user invoked `gbrain forget` on this row;
    *     `context` matches `/^forgotten:/i`.
    * When neither is set but `active=false`, the row is "inactive for
@@ -208,12 +209,29 @@ export function factsRowProblem(layout: readonly FactsFenceColumn[], named: numb
   return layout.slice(cells.length, named).some(column => !FACTS_OPTIONAL_COLUMNS.has(column)) ? 'short' : null;
 }
 
-function parseSupersededByFromContext(context: string | undefined): number | undefined {
-  if (!context) return undefined;
-  const m = context.match(/superseded by #(\d+)/i);
-  if (!m) return undefined;
-  const n = parseInt(m[1], 10);
-  return Number.isFinite(n) && n > 0 ? n : undefined;
+const FACTS_CITATION_RE = /^(\s*superseded by #)(\d+)/i;
+
+/**
+ * The row a struck facts row's `superseded by #N` names. Every facts writer
+ * puts the live pointer at the START of the context cell (the fence strike
+ * writes it alone; facts/forget.ts `supersededFact` prepends it to the row's
+ * own context), so only a leading citation counts, in any case. Text later in
+ * the cell is prose: a live row's note that a later strike kept, or a
+ * `forgotten:` withdrawal's reason, never becomes a link. The takes fence's
+ * writer appends instead, so takes reads its last citation
+ * (`supersessionCitation`, takes-fence.ts). Callers read this on struck rows
+ * only: the parser, fence repair's facts kind and the phantom redirect.
+ */
+export function factsSupersessionCitation(context: string | undefined): number | null {
+  const m = FACTS_CITATION_RE.exec(context ?? '');
+  if (!m) return null;
+  const n = Number(m[2]);
+  return Number.isSafeInteger(n) && n > 0 ? n : null;
+}
+
+/** `context` with the citation `factsSupersessionCitation` reads pointed at row `target`; unchanged when it carries none. */
+export function rewriteFactsSupersessionCitation(context: string, target: number): string {
+  return context.replace(FACTS_CITATION_RE, (_match, lead: string) => `${lead}${target}`);
 }
 
 function parseForgottenFromContext(context: string | undefined): boolean {
@@ -354,7 +372,7 @@ export function parseFactsFence(body: string): FactsFenceParseResult {
 
     const { text: claimText, struck } = stripStrikethrough(claimRaw);
     const context = parseStringCell(contextRaw);
-    const supersededBy = struck ? parseSupersededByFromContext(context) : undefined;
+    const supersededBy = struck ? factsSupersessionCitation(context) ?? undefined : undefined;
     const forgotten    = struck && parseForgottenFromContext(context);
 
     facts.push({

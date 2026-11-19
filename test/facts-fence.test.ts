@@ -257,6 +257,31 @@ describe('parseFactsFence — strikethrough semantics (Codex R2-#3 contract)', (
     expect(r.warnings).toEqual([]);
     expect(r.facts[0]).toMatchObject({ rowNum: 1, active: false, supersededBy: 2 });
   });
+
+  // A live row keeps "superseded by #N" as prose (#9069); a later strike puts
+  // its own marker first and keeps that prose after it. Only the leading
+  // citation is the writer's pointer.
+  test('L109: a forgotten row whose kept prose says "superseded by #2" takes no supersession pointer', () => {
+    const body = wrapFenceBody(
+      `| 1 | ~~Old claim~~ | fact | 0.8 | world | medium | 2026-01-01 |  | src | forgotten: user asked \\| superseded by #2 |
+| 2 | Other claim | fact | 0.9 | world | medium | 2026-06-01 |  | src |  |`,
+    );
+    const r = parseFactsFence(body);
+    expect(r.warnings).toEqual([]);
+    expect(r.facts[0]).toMatchObject({ rowNum: 1, active: false, forgotten: true, context: 'forgotten: user asked | superseded by #2' });
+    expect(r.facts[0].supersededBy).toBeUndefined();
+  });
+
+  test('L109: a cross-page strike ("superseded", no row) whose kept prose says "superseded by #2" takes no pointer', () => {
+    const body = wrapFenceBody(
+      `| 1 | ~~Old claim~~ | fact | 0.8 | world | medium | 2026-01-01 |  | src | superseded \\| superseded by #2 |
+| 2 | Other claim | fact | 0.9 | world | medium | 2026-06-01 |  | src |  |`,
+    );
+    const r = parseFactsFence(body);
+    expect(r.warnings).toEqual([]);
+    expect(r.facts[0]).toMatchObject({ rowNum: 1, active: false, context: 'superseded | superseded by #2' });
+    expect(r.facts[0].supersededBy).toBeUndefined();
+  });
 });
 
 describe('parseFactsFence — lenient hand-edits', () => {

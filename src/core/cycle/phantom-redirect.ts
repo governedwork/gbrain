@@ -51,6 +51,7 @@ import {
   replaceOrInsertFactsFence,
   FACTS_FENCE_BEGIN,
   FACTS_FENCE_END,
+  rewriteFactsSupersessionCitation,
   type ParsedFact,
 } from '../facts-fence.ts';
 import { locateOutsideCode } from '../fence-scan.ts';
@@ -379,7 +380,7 @@ export function mergePhantomFenceRows(
   const merged: ParsedFact[] = [...existingFacts, ...pending.map((f) => {
     const target = f.supersededBy === undefined ? undefined : renumber.get(f.supersededBy);
     if (target === undefined) return f;
-    return { ...f, supersededBy: target, context: f.context?.replace(/superseded by #\d+/i, `superseded by #${target}`) };
+    return { ...f, supersededBy: target, context: f.context === undefined ? undefined : rewriteFactsSupersessionCitation(f.context, target) };
   })];
 
   // Shared placement rule (#4756): replace in place, else insert ABOVE the
