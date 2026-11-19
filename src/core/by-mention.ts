@@ -126,7 +126,7 @@ export function hashGazetteer(gazetteer: Gazetteer): string {
     for (const e of bucket) entries.push(`${e.source_id}\0${e.slug}\0${e.title}\0${e.tokens.join(' ')}\0${e.matchText ?? ''}${e.caseTokens ? `\0${e.caseTokens.join(' ')}` : ''}`);
   }
   // Matching semantics are part of the resume identity, not just DB contents.
-  return createHash('sha256').update('link-syntax-masked-v6\n').update(entries.sort().join('\n')).digest('hex').slice(0, 8);
+  return createHash('sha256').update('link-syntax-visible-text-v7\n').update(entries.sort().join('\n')).digest('hex').slice(0, 8);
 }
 
 /** One row of the saved entry set the mention pass diffs (mention_gazetteer_entries). */
@@ -742,6 +742,75 @@ function hasKatakanaMatchBoundary(
 }
 
 /**
+ * The text the mention scanner reads: code and HTML comments stripped
+ * (`stripCodeBlocks`), then link syntax masked with the text a reader sees kept
+ * (`maskLinkSyntax`); offsets into `text` hold.
+ */
+export function mentionScanText(text: string): string {
+  return maskLinkSyntax(stripCodeBlocks(text, { onHtmlComment: () => {} }));
+}
+
+/** A wikilink's target, up to its `#heading` or `|display` (group 1). */
+const WIKILINK_TARGET_RE = /!?\[\[([^[\]\n|#]*)[^[\]\n]*\]\]/g;
+const SLUG_INDEX = new WeakMap<Gazetteer, Map<string, GazetteerEntry[]>>();
+
+/** The gazetteer's targets by slug and by slug basename, one entry per (source, slug), built once per gazetteer. */
+function slugIndex(gazetteer: Gazetteer): Map<string, GazetteerEntry[]> {
+  const cached = SLUG_INDEX.get(gazetteer);
+  if (cached) return cached;
+  const index = new Map<string, GazetteerEntry[]>();
+  const seen = new Set<string>();
+  for (const bucket of gazetteer.values()) {
+    for (const e of bucket) {
+      if (seen.has(`${e.source_id}\0${e.slug}`)) continue;
+      seen.add(`${e.source_id}\0${e.slug}`);
+      for (const key of new Set([e.slug, e.slug.slice(e.slug.lastIndexOf('/') + 1)])) index.set(key, [...index.get(key) ?? [], e]);
+    }
+  }
+  SLUG_INDEX.set(gazetteer, index);
+  return index;
+}
+
+/**
+ * Wikilinks that point at a gazetteer target by its slug or its unique basename (`[[people/alice-example]]`,
+ * `[[alice-example|Alice]]`): the link names that entity whatever its text says, so it is a mention at the target's
+ * offset. A link to any other page (`[[notes/widget-co-launch]]`) mentions nothing through its target, which
+ * `maskLinkSyntax` masks. The self-link, cross-source (own source first) and per-page ignore guards apply.
+ */
+function linkedMentions(code: string, gazetteer: Gazetteer, opts: FindMentionsOpts, ignored: Set<string>): Mention[] {
+  if (!code.includes('[[')) return [];
+  const index = slugIndex(gazetteer);
+  const one = (list: GazetteerEntry[]) => (list.length === 1 ? list[0] : undefined);
+  const out: Mention[] = [];
+  for (const link of code.matchAll(WIKILINK_TARGET_RE)) {
+    const target = link[1]!.trim().toLowerCase().replace(/^\.?\//, '').replace(/\.md$/, '');
+    const candidates = target ? index.get(target) ?? [] : [];
+    if (!candidates.length) continue;
+    const exact = candidates.filter(e => e.slug === target);
+    const basename = candidates.filter(e => e.slug !== target);
+    const own = (list: GazetteerEntry[]) => list.filter(e => e.source_id === opts.fromSourceId);
+    const foreign = (list: GazetteerEntry[]) => (opts.allowCrossSource ? list.filter(e => e.source_id !== opts.fromSourceId) : []);
+    const entry = one(own(exact)) ?? one(own(basename)) ?? one(foreign(exact)) ?? one(foreign(basename));
+    if (!entry || (entry.source_id === opts.fromSourceId && entry.slug === opts.fromSlug) || ignored.has(tokenizeTitle(entry.title).join(' '))) continue;
+    const at = link.index! + link[0].indexOf('[[') + 2;
+    out.push({ slug: entry.slug, source_id: entry.source_id, name: entry.title, offset: at + link[1]!.length - link[1]!.trimStart().length });
+  }
+  return out;
+}
+
+/** Mentions in offset order, the first per target kept (the scan's first-mention cap across both lists). */
+function firstMentions(scanned: Mention[], linked: Mention[]): Mention[] {
+  if (!linked.length) return scanned;
+  const seen = new Set<string>();
+  return [...scanned, ...linked].sort((a, b) => a.offset - b.offset).filter(m => {
+    const key = `${m.source_id}\0${m.slug}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/**
  * Scan body text for mentions of gazetteer entities. Pure function — no
  * IO. Returns `Mention[]` ordered by offset, deduped per
  * `(fromSourceId, fromSlug → entry.source_id, entry.slug)` pair
@@ -764,12 +833,14 @@ function hasKatakanaMatchBoundary(
  *  - First-mention-only cap: dedup by `(entry.source_id, entry.slug)` (one
  *    link per target page regardless of how many body mentions there are).
  *
- * Code-block and HTML-comment stripping via `stripCodeBlocks`, then link
- * syntax via `maskLinkSyntax` (a wikilink target, the hidden target of
- * `[[target|Display]]`, a markdown link destination, a URL: not text the page
- * says; display text stays). Both preserve offsets, so the returned mention
- * offsets index into the ORIGINAL text not the stripped text — useful for
- * downstream debugging tools.
+ * Reads `mentionScanText(text)`: code and HTML comments stripped, then link
+ * syntax masked (an address-shaped wikilink target, the hidden target of
+ * `[[target|Display]]`, a markdown link destination, a URL) with the text a
+ * reader sees kept (`[[Acme Example]]`, a display name). A wikilink whose
+ * target is an entity's slug or unique basename mentions that entity
+ * (`linkedMentions`). Both preserve offsets, so the returned mention offsets
+ * index into the ORIGINAL text not the stripped text — useful for downstream
+ * debugging tools.
  */
 export function findMentionedEntities(
   text: string,
@@ -777,10 +848,12 @@ export function findMentionedEntities(
   opts: FindMentionsOpts,
 ): Mention[] {
   if (!text || gazetteer.size === 0) return [];
-  const stripped = maskLinkSyntax(stripCodeBlocks(text, { onHtmlComment: () => {} }));
-  const tokens = tokenizeForScan(stripped);
-  if (tokens.length === 0) return [];
+  const code = stripCodeBlocks(text, { onHtmlComment: () => {} });
   const ignored = new Set((opts.ignoreNames ?? []).map(n => tokenizeTitle(n).join(' ')).filter(Boolean));
+  const linked = linkedMentions(code, gazetteer, opts, ignored);
+  const stripped = maskLinkSyntax(code);
+  const tokens = tokenizeForScan(stripped);
+  if (tokens.length === 0) return firstMentions([], linked);
   // A case-sensitive entry matches only the original-case body text.
   const caseMatches = (entry: GazetteerEntry, at: number) => !entry.caseTokens || entry.caseTokens.every((t, k) => {
     const tok = tokens[at + k]!;
@@ -897,7 +970,7 @@ export function findMentionedEntities(
     i += matchedTokens;
   }
 
-  return out;
+  return firstMentions(out, linked);
 }
 
 // ============================================================

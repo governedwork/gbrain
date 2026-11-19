@@ -81,6 +81,17 @@ describe('extractTimelineFromMeetings', () => {
     });
   });
 
+  it('L159: finds an attendee written only as a wikilink in the meeting body, by slug or by name', async () => {
+    await seedEntity('people/alice-example', 'Alice Example');
+    await seedEntity('people/bob-example', 'Bob Example');
+    await seedNote('meetings/by-slug', { title: 'By Slug', legacyType: 'meeting', body: 'Attendees: [[people/alice-example]]' });
+    await seedNote('meetings/by-name', { title: 'By Name', legacyType: 'meeting', body: 'Attendees: [[Bob Example]]' });
+    const result = await extractTimelineFromMeetings(engine, { gazetteer: await buildGazetteer(engine) });
+    expect(result).toMatchObject({ meetings_scanned: 2, entries_created: 2 });
+    expect((await engine.getTimeline('people/alice-example', { sourceId: 'default' })).map(e => e.summary)).toEqual(['Discussed in By Slug']);
+    expect((await engine.getTimeline('people/bob-example', { sourceId: 'default' })).map(e => e.summary)).toEqual(['Discussed in By Name']);
+  });
+
   it('does not scan ordinary note pages as meetings', async () => {
     await seedEntity('people/alice-example', 'Alice Example');
     await seedNote('notes/team-sync', { title: 'Team Sync' });
