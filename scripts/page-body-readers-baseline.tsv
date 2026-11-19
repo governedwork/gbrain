@@ -50,7 +50,6 @@ src/commands/jobs.ts	JOBS_HELP	sql	NONE	not the page body: help text
 src/commands/lint.ts	lintContent	field	STREAM	
 src/commands/migrate-engine.ts	copyPageToTarget	call:putPage	SEGW	
 src/commands/migrate-engine.ts	copyPageToTarget	field	STREAM	
-src/commands/migrations/v0_32_2.ts	phaseCVerify	call:serializePageToMarkdown	SEGW	
 src/commands/quarantine.ts	runClear	call:serializeMarkdown	SEGW	
 src/commands/quarantine.ts	runClear	field	SEGW	
 src/commands/quarantine.ts	runScan	call:serializePageToMarkdown	SEGW	
@@ -244,7 +243,7 @@ src/core/facts/reconcile-watermark.ts	selectFactsReconcileDrain	sql	STREAM
 src/core/facts/relink-publish.ts	prepareRelinkMutation	call:serializePageToMarkdown	SEGW	
 src/core/facts/relink-publish.ts	prepareRelinkMutation	field	SEGW	
 src/core/facts/subject-infer-write.ts	linkAllowed	field	STREAM	
-src/core/facts/unfenced-facts.ts	storedPageMarkdown	call:serializePageToMarkdown	SEGW	the three fence planners' one reader: wholeBodySnapshot reads a segmented page back whole up to PAGE_MAX_BYTES and refuses page_body_segmented above it
+src/core/facts/unfenced-facts.ts	storedPageMarkdown	call:serializePageToMarkdown	SEGW	the fence planners' and the v0.32.2 verify's one reader: wholeBodySnapshot reads a segmented page back whole up to PAGE_MAX_BYTES and refuses page_body_segmented above it
 src/core/facts/withdrawal-discovery.ts	discoverWithdrawalTargets	field	STREAM	inline rows only
 src/core/facts/withdrawal-discovery.ts	discoverWithdrawalTargets	sql	STREAM	page scan reads inline bodies (NULL never matches); segmented pages are found by the chunk scan and their mirror writers refuse or skip (per-segment discovery, PR 2)
 src/core/fence-repair/census.ts	judgePages	field	STREAM	

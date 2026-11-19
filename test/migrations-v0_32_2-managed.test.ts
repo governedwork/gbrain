@@ -38,6 +38,7 @@ import { serializePageToMarkdown } from '../src/core/markdown.ts';
 import { submitPageMutation } from '../src/core/persistence/page-mutations.ts';
 import { maintenancePreflight, submitFactFenceAdoption } from '../src/core/persistence/prepared-maintenance.ts';
 import { managedBrain } from './helpers/managed-brain.ts';
+import { createSegmentedPage } from './helpers/segmented-page.ts';
 import { LEGACY_DB_ONLY_SLUG, LEGACY_FILE_SLUG, seedLegacyManagedContent, type LegacySeed } from './helpers/managed-legacy-fixture.ts';
 import { requirePostgresTestDatabase, testBackends } from './helpers/test-backends.ts';
 
@@ -270,5 +271,22 @@ for (const backend of testBackends()) {
       expect(await indexed()).toEqual([1, 3]);
       expect(await __testing.phaseCVerify(engine, OPTS)).toMatchObject({ status: 'complete', detail: 'pages_checked=1' });
     }, { databaseUrl });
+  }, 120_000);
+
+  // Above the demote bound (512 KiB), so the page stays in segments after the fence write.
+  test(`L153: ${backend}: verify reads a segmented page the backfill fenced as in sync`, async () => {
+    const SLUG = 'people/erin-example';
+    await managedBrain(async ({ engine }) => {
+      expect(await __testing.phaseBFenceFacts(engine, OPTS)).toMatchObject({ status: 'complete' });
+      const [page] = await engine.executeRaw<{ body_storage: string }>('SELECT body_storage FROM pages WHERE slug = $1', [SLUG]);
+      expect(page!.body_storage).toBe('segmented');
+      expect((await engine.executeRaw<{ row_num: number }>('SELECT row_num FROM facts WHERE entity_slug = $1', [SLUG])).map(r => r.row_num)).toEqual([1]);
+      expect(await __testing.phaseCVerify(engine, OPTS)).toMatchObject({ status: 'complete', detail: 'pages_checked=1' });
+    }, { databaseUrl, setup: async ({ engine }) => {
+      const prose = Array.from({ length: 9000 }, (_, i) => `Erin example note ${i}: the platform team shipped another release on schedule.`).join('\n\n');
+      await createSegmentedPage(engine, { slug: SLUG, truth: `# Erin Example\n\n${prose}\n`, meta: { type: 'person', title: 'Erin Example' } });
+      await engine.executeRaw(`INSERT INTO facts (source_id, entity_slug, fact, kind, visibility, notability, valid_from, source, confidence)
+        VALUES ('default', $1, 'Erin example moved to Porto', 'fact', 'world', 'medium', '2026-03-01', 'mcp:remember', 0.9)`, [SLUG]);
+    } });
   }, 120_000);
 }
