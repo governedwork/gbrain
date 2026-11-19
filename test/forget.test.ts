@@ -18,6 +18,10 @@ import { importFromContent } from '../src/core/import-file.ts';
 import { runExtractFacts } from '../src/core/cycle/extract-facts.ts';
 import { registerLocalWriter } from '../src/core/persistence/identity.ts';
 import { runForget } from '../src/commands/recall.ts';
+import { forgetBatch } from '../src/commands/forget.ts';
+import { OperationError } from '../src/core/ops/contract.ts';
+import { PENDING_WRITE_EXIT_CODE } from '../src/core/exit-codes.ts';
+import { Readable } from 'node:stream';
 import { _resetCliExitVerdictForTests, currentExitCode } from '../src/core/cli-force-exit.ts';
 import { withEnv } from './helpers/with-env.ts';
 
@@ -87,4 +91,63 @@ describe('gbrain forget <id>... (L146)', () => {
     expect((summary.failed ?? []).map(f => ({ id: String(f.id), code: f.code }))).toEqual([{ id: String(bad), code: 'not_found' }]);
     expect(typeof summary.failed?.[0]?.request_id).toBe('string');
   }, 60_000);
+  test('L146: a flag value is never an id: an unquoted multi-word --reason refuses the run and forgets nothing', async () => {
+    const run = await capture(() => runForget(engine, [String(ids[0]), '--reason', 'dup', 'of', String(ids[1])]));
+    expect(run.code).not.toBe(0);
+    // 'dup' is the --reason value; 'of' is the first token that is neither a flag value nor an id.
+    expect(run.err).toContain("'of' is not a fact id");
+    expect(await expired(ids)).toEqual(ids.map(id => ({ id, expired: false })));
+  }, 60_000);
+
+  test('L146: numeric --reason and --match values are never forgotten as ids', async () => {
+    const reasoned = await capture(() => runForget(engine, [String(ids[0]), '--reason', String(ids[1])]));
+    expect(reasoned.code).toBe(0);
+    const matched = await capture(() => runForget(engine, [String(ids[0]), '--match', String(ids[2])]));
+    expect(matched.code).toBe(0);
+    expect(await expired(ids)).toEqual([{ id: ids[0]!, expired: true }, { id: ids[1]!, expired: false }, { id: ids[2]!, expired: false }]);
+  }, 60_000);
+
+  test('L146: --ids-from-stdin with a bad token refuses before forgetting anything', async () => {
+    const run = await capture(() => runForget(engine, [String(ids[0]), '--ids-from-stdin'], { stdin: Readable.from([`${ids[1]}, x ${ids[2]}\n`]) }));
+    expect(run.code).not.toBe(0);
+    expect(run.err).toContain("'x' is not one");
+    expect(await expired(ids)).toEqual(ids.map(id => ({ id, expired: false })));
+    const ok = await capture(() => runForget(engine, ['--ids-from-stdin', '--json'], { stdin: Readable.from([`${ids[1]}\n${ids[2]},${ids[1]}\n`]) }));
+    expect(ok.code).toBe(0);
+    expect(JSON.parse(ok.out).forgotten).toEqual([ids[1], ids[2]]);
+  }, 60_000);
+
+  test('L146: a batch refuses --request-id and forgets nothing; repeated ids are forgotten once', async () => {
+    const refused = await capture(() => runForget(engine, [String(ids[0]), String(ids[1]), '--request-id', randomUUID()]));
+    expect(refused.code).not.toBe(0);
+    expect(await expired(ids)).toEqual(ids.map(id => ({ id, expired: false })));
+    const run = await capture(() => runForget(engine, [String(ids[0]), String(ids[0]), String(ids[1]), '--json']));
+    expect(run.code).toBe(0);
+    expect(JSON.parse(run.out)).toMatchObject({ forgotten: [ids[0], ids[1]], already_withdrawn: [], failed: [] });
+  }, 60_000);
+
+  test('L146: a pending write in a batch is pending, not failed, and exits as a single pending forget does', async () => {
+    const pendingError = () => {
+      const e = new OperationError('write_pending', 'The owner has not committed the forget yet.');
+      e.writeRequest = { request_id: randomUUID(), state: 'queued', retry_after_ms: 1000 };
+      return e;
+    };
+    const forgetOne = async (p: Record<string, unknown>) => {
+      if (p.id === '2') throw pendingError();
+      if (p.id === '3') throw new OperationError('not_found', 'No fact with id "3".');
+      return { id: String(p.id), expired: true };
+    };
+    const quiet = async <T>(fn: () => Promise<T>) => {
+      const e = process.stderr.write.bind(process.stderr);
+      process.stderr.write = (() => true) as typeof process.stderr.write;
+      try { return await fn(); } finally { process.stderr.write = e; }
+    };
+    const pendingOnly = await quiet(() => forgetBatch(['1', '2'], forgetOne, { acceptPending: false, json: true }));
+    expect(pendingOnly.summary).toMatchObject({ forgotten: [1], failed: [], pending: [{ id: 2, state: 'queued' }] });
+    expect(pendingOnly.exitCode).toBe(PENDING_WRITE_EXIT_CODE);
+    expect((await quiet(() => forgetBatch(['1', '2'], forgetOne, { acceptPending: true, json: true }))).exitCode).toBe(0);
+    const withFailure = await quiet(() => forgetBatch(['2', '3'], forgetOne, { acceptPending: true, json: true }));
+    expect(withFailure.summary.failed.map(f => f.id)).toEqual([3]);
+    expect(withFailure.exitCode).toBe(1);
+  });
 });
