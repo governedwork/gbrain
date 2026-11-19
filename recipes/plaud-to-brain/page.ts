@@ -33,8 +33,20 @@ export interface PlaudMeetingRecord {
   time: string;
   /** `33m`, `1h05m` (`durationText` of Plaud's milliseconds). */
   duration: string;
-  /** Step 4's roster: people slugs, unresolved attendees as emails. The source's claim. */
+  /**
+   * The people known to have been there, by person slug only, never an email: what the runner has evidence for (Step 4:
+   * the recorder, whose own Plaud made the recording), and what meeting-ingestion Phase 4 confirms from the transcript.
+   * GBrain records each as `person --attended--> meeting`; an entry no live person page answers for holds back every
+   * link of the page (docs/guides/attendance-evidence.md), so an unresolved person is never listed here.
+   */
   attendees: readonly string[];
+  /**
+   * Step 4's roster: the calendar event's invitees, people slugs where an exact email resolves and emails otherwise.
+   * The source's claim (invited ≠ present), kept apart from `attendees`; `[]` when no event overlapped the recording.
+   */
+  invitees: readonly string[];
+  /** The page's tags (GBrain's frontmatter `tags`). `[]` for none. */
+  tags: readonly string[];
   /** Step 4's calendar page slug, or `""` when no event overlapped the recording. */
   calendar_event: string;
   /** Every page of `get_transcript`, in order. */
@@ -100,7 +112,11 @@ function stamp(ms: number): string {
  * holds that slug, the runner files this one at `slugWithId(slug, record.source_id)`.
  */
 export function renderMeetingPage(record: PlaudMeetingRecord): { slug: string; content: string } {
-  const { date, time, duration, attendees, calendar_event: calendarEvent, source_summary: summary } = record;
+  const { date, time, duration, attendees, invitees, tags, calendar_event: calendarEvent, source_summary: summary } = record;
+  // A person slug is a path with no `@`: an email (or a bare name) here would be an attendance claim GBrain cannot resolve.
+  const notSlug = attendees.find((a) => a.includes('@') || !a.includes('/'));
+  if (notSlug !== undefined) throw new Error(`attendees holds people slugs only, not ${q(notSlug)}: an unresolved person is an invitee`);
+  const linked = (people: readonly string[]): string => people.map((p) => (p.includes('@') ? p : `[[${p}]]`)).join(', ');
   const fm = [
     '---',
     `type: ${q('meeting')}`,
@@ -111,20 +127,29 @@ export function renderMeetingPage(record: PlaudMeetingRecord): { slug: string; c
     `source: ${q(record.source)}`,
     `source_id: ${q(record.source_id)}`,
     `attendees: [${attendees.map(q).join(', ')}]`,
+    // A runner may keep the roster but not name its event (one filed where that calendar page does not live).
+    ...(calendarEvent === '' && invitees.length === 0 ? [] : [`invitees: [${invitees.map(q).join(', ')}]`]),
     ...(calendarEvent === '' ? [] : [`calendar_event: ${q(calendarEvent)}`]),
+    ...(tags.length === 0 ? [] : [`tags: [${tags.map(q).join(', ')}]`]),
     'facts_backstop: false',
     '---',
   ];
-  const who =
-    calendarEvent === ''
-      ? 'Attendees: unknown (no calendar event overlapped the recording).'
-      : `Attendees: ${attendees.map((a) => (a.includes('@') ? a : `[[${a}]]`)).join(', ') || 'none listed'} (from [[${calendarEvent}]]).`;
+  // The Attendees line is GBrain's bare link list (attendance evidence), so it carries exactly the frontmatter's people.
+  const present = attendees.length === 0 ? 'Attendees: none confirmed yet.' : `Attendees: ${linked(attendees)}`;
+  const invited =
+    calendarEvent !== ''
+      ? `Invited (from [[${calendarEvent}]], not confirmed present): ${linked(invitees) || 'none listed'}.`
+      : invitees.length > 0
+        ? `Invited (from the calendar, not confirmed present): ${linked(invitees)}.`
+        : 'Invited: unknown (no calendar event overlapped the recording).';
   const body = [
     `# ${record.title}`,
     '',
     `${date} ${time} · ${duration} · recorded with Plaud (\`${record.source_id}\`).`,
     '',
-    who,
+    present,
+    '',
+    invited,
     '',
     ...(summary === ''
       ? []
