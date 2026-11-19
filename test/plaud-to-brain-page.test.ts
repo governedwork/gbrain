@@ -175,6 +175,13 @@ describe('attendees and invitees', () => {
     expect(blocked.attendanceComplete).toBe(false);
   });
 
+  test('invitees without a named event are still kept, and said to be the calendar\'s', () => {
+    const page = renderMeetingPage(recordOf({ invitees: ['people/anna-a'], calendar_event: '' }));
+    expect(frontmatterOf(page.content)).toContain('invitees: ["people/anna-a"]');
+    expect(page.content).not.toContain('calendar_event:');
+    expect(page.content).toContain('\nInvited (from the calendar, not confirmed present): [[people/anna-a]].\n');
+  });
+
   test('no tags: no tags key', () => {
     expect(frontmatterOf(renderMeetingPage(recordOf({ tags: [] })).content)).not.toContain('tags:');
   });
