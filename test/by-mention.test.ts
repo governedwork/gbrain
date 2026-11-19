@@ -406,24 +406,35 @@ test('L159: visible text still matches: a wikilink display name and plain prose 
   expect(l159Scan(linked)).toEqual([['projects/acme-example', linked.indexOf('Acme Example')]]);
 });
 
-test('L159: maskLinkSyntax keeps length and line breaks, masks a reference definition\'s address and an autolink, and leaves a bracketed prose label alone', () => {
-  const body = 'Intro\r\n[kernels]: projects/acme-example-kernels "kernel notes"\r\n<https://widget-co.example.com>\n[Update]: Acme Example shipped.\n';
+test('L159: maskLinkSyntax keeps length and line breaks, masks a reference definition and an autolink, and leaves a bracketed prose label alone', () => {
+  const body = 'Intro\r\n[kernels]: projects/acme-example-kernels "Acme Example kernels"\r\n<https://widget-co.example.com>\n[Update]: Acme Example shipped.\n';
   const masked = maskLinkSyntax(body);
   expect(masked.length).toBe(body.length);
   expect([...masked].filter(c => c === '\r' || c === '\n').join('')).toBe('\r\n\r\n\n\n');
   expect(masked).not.toContain('acme-example-kernels');
   expect(masked).not.toContain('widget-co');
-  expect(masked).toContain('[kernels]:');
   expect(masked).toContain('[Update]: Acme Example shipped.');
   expect(l159Scan(body)).toEqual([['projects/acme-example', body.indexOf('Acme Example shipped')]]);
 });
 
 // What a reader sees stays scannable; only link syntax goes.
 test('L159: a bare [[Acme Example]] wikilink shows its name, so it mentions at the name\'s offset; an address-shaped one does not', () => {
-  const body = 'We met [[Acme Example]] and filed ![[diagram.png]] under [[acme-example-notes]].';
+  const body = 'We met [[Acme Example]] and filed it under [[acme-example-notes]].';
   expect(l159Scan(body)).toEqual([['projects/acme-example', body.indexOf('Acme Example')]]);
-  const embed = 'Agenda: ![[Widget Co]] and [[Acme Example#Funding]].';
-  expect(l159Scan(embed)).toEqual([['products/widget-co', embed.indexOf('Widget Co')], ['projects/acme-example', embed.indexOf('Acme Example')]]);
+  const heading = 'Agenda: [[Acme Example#Funding]].';
+  expect(l159Scan(heading)).toEqual([['projects/acme-example', heading.indexOf('Acme Example')]]);
+});
+
+// What a link points at is the markdown link extractor's (link_source markdown), never a mention.
+test('L159: a wikilink to an entity\'s own slug or basename is link syntax, not a mention', () => {
+  expect(l159Scan('Agenda: [[projects/acme-example]] then [[widget-co]] and [[notes/widget-co-launch]].')).toEqual([]);
+});
+
+// A reader sees an embed's attachment, not its file name.
+test('L159: an embed is masked whole: ![[Acme Example logo.png]] and ![[Widget Co roadmap 2024.pdf]] mention nothing', () => {
+  const body = 'Logo: ![[Acme Example logo.png]] Roadmap: ![[Widget Co roadmap 2024.pdf]] Note: ![[Widget Co]]';
+  expect(maskLinkSyntax(body)).toBe(`Logo: ${' '.repeat('![[Acme Example logo.png]]'.length)} Roadmap: ${' '.repeat('![[Widget Co roadmap 2024.pdf]]'.length)} Note: ${' '.repeat('![[Widget Co]]'.length)}`);
+  expect(l159Scan(body)).toEqual([]);
 });
 
 test('L159: [[target|display]] masks target| and keeps display; [text](url) keeps text', () => {
@@ -432,37 +443,37 @@ test('L159: [[target|display]] masks target| and keeps display; [text](url) keep
   expect(maskLinkSyntax('[Widget Co](https://widget-co.example.com)')).toBe(`[Widget Co]${gap('(https://widget-co.example.com)')}`);
 });
 
-test('L159: a reference definition masks only an address-shaped destination; a footnote definition is never masked', () => {
-  const ref = '[kernels]: <projects/acme-example-kernels>\n[note]: Acme Example signed\n';
-  expect(maskLinkSyntax(ref)).toBe(`[kernels]: ${' '.repeat('<projects/acme-example-kernels>'.length)}\n[note]: Acme Example signed\n`);
+test('L159: a reference definition line loses its title and an address-shaped destination; a prose line that starts like one and a footnote definition are untouched', () => {
+  const ref = '[kernels]: <projects/acme-example-kernels> "Acme Example kernels"\n[note]: Acme Example signed\n';
+  expect(maskLinkSyntax(ref)).toBe(`[kernels]: ${' '.repeat('<projects/acme-example-kernels> "Acme Example kernels"'.length)}\n[note]: Acme Example signed\n`);
   expect(l159Scan(ref)).toEqual([['projects/acme-example', ref.indexOf('Acme Example signed')]]);
+  const partner = '[Partner]: widget-co is our partner now';
+  expect(maskLinkSyntax(partner)).toBe(partner);
+  expect(l159Scan(partner)).toEqual([['products/widget-co', partner.indexOf('widget-co')]]);
   const footnote = 'Signed.[^1]\n\n[^1]: Widget Co confirmed it, see [[notes/widget-co-call]].\n';
   expect(l159Scan(footnote)).toEqual([['products/widget-co', footnote.indexOf('Widget Co confirmed')]]);
 });
 
-test('L159: a wikilink to an entity\'s slug or basename mentions that entity; a link to another page through a slug that contains its name does not', () => {
-  const body = 'Agenda: [[projects/acme-example]] then [[widget-co|the widgets]] and [[notes/widget-co-launch]].';
-  expect(l159Scan(body)).toEqual([['projects/acme-example', body.indexOf('projects/acme-example')], ['products/widget-co', body.indexOf('widget-co|')]]);
-});
-
-// A bare URL ends where a URL ends: RFC 3986 ASCII characters, no `|` or `,`, trailing punctuation dropped (GFM).
-test('L159: a bare URL stops at the first non-ASCII character, a | and a comma, and drops trailing punctuation', () => {
+// A bare URL ends as a GFM extended autolink ends: at whitespace or '<' (and '>', '"', '|'), trailing punctuation dropped.
+// Non-ASCII text, commas and brackets inside it are part of the link a renderer draws.
+test('L159: a bare URL keeps non-ASCII text, commas and brackets, and ends at whitespace, | or trailing punctuation', () => {
   const gaz = gazetteerFromEntries([
-    { slug: 'people/tanaka', source_id: 'default', title: '田中太郎' },
+    { slug: 'companies/toyota', source_id: 'default', title: 'トヨタ' },
     { slug: 'projects/acme-example', source_id: 'default', title: 'Acme Example' },
-    { slug: 'people/alice-example', source_id: 'default', title: 'Alice Example' },
+    { slug: 'products/widget-co', source_id: 'default', title: 'Widget Co' },
   ]);
   const scan = (body: string) => findMentionedEntities(body, gaz, { fromSlug: 'notes/n1', fromSourceId: 'default' }).map(m => [m.slug, m.offset]);
-  const cjk = '詳細はhttps://example.com/を参照。田中太郎さんが来た。';
-  expect(maskLinkSyntax(cjk)).toBe(`詳細は${' '.repeat('https://example.com/'.length)}を参照。田中太郎さんが来た。`);
-  expect(scan(cjk)).toEqual([['people/tanaka', cjk.indexOf('田中太郎')]]);
+  for (const url of ['https://ja.wikipedia.org/wiki/トヨタ', 'https://lemonde.example.com/économie/acme-example-rachète',
+    'https://news.example.com/acme-raises,widget-co-joins', 'https://shop.example.com/list?filter[name]=widget-co']) {
+    const body = `See ${url} today.`;
+    expect(maskLinkSyntax(body)).toBe(`See ${' '.repeat(url.length)} today.`);
+    expect(scan(body)).toEqual([]);
+  }
   const table = '|https://x.com|Acme Example|';
   expect(maskLinkSyntax(table)).toBe(`|${' '.repeat('https://x.com'.length)}|Acme Example|`);
   expect(scan(table)).toEqual([['projects/acme-example', table.indexOf('Acme Example')]]);
-  const comma = 'See https://x.com/a,Alice Example said';
-  expect(maskLinkSyntax(comma)).toBe(`See ${' '.repeat('https://x.com/a'.length)},Alice Example said`);
-  expect(scan(comma)).toEqual([['people/alice-example', comma.indexOf('Alice Example')]]);
   expect(maskLinkSyntax('Read https://x.com/wiki/Foo_(bar). Then Acme Example.')).toBe(`Read ${' '.repeat('https://x.com/wiki/Foo_(bar)'.length)}. Then Acme Example.`);
+  expect(maskLinkSyntax('(see https://x.com/a), "https://x.com/b"!')).toBe(`(see ${' '.repeat('https://x.com/a'.length)}), "${' '.repeat('https://x.com/b'.length)}"!`);
 });
 
 // ============================================================

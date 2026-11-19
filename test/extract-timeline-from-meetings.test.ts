@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test'
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { extractTimelineFromMeetings } from '../src/core/extract-timeline-from-meetings.ts';
 import { buildGazetteer, type Gazetteer } from '../src/core/by-mention.ts';
+import { extractStaleFromDB } from '../src/commands/extract.ts';
 import { resetPgliteState } from './helpers/reset-pglite.ts';
 import { withEnv } from './helpers/with-env.ts';
 
@@ -81,15 +82,20 @@ describe('extractTimelineFromMeetings', () => {
     });
   });
 
-  it('L159: finds an attendee written only as a wikilink in the meeting body, by slug or by name', async () => {
+  it('L159: an entity written only as a link in the meeting body is discussed there: the link extractor\'s row by slug, the mention scan by name', async () => {
     await seedEntity('people/alice-example', 'Alice Example');
     await seedEntity('people/bob-example', 'Bob Example');
-    await seedNote('meetings/by-slug', { title: 'By Slug', legacyType: 'meeting', body: 'Attendees: [[people/alice-example]]' });
+    await engine.putPage('companies/acme-example', { type: 'company', title: 'Acme Example', compiled_truth: 'A company.', timeline: '', frontmatter: {} });
+    await seedNote('meetings/by-slug', { title: 'By Slug', legacyType: 'meeting', body: 'Attendees: [[people/alice-example]]. Topic: [[companies/acme-example]].' });
     await seedNote('meetings/by-name', { title: 'By Name', legacyType: 'meeting', body: 'Attendees: [[Bob Example]]' });
+    // The link extractor writes the meeting's link rows (link_source markdown), as extract --stale does.
+    await extractStaleFromDB(engine, { dryRun: false, jsonMode: false, quiet: true, catchUp: true });
     const result = await extractTimelineFromMeetings(engine, { gazetteer: await buildGazetteer(engine) });
-    expect(result).toMatchObject({ meetings_scanned: 2, entries_created: 2 });
-    expect((await engine.getTimeline('people/alice-example', { sourceId: 'default' })).map(e => e.summary)).toEqual(['Discussed in By Slug']);
-    expect((await engine.getTimeline('people/bob-example', { sourceId: 'default' })).map(e => e.summary)).toEqual(['Discussed in By Name']);
+    expect(result).toMatchObject({ meetings_scanned: 2, entries_created: 3 });
+    const discussed = async (slug: string) => (await engine.getTimeline(slug, { sourceId: 'default' })).map(e => e.summary);
+    expect(await discussed('people/alice-example')).toEqual(['Discussed in By Slug']);
+    expect(await discussed('companies/acme-example')).toEqual(['Discussed in By Slug']);
+    expect(await discussed('people/bob-example')).toEqual(['Discussed in By Name']);
   });
 
   it('does not scan ordinary note pages as meetings', async () => {

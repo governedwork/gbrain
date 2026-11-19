@@ -71,33 +71,34 @@ export function stripCodeBlocks(content: string, opts: { onHtmlComment?: (start:
 }
 
 /**
- * Link syntax, in one left-to-right scan: a wikilink (`[[target]]`,
- * `![[target]]`, `[[target|display]]`; groups 1-2), an inline link's or image's
- * `(destination "title")` after its `]`, a reference definition's
- * `[label]: destination` (groups 3-4; never a footnote definition `[^x]: …`), a
- * scheme autolink `<scheme:…>`, and a bare URL (`scheme://…`, `www.…`; group 5)
- * made of URL characters only (`URL_CHARS`). The patterns' character classes are
- * disjoint where they repeat, so matching stays linear.
+ * Link syntax, in one left-to-right scan: an embed (`![[file]]`), a wikilink
+ * (`[[target]]`, `[[target|display]]`; groups 1-2), an inline link's or image's
+ * `(destination "title")` after its `]`, a whole reference definition line
+ * `[label]: destination "title"` (groups 3-5; never a footnote definition
+ * `[^x]: …`), a scheme autolink `<scheme:…>`, and a bare URL (`scheme://…`,
+ * `www.…`; group 6). The patterns' character classes are disjoint where they
+ * repeat, so matching stays linear.
  */
 const LINK_SYNTAX_RE = new RegExp([
-  /!?\[\[([^[\]\n|]*)(?:\|([^[\]\n]*))?\]\]/.source,
+  /!\[\[[^[\]\n]*\]\]/.source,
+  /\[\[([^[\]\n|]*)(?:\|([^[\]\n]*))?\]\]/.source,
   /(?<=\])\([ \t]*(?:<[^>\n]*>|[^\s()]*(?:\([^\s()]*\)[^\s()]*)*)(?:[ \t]+(?:"[^"\n]*"|'[^'\n]*'))?[ \t]*\)/.source,
-  /^( {0,3}\[(?!\^)[^\]\n]+\]:[ \t]*)(<[^>\n]*>|\S+)/.source,
+  /^( {0,3}\[(?!\^)[^\]\n]+\]:[ \t]*)(<[^>\n]*>|\S+)([ \t]+(?:"[^"\n]*"|'[^'\n]*'|\([^)\n]*\)))?[ \t]*\r?$/.source,
   /<[A-Za-z][A-Za-z0-9+.-]{1,31}:[^\s<>]*>/.source,
-  /(\b(?:[A-Za-z][A-Za-z0-9+.-]{1,31}:\/\/|www\.)[A-Za-z0-9\-._~:/?#@!$&'()*+;=%]+)/.source,
+  /(\b(?:[A-Za-z][A-Za-z0-9+.-]{1,31}:\/\/|www\.)[^\s<>"|]+)/.source,
 ].join('|'), 'gm');
 
 /**
- * Where a bare URL ends: its characters are RFC 3986 ASCII (unreserved, reserved but `,` `[` `]`, and `%`), so it
- * stops at the first non-ASCII character, `|`, `,` or whitespace; then, as a GFM autolink, trailing punctuation
- * (`.;:!?'*_~`) and an unbalanced `)` are not part of it.
+ * Where a bare URL ends, as a GFM extended autolink ends: at whitespace or `<` (and at `>`, `"` or `|`, which are
+ * no URL's characters: an HTML attribute's quote, a table cell's edge), with trailing punctuation (`?!.,:*_~'"`) and an
+ * unbalanced `)` not part of it. Non-ASCII text, commas and brackets inside a URL are part of it: a renderer links them.
  */
 function urlEnd(url: string): number {
   let end = url.length;
   const count = (ch: string) => url.slice(0, end).split(ch).length - 1;
   for (;;) {
     const last = url[end - 1]!;
-    if (".;:!?'*_~".includes(last) || (last === ')' && count('(') < count(')'))) end--;
+    if ('?!.,:*_~\'"'.includes(last) || (last === ')' && count('(') < count(')'))) end--;
     else return end;
   }
 }
@@ -121,17 +122,20 @@ const blank = (s: string) => s.replace(/[^\r\n]/g, ' ');
 /**
  * Mask link syntax but keep the text a reader sees, replacing every masked
  * character but CR/LF with a space, so UTF-16 offsets hold (like
- * `stripCodeBlocks`): `[[Acme Example]]` keeps `Acme Example` (only the
- * brackets go) unless its target is address-shaped (`[[notes/widget-co-launch]]`,
- * `![[diagram.png]]`: masked whole); `[[target|display]]` keeps `display`; a
- * markdown link or image keeps its bracketed text and loses its `(destination)`;
- * a reference definition loses only an address-shaped destination; a footnote
- * definition is untouched; autolinks and bare URLs (`urlEnd`) are masked. Run it on text
- * whose code is already stripped, so link syntax inside code is not read at all.
+ * `stripCodeBlocks`): an embed (`![[Acme Example logo.png]]`) is masked whole,
+ * since a reader sees the attachment; `[[Acme Example]]` keeps `Acme Example`
+ * (only the brackets go) unless its target is address-shaped
+ * (`[[notes/widget-co-launch]]`: masked whole); `[[target|display]]` keeps
+ * `display`; a markdown link or image keeps its bracketed text and loses its
+ * `(destination)`; a reference definition line loses its title (a tooltip) and
+ * an address-shaped destination, while a prose line that only starts like one
+ * and a footnote definition are untouched; autolinks and bare URLs (`urlEnd`)
+ * are masked. Run it on text whose code is already stripped, so link syntax
+ * inside code is not read at all.
  */
 export function maskLinkSyntax(content: string): string {
   if (!/[[<]|:\/\/|www\./.test(content)) return content;
-  return content.replace(LINK_SYNTAX_RE, (match: string, target?: string, display?: string, label?: string, destination?: string, url?: string) => {
+  return content.replace(LINK_SYNTAX_RE, (match: string, target?: string, display?: string, label?: string, destination?: string, title?: string, url?: string) => {
     if (target !== undefined) {
       const open = match.indexOf('[[') + 2;
       if (display !== undefined) {
@@ -141,7 +145,10 @@ export function maskLinkSyntax(content: string): string {
       if (addressShaped(target)) return blank(match);
       return blank(match.slice(0, open)) + target + blank(match.slice(open + target.length));
     }
-    if (label !== undefined) return addressShaped(destination!) ? label + blank(destination!) : match;
+    if (label !== undefined) {
+      const rest = match.slice(label.length + destination!.length + (title ?? '').length);
+      return label + (addressShaped(destination!) ? blank(destination!) : destination!) + blank(title ?? '') + rest;
+    }
     if (url !== undefined) return blank(url.slice(0, urlEnd(url))) + url.slice(urlEnd(url));
     return blank(match);
   });
