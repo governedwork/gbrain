@@ -6,8 +6,9 @@
  * Existing migration tests cover managed snapshots and classic files, not this
  * classic placement matrix. These probes compare all page, fact and history
  * rows and file bytes before/after: verification must never repair anything.
- * Seams: no new production seam; proxies inject a snapshot read failure or
- * order the segmented group before a healthy group to prove continuation.
+ * Seams: no new production seam; proxies inject a snapshot read failure, order
+ * the segmented group before a healthy group to prove continuation, or report a
+ * segmented page's stored size over the page ceiling.
  */
 import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -16,6 +17,7 @@ import { dirname, join } from 'node:path';
 import { __testing } from '../../src/commands/migrations/v0_32_2.ts';
 import type { BrainEngine } from '../../src/core/engine.ts';
 import { renderFactsTable } from '../../src/core/facts-fence.ts';
+import { PAGE_MAX_BYTES } from '../../src/core/page-size-policy.ts';
 import { _resetWriteThroughCacheForTest } from '../../src/core/write-through.ts';
 import { isolatedSharedSkillsEngine } from '../helpers/shared-skills-engine.ts';
 import { createSegmentedPage, segmentedPageState } from '../helpers/segmented-page.ts';
@@ -114,32 +116,48 @@ for (const { backend, databaseUrl } of pathologicalArms()) {
       }, 180_000);
     }
 
-    test('segmented database-only page is held without changing its generation or history', async () => {
+    // A segmented page reads back whole up to PAGE_MAX_BYTES (L153); one over it is held as drift, and verify still
+    // reaches the healthy page after it. Neither path repairs anything.
+    async function verifySegmented(engine: BrainEngine, root: string, overCeiling: boolean) {
+      const f = await seed(engine, root, { db: 1, segmented: true });
+      await engine.putPage('zz/healthy', { type: 'note', title: 'Healthy', compiled_truth: fence(1) });
+      await engine.executeRaw(`INSERT INTO facts (source_id, entity_slug, fact, kind, visibility, notability, valid_from, source, confidence, row_num, source_markdown_slug)
+        VALUES ('default','zz/healthy','A synthetic claim','fact','private','medium','2026-01-01','manual',1,1,'zz/healthy')`);
+      const before = await state(engine, f.path);
+      const segments = await segmentedPageState(engine, f.id);
+      const checked: string[] = [];
+      const ordered = new Proxy(engine, { get(target, key) {
+        if (key === 'executeRaw') return async (sql: string, params?: unknown[]) => {
+          const rows = await target.executeRaw(sql, params);
+          return sql.includes('array_agg(row_num') ? rows.sort((a, b) => String(a.source_markdown_slug).localeCompare(String(b.source_markdown_slug))) : rows;
+        };
+        if (key === 'readPageSnapshot') return async (...args: Parameters<BrainEngine['readPageSnapshot']>) => {
+          checked.push(args[0]);
+          const snapshot = await target.readPageSnapshot(...args);
+          // The stored size is all the ceiling reads: report one over it without seeding 24 MiB.
+          return overCeiling && snapshot && args[0] === SLUG
+            ? { ...snapshot, page: { ...snapshot.page, body_bytes: PAGE_MAX_BYTES + 1 } } : snapshot;
+        };
+        const value = Reflect.get(target, key, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      } });
+      const result = await __testing.phaseCVerify(ordered, OPTS);
+      expect(checked).toEqual([SLUG, 'zz/healthy']);
+      expect(await state(engine, f.path)).toEqual(before);
+      expect(await segmentedPageState(engine, f.id)).toEqual(segments);
+      return result;
+    }
+
+    test('segmented database-only page is verified from its whole body without changing its generation or history', async () => {
       await withBrain(databaseUrl, async (engine, root) => {
-        const f = await seed(engine, root, { db: 1, segmented: true });
-        await engine.putPage('zz/healthy', { type: 'note', title: 'Healthy', compiled_truth: fence(1) });
-        await engine.executeRaw(`INSERT INTO facts (source_id, entity_slug, fact, kind, visibility, notability, valid_from, source, confidence, row_num, source_markdown_slug)
-          VALUES ('default','zz/healthy','A synthetic claim','fact','private','medium','2026-01-01','manual',1,1,'zz/healthy')`);
-        const before = await state(engine, f.path);
-        const segments = await segmentedPageState(engine, f.id);
-        const checked: string[] = [];
-        const ordered = new Proxy(engine, { get(target, key) {
-          if (key === 'executeRaw') return async (sql: string, params?: unknown[]) => {
-            const rows = await target.executeRaw(sql, params);
-            return sql.includes('array_agg(row_num') ? rows.sort((a, b) => String(a.source_markdown_slug).localeCompare(String(b.source_markdown_slug))) : rows;
-          };
-          if (key === 'readPageSnapshot') return async (...args: Parameters<BrainEngine['readPageSnapshot']>) => {
-            checked.push(args[0]);
-            return target.readPageSnapshot(...args);
-          };
-          const value = Reflect.get(target, key, target);
-          return typeof value === 'function' ? value.bind(target) : value;
-        } });
-        expect(await __testing.phaseCVerify(ordered, OPTS)).toMatchObject({ status: 'failed',
+        expect(await verifySegmented(engine, root, false)).toMatchObject({ status: 'complete', detail: 'pages_checked=2' });
+      });
+    }, 180_000);
+
+    test('segmented database-only page over the page ceiling is held without changing its generation or history', async () => {
+      await withBrain(databaseUrl, async (engine, root) => {
+        expect(await verifySegmented(engine, root, true)).toMatchObject({ status: 'failed',
           detail: expect.stringContaining(`1 pages drifted: ${SLUG} (page_body_segmented:`) });
-        expect(checked).toEqual([SLUG, 'zz/healthy']);
-        expect(await state(engine, f.path)).toEqual(before);
-        expect(await segmentedPageState(engine, f.id)).toEqual(segments);
       });
     }, 180_000);
 

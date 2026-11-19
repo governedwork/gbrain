@@ -80,7 +80,7 @@ import {
   type SupersessionChain,
 } from '../facts/supersede-resolve.ts';
 import { writeReceipt } from '../extract/receipt-writer.ts';
-import { fenceUnfencedFacts, planUnfencedFacts } from '../facts/unfenced-facts.ts';
+import { fenceUnfencedFacts, planUnfencedFacts, segmentedFileToken } from '../facts/unfenced-facts.ts';
 import { classifyRunStop, upsertExtractRollup } from '../extract/rollup-writer.ts';
 import { factsFenceView } from '../facts-fence.ts';
 import { segmentedBodyMatchesFile, segmentedFactsFenceView } from '../page-body/segment-facts.ts';
@@ -782,14 +782,14 @@ export async function runExtractFacts(
   // managed brain, the page file + maintenance transaction otherwise. The
   // fenced pages join this run's reconcile below.
   let fencedSlugs: string[] = [];
-  let unboundRefused = new Set<string>();
+  let heldNotGating = new Set<string>();
   if (!opts.dryRun) {
     try {
       const fence = await fenceUnfencedFacts(engine, await planUnfencedFacts(engine, { sourceId }), { pageLockRoot: opts.pageLockRoot });
       result.unfencedRowsFenced = fence.fenced;
       fencedSlugs = fence.fenced_slugs;
-      unboundRefused = new Set(fence.unbound_refused.map(page => page.slug));
-      for (const page of [...fence.failed_pages, ...fence.missing_files]) result.warnings.push(`FACTS_FENCE_FAILED: ${page}`);
+      heldNotGating = new Set([...fence.unbound_refused, ...fence.segmented_files].map(page => page.slug));
+      for (const page of [...fence.failed_pages, ...fence.missing_files, ...fence.segmented_files.map(held => segmentedFileToken(held.slug))]) result.warnings.push(`FACTS_FENCE_FAILED: ${page}`);
     } catch (e) {
       result.warnings.push(`FACTS_FENCE_FAILED: ${(e instanceof Error ? e.message : String(e)).slice(0, 300)}`);
     }
@@ -801,9 +801,10 @@ export async function runExtractFacts(
   // #6610: rows the unbound-source policy keeps unfenced on database-only pages stay held out of reconciliation
   // but never gate the run; doctor fence_integrity names the opt-in that fences them.
   // #6946: so do the database-only rows of a clone gbrain owns, which is never fenced.
+  // So do the rows of an unmanaged file-backed page stored in segments, which no run fences (a warning names the page).
   const pending = await pendingLegacyRows(engine, sourceId);
   const legacySlugs = new Set(pending.keys());
-  const gating = await urlCloneReadOnly(engine, sourceId) ? [] : [...pending].filter(([slug]) => !unboundRefused.has(slug));
+  const gating = await urlCloneReadOnly(engine, sourceId) ? [] : [...pending].filter(([slug]) => !heldNotGating.has(slug));
   const legacyCount = gating.reduce((sum, [, n]) => sum + n, 0);
   result.legacyRowsPending = legacyCount;
   result.legacyPages = gating.map(([slug]) => slug).sort();
