@@ -1,11 +1,12 @@
 /**
  * L152: revert_version (force) of a segmented page whose live generation does
- * not tile (persistence/untiled-revert.ts) versioned that unreadable generation
+ * not tile (persistence/untiled-revert.ts) versions that unreadable generation
  * as the page's newest version, so every remote get_versions of the page then
- * failed page_body_rows_unreadable. After the repair no stored version
- * references the unreadable generation, and get_versions never fails the whole
- * list on one version whose rows do not tile: that version comes back flagged
- * `body_unreadable: true`, without size fields.
+ * failed page_body_rows_unreadable. The version stays (it roots the
+ * generation's surviving rows and keeps the pre-revert metadata), and
+ * get_versions never fails the whole list on one version whose rows do not
+ * tile: that version comes back flagged `body_unreadable: true`, without size
+ * fields.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
@@ -17,7 +18,8 @@ import { liveGenerationTiling } from '../src/core/page-body/body-tiling.ts';
 const BROKEN = 'notes/l152-untiled';
 const POISONED = 'notes/l152-poisoned';
 const fm = (title: string) => `---\ntitle: ${title}\ntype: note\n---\n\n`;
-const body = (seed: number) => 'Intro.\n\n' + conversationBody(1_250_000, { seed }) + '\n';
+const NEEDLE = 'needleword';
+const body = (seed: number) => 'Intro.\n\n' + conversationBody(1_250_000, { seed, needles: [{ at: 0.95, word: NEEDLE }] }) + '\n';
 
 for (const kind of testBackends()) {
   describe(`untiled revert history (L152, ${kind})`, () => {
@@ -40,36 +42,48 @@ for (const kind of testBackends()) {
     }, 600_000);
     afterAll(() => brain?.close(), 120_000);
 
-    test('L152: an untiled revert stores no version of the unreadable generation, and remote get_versions succeeds', async () => {
-      await edit(BROKEN, 'Intro.', 'Intro, edited.');
+    test('L152: an untiled revert keeps its unreadable generation as a version (its surviving rows stay rooted), and remote get_versions flags it instead of failing', async () => {
+      // One write with two edits far apart: the new generation publishes rows of its own at both places.
+      const both = await brain.call('edit_page', { slug: BROKEN, expected_revision: await revision(BROKEN), request_id: randomUUID(),
+        edits: [{ old_text: 'Intro.', new_text: 'Intro, edited.' }, { old_text: NEEDLE, new_text: 'needle-edited' }] });
+      expect(both.body.error, JSON.stringify(both.body).slice(0, 400)).toBeUndefined();
       const edited = await page(BROKEN);
       const id = Number(edited.id);
       const bad = Number(edited.body_generation);
-      // The state the flip race left: the rows the new generation published are gone, so it does not tile.
-      const gone = await brain.engine.executeRaw('DELETE FROM page_body_manifest WHERE page_id=$1 AND staging_id IS NULL AND gen_from=$2::bigint RETURNING seq', [id, bad]);
-      expect(gone.length).toBeGreaterThan(0);
-      await brain.engine.executeRaw('DELETE FROM content_chunks WHERE page_id=$1 AND body_generation=$2::bigint', [id, bad]);
+      const own = async () => (await brain.engine.executeRaw<{ n: number }>(
+        'SELECT count(*)::int AS n FROM page_body_manifest WHERE page_id=$1 AND staging_id IS NULL AND gen_from=$2::bigint', [id, bad]))[0]!.n;
+      expect(await own()).toBeGreaterThan(1);
+      // The state the flip race left: the generation lost its last own row, so it does not tile; its other rows survive.
+      const gone = await brain.engine.executeRaw(`DELETE FROM page_body_manifest WHERE (page_id, occurrence_id, gen_from) IN (
+        SELECT page_id, occurrence_id, gen_from FROM page_body_manifest WHERE page_id=$1 AND staging_id IS NULL AND gen_from=$2::bigint
+         ORDER BY region DESC, byte_start DESC LIMIT 1) RETURNING seq`, [id, bad]);
+      expect(gone).toHaveLength(1);
       expect((await liveGenerationTiling(brain.engine, id))!.tiles).toBe(false);
+      const surviving = await own();
+      expect(surviving).toBeGreaterThan(0);
 
       const versions = (await brain.call('get_versions', { slug: BROKEN, limit: 10 })).body as unknown as Array<{ id: number; body_generation?: number }>;
-      const target = versions.find(v => v.body_generation !== undefined && Number(v.body_generation) !== bad)!;
+      const target = versions.find(v => v.body_generation !== undefined && Number(v.body_generation) < bad)!;
       expect(target).toBeDefined();
       const res = await brain.call('revert_version', { slug: BROKEN, version_id: target.id, force: true, request_id: randomUUID() }, { remote: true });
       expect(res.body.error, JSON.stringify(res.body).slice(0, 400)).toBeUndefined();
       expect(res.body.status).toBe('reverted');
       expect((await liveGenerationTiling(brain.engine, id))!.tiles).toBe(true);
 
-      // No stored version references the unreadable generation.
+      // The revert stored the unreadable generation as a version, so a sweep keeps that generation's surviving rows.
       const archived = await brain.engine.executeRaw<{ id: number }>(
         "SELECT id FROM page_versions WHERE page_id=$1 AND body_storage='segmented' AND body_generation=$2::bigint", [id, bad]);
-      expect(archived.map(r => Number(r.id))).toEqual([]);
+      expect(archived).toHaveLength(1);
+      await brain.engine.sweepSegments({ pageId: id });
+      expect(await own()).toBe(surviving);
 
-      // The page's history reads for a remote caller.
+      // The page's history reads for a remote caller, with that version flagged.
       const history = await brain.call('get_versions', { slug: BROKEN, limit: 10 }, { remote: true });
       expect(history.body.error, JSON.stringify(history.body).slice(0, 400)).toBeUndefined();
       expect(history.isError).toBe(false);
-      const ids = (history.body as unknown as Array<{ id: number }>).map(v => Number(v.id));
-      expect(ids).toContain(Number(target.id));
+      const rows = history.body as unknown as Array<Record<string, unknown>>;
+      expect(rows.find(v => Number(v.id) === Number(archived[0]!.id))?.body_unreadable).toBe(true);
+      expect(rows.map(v => Number(v.id))).toContain(Number(target.id));
     }, 600_000);
 
     test('L152: a stored version whose rows do not tile comes back flagged body_unreadable instead of failing remote get_versions', async () => {
