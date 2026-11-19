@@ -33,6 +33,7 @@ import { runCycle } from '../src/core/cycle.ts';
 import { runConfig } from '../src/commands/config.ts';
 import { runServe } from '../src/commands/serve.ts';
 import {
+  MCP_LOG_LAST_PRUNE_KEY,
   MCP_LOG_RETENTION_KEY,
   lifetimeUsage,
   mcpLogRetentionRefusal,
@@ -72,10 +73,13 @@ async function rollup(engine: BrainEngine): Promise<Map<string, { requests: numb
 }
 
 async function purgeDetails(engine: BrainEngine): Promise<Record<string, unknown>> {
-  const report = await runCycle(engine, { brainDir: mkdtempSync(join(tmpdir(), 'gb-mcp-log-cycle-')), phases: ['purge'] });
-  const phase = report.phases.find(p => p.phase === 'purge')!;
-  expect(phase.status).not.toBe('fail');
-  return phase.details;
+  const brainDir = mkdtempSync(join(tmpdir(), 'gb-mcp-log-cycle-'));
+  try {
+    const report = await runCycle(engine, { brainDir, phases: ['purge'] });
+    const phase = report.phases.find(p => p.phase === 'purge')!;
+    expect(phase.status).not.toBe('fail');
+    return phase.details;
+  } finally { rmSync(brainDir, { recursive: true, force: true }); }
 }
 
 for (const kind of testBackends()) {
@@ -98,6 +102,7 @@ for (const kind of testBackends()) {
       await engine.executeRaw('DELETE FROM mcp_request_log');
       await engine.executeRaw('DELETE FROM mcp_request_log_rollup');
       await engine.unsetConfig(MCP_LOG_RETENTION_KEY);
+      await engine.unsetConfig(MCP_LOG_LAST_PRUNE_KEY);
     });
 
     // Fork: the tally table rides a fork schema fragment instead of upstream's numbered migration.

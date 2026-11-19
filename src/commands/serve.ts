@@ -600,13 +600,6 @@ function installFactsDrain(engine: BrainEngine, opts: ServeOptions, deps: StdioL
   });
 }
 
-/**
- * #6317 (B4): the facts drain plus the movement watch (one `[gbrain notice]`
- * when a managed source's sync data stops moving; reader in
- * persistence/sync-movement.ts), stopped together at shutdown. #6858 ask 6:
- * the on-commit HEAD watcher (`sync.on_commit`, core/serve-head-watcher.ts)
- * stops with them, before shutdownDelegatedSync aborts the sync it started.
- */
 /** #6770: the PGLite lock owner's request-log retention prune, hourly (a no-op on Postgres or while retention is off). */
 function installMcpLogPrune(engine: BrainEngine, opts: ServeOptions, log: (line: string) => void, shuttingDown: () => boolean): McpLogPruneTicker | null {
   if (opts.mcpLogPrune === false) return null;
@@ -614,6 +607,13 @@ function installMcpLogPrune(engine: BrainEngine, opts: ServeOptions, log: (line:
     canRun: async () => !shuttingDown() && !isEngineDegradedForServe(engine) && !(await loadSyncRunner()).isDelegatedSyncRunning() });
 }
 
+/**
+ * #6317 (B4): the facts drain plus the movement watch (one `[gbrain notice]`
+ * when a managed source's sync data stops moving; reader in
+ * persistence/sync-movement.ts), stopped together at shutdown. #6858 ask 6:
+ * the on-commit HEAD watcher (`sync.on_commit`, core/serve-head-watcher.ts)
+ * stops with them, before shutdownDelegatedSync aborts the sync it started.
+ */
 function installResidentTickers(engine: BrainEngine, opts: ServeOptions, deps: StdioLifecycleDeps, shuttingDown: () => boolean): { stop(): Promise<void> } {
   const factsDrain = installFactsDrain(engine, opts, deps, shuttingDown);
   const mcpLogPrune = installMcpLogPrune(engine, opts, deps.log, shuttingDown);
