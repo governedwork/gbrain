@@ -10,7 +10,8 @@
  * recompute what a rule may output for a given before value.
  */
 import { isValidHolder, rewriteSupersessionCitation, supersessionCitation, TAKE_KIND_VALUES } from '../takes-fence.ts';
-import { percentCellValue } from '../fence-shared.ts';
+import { factsSupersessionCitation, rewriteFactsSupersessionCitation } from '../facts-fence.ts';
+import { percentCellValue, stripStrikethrough } from '../fence-shared.ts';
 import type { FenceKind } from './types.ts';
 
 export const FACTS_COLUMNS = [
@@ -272,22 +273,27 @@ export function appendOriginalKind(context: string, word: string): string {
 
 /**
  * The `superseded by #N` reference a facts context or takes source cell
- * carries. A takes cell reads the citation the takes projection reads
- * (`supersessionCitation`: the last one); a facts cell reads the first, as
- * `facts-fence.ts` projects it.
+ * carries, read the way each parser projects it: a takes cell's last
+ * citation (`supersessionCitation`), a facts cell's leading one
+ * (`factsSupersessionCitation`), each where its writer puts the live pointer.
  */
 export function supersededRef(text: string, kind: FenceKind): number | null {
-  if (kind === 'takes') return supersessionCitation(text);
-  const m = /superseded by #(\d+)/i.exec(text);
-  if (!m) return null;
-  const n = parseInt(m[1]!, 10);
-  return n > 0 ? n : null;
+  return kind === 'takes' ? supersessionCitation(text) : factsSupersessionCitation(text);
 }
 
 /** `text` with the reference `supersededRef` reads pointed at row `target`. */
 export function rewriteSupersededRef(text: string, target: number, kind: FenceKind): string {
-  if (kind === 'takes') return rewriteSupersessionCitation(text, target);
-  return text.replace(/(superseded by #)\d+/i, `$1${target}`);
+  return kind === 'takes' ? rewriteSupersessionCitation(text, target) : rewriteFactsSupersessionCitation(text, target);
+}
+
+/**
+ * The reference a row carries as a pointer: a facts row's only while it is
+ * struck, since the facts parser links struck rows only (a live row's
+ * `superseded by #N` is prose, and a renumber neither follows nor rewrites it).
+ */
+export function rowSupersededRef(kind: FenceKind, claim: string, ref: string): number | null {
+  if (kind === 'facts' && !stripStrikethrough(claim.trim()).struck) return null;
+  return supersededRef(ref, kind);
 }
 
 /** Whitespace-collapsed text for comparisons. */

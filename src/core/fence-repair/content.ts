@@ -21,7 +21,7 @@ import { parseTakesFence } from '../takes-fence.ts';
 import type { MergeOrigins } from './merge.ts';
 import { planRowRules, type CellText, type RowPlan } from './rules.ts';
 import { extractRawRows, rowNumOf, type RawFence, type RawRow, type RawSection } from './raw-rows.ts';
-import { ALLOWED, BASE_WIDTH, canonicalColumn, CANONICAL_HEADER, collapse, COLUMN_DEFAULTS, COLUMNS, rewriteSupersededRef, supersededRef, WIDE_WIDTH } from './schema.ts';
+import { ALLOWED, BASE_WIDTH, canonicalColumn, CANONICAL_HEADER, collapse, COLUMN_DEFAULTS, COLUMNS, rewriteSupersededRef, rowSupersededRef, WIDE_WIDTH } from './schema.ts';
 import { headerlessMisfit } from './stray-cells.ts';
 import { applyEdits, fenceBlocked, type Edit } from './structure.ts';
 import type { FenceCtx, FenceFix, FenceIssue, FenceKind, FenceReason, FenceSection } from './types.ts';
@@ -181,7 +181,7 @@ function claimKey(row: RawRow): string {
 const REF_COLUMN: Record<FenceKind, string> = { facts: 'context', takes: 'source' };
 
 function refOf(kind: FenceKind, w: RowWork): number | null {
-  return supersededRef(w.row.byColumn.get(REF_COLUMN[kind])?.text ?? '', kind);
+  return rowSupersededRef(kind, w.row.byColumn.get('claim')?.text ?? '', w.row.byColumn.get(REF_COLUMN[kind])?.text ?? '');
 }
 
 function renumber(pass: Pass, kind: FenceKind): void {
