@@ -270,6 +270,13 @@ describe('renumber (prior-aware)', () => {
     expect(FENCE_REASONS.superseded_ambiguous.manualOnly).toBe(true);
   });
 
+  test('L109: a live facts row whose context mentions "superseded by #N" neither blocks the renumber nor is rewritten', () => {
+    const r = run(facts(factsRow(2, 'One'), factsRow(2, 'Two'), factsRow(3, 'Three', { ctx: 'superseded by #2 in the old memo' })));
+    expect(parseFactsFence(r.page.compiled_truth).facts.map(f => [f.rowNum, f.claim, f.context ?? null]))
+      .toEqual([[2, 'One', null], [4, 'Two', null], [3, 'Three', 'superseded by #2 in the old memo']]);
+    expectRepaired(r);
+  });
+
   test('superseded by #N naming a duplicated N is residual (takes source)', () => {
     const r = run(takes(takesRow(4, 'Old take'), takesRow(4, 'Other take'), takesRow(5, '~~Older take~~', { src: 'call; superseded by #4' })));
     expect(reasons(r)).toEqual(['superseded_ambiguous']);

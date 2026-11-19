@@ -36,7 +36,7 @@ import { extractRawRows, primaryFence, rowNumOf, type RawFence, type RawRow } fr
 import { trailingLinesOf } from './structure.ts';
 import { cellsChanged } from './validate-cells.ts';
 import { GATE_REASONS } from './reasons.ts';
-import { cellValid, collapse, enumSynonym, rewriteSupersededRef, supersededRef } from './schema.ts';
+import { cellValid, collapse, enumSynonym, rewriteSupersededRef, rowSupersededRef } from './schema.ts';
 import type { FenceCtx, FenceKind, FenceLocation, FencePage, FenceReason, FenceSection, FenceTier, GateLetter } from './types.ts';
 
 export interface ValidateCtx extends FenceCtx {
@@ -226,7 +226,7 @@ function withFollowedRef(pair: FencePair, p: Paired): RawRow {
   if (pair.rows.every(r => r.fence === pair.before)) return p.row;
   const column = pair.kind === 'facts' ? 'context' : 'source';
   const cell = p.row.byColumn.get(column);
-  const ref = cell ? supersededRef(cell.text, pair.kind) : null;
+  const ref = cell ? rowSupersededRef(pair.kind, p.row.byColumn.get('claim')?.text ?? '', cell.text) : null;
   if (ref === null) return p.row;
   const own = pair.rows.filter(r => r.fence === p.fence && numOf(r.fence, r.row) === ref);
   if (own.length !== 1) return p.row;

@@ -201,12 +201,86 @@ describe('parseFactsFence — strikethrough semantics (Codex R2-#3 contract)', (
     expect(r.facts[0].supersededBy).toBeUndefined();
   });
 
+  test('#9069: an unstruck row whose context cell says "superseded by #N" stays live with no supersededBy', () => {
+    const body = wrapFenceBody(
+      `| 1 | Renewal is due in March | fact | 0.9 | world | medium | 2026-01-01 |  | src | superseded by #2 |
+| 2 | Renewal moved to April | fact | 0.9 | world | medium | 2026-02-01 |  | src |  |`,
+    );
+    const r = parseFactsFence(body);
+    expect(r.warnings).toEqual([]);
+    expect(r.facts[0]).toMatchObject({ active: true, forgotten: false, context: 'superseded by #2' });
+    expect(r.facts[0].supersededBy).toBeUndefined();
+  });
+
   test('case-insensitive "Superseded By #N" still parses', () => {
     const body = wrapFenceBody(
       `| 1 | ~~Old~~ | fact | 0.8 | world | medium | 2026-01-01 |  | src | Superseded By #42 |`,
     );
     const r = parseFactsFence(body);
     expect(r.facts[0].supersededBy).toBe(42);
+  });
+
+  // Each fence reads the citation its writer places: the facts strike writes
+  // the live pointer FIRST (facts/forget.ts supersededFact prepends it), so a
+  // struck facts row reads its first `superseded by #N`, in any case; the
+  // takes writer appends, so takes reads the last (supersessionCitation). Only
+  // a struck row takes a pointer.
+  test('L109: a struck row citing "superseded by #2; superseded by #3" points at the first, row 2', () => {
+    const body = wrapFenceBody(
+      `| 1 | ~~Old claim~~ | fact | 0.8 | world | medium | 2026-01-01 |  | src | superseded by #2; superseded by #3 |
+| 2 | ~~Middle claim~~ | fact | 0.8 | world | medium | 2026-03-01 |  | src | superseded by #3 |
+| 3 | New claim | fact | 0.9 | world | medium | 2026-06-01 |  | src |  |`,
+    );
+    const r = parseFactsFence(body);
+    expect(r.warnings).toEqual([]);
+    expect(r.facts.map(f => [f.rowNum, f.active, f.supersededBy])).toEqual([[1, false, 2], [2, false, 3], [3, true, undefined]]);
+  });
+
+  test('L109: a live row whose context says "superseded by #1" takes no supersession pointer', () => {
+    const body = wrapFenceBody(
+      `| 1 | ~~Old claim~~ | fact | 0.8 | world | medium | 2026-01-01 |  | src |  |
+| 2 | Current claim | fact | 0.9 | world | medium | 2026-06-01 |  | src | superseded by #1 |`,
+    );
+    const r = parseFactsFence(body);
+    expect(r.warnings).toEqual([]);
+    expect(r.facts[1]).toMatchObject({ rowNum: 2, active: true, context: 'superseded by #1' });
+    expect(r.facts[1].supersededBy).toBeUndefined();
+  });
+
+  test('L109: a capitalised "Superseded By #2" first on a struck row points at row 2', () => {
+    const body = wrapFenceBody(
+      `| 1 | ~~Old claim~~ | fact | 0.8 | world | medium | 2026-01-01 |  | src | Superseded By #2; superseded by #3 |
+| 2 | New claim | fact | 0.9 | world | medium | 2026-06-01 |  | src |  |
+| 3 | Other claim | fact | 0.9 | world | medium | 2026-06-01 |  | src |  |`,
+    );
+    const r = parseFactsFence(body);
+    expect(r.warnings).toEqual([]);
+    expect(r.facts[0]).toMatchObject({ rowNum: 1, active: false, supersededBy: 2 });
+  });
+
+  // A live row keeps "superseded by #N" as prose (#9069); a later strike puts
+  // its own marker first and keeps that prose after it. Only the leading
+  // citation is the writer's pointer.
+  test('L109: a forgotten row whose kept prose says "superseded by #2" takes no supersession pointer', () => {
+    const body = wrapFenceBody(
+      `| 1 | ~~Old claim~~ | fact | 0.8 | world | medium | 2026-01-01 |  | src | forgotten: user asked \\| superseded by #2 |
+| 2 | Other claim | fact | 0.9 | world | medium | 2026-06-01 |  | src |  |`,
+    );
+    const r = parseFactsFence(body);
+    expect(r.warnings).toEqual([]);
+    expect(r.facts[0]).toMatchObject({ rowNum: 1, active: false, forgotten: true, context: 'forgotten: user asked | superseded by #2' });
+    expect(r.facts[0].supersededBy).toBeUndefined();
+  });
+
+  test('L109: a cross-page strike ("superseded", no row) whose kept prose says "superseded by #2" takes no pointer', () => {
+    const body = wrapFenceBody(
+      `| 1 | ~~Old claim~~ | fact | 0.8 | world | medium | 2026-01-01 |  | src | superseded \\| superseded by #2 |
+| 2 | Other claim | fact | 0.9 | world | medium | 2026-06-01 |  | src |  |`,
+    );
+    const r = parseFactsFence(body);
+    expect(r.warnings).toEqual([]);
+    expect(r.facts[0]).toMatchObject({ rowNum: 1, active: false, context: 'superseded | superseded by #2' });
+    expect(r.facts[0].supersededBy).toBeUndefined();
   });
 });
 
