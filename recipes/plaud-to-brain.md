@@ -200,6 +200,7 @@ calendar_event: ""      # Step 4's calendar page slug, or empty when no event ov
 transcript_segments: [] # every page of get_transcript, speaker_raw = Plaud's speaker
 raw_transcript_text: "..."   # the whole transcript, never truncated
 source_summary: "..."        # get_note's Markdown: a claim
+recorded_by: "<email>"       # the email of the account that owns the connection the recording came through
 ```
 
 **The page's one definition is `recipes/plaud-to-brain/page.ts`.** `renderMeetingPage(record)` renders this record
@@ -238,10 +239,12 @@ capture(
 type: meeting
 title: "<title>"
 date: "YYYY-MM-DD"
+effective_date: "YYYY-MM-DD"   # = date
 time: "HH:MM ±HH:MM"
 duration: "1h05m"
 source: plaud
 source_id: <id>
+recorded_by: "<email>"  # the connection owner's email: the recorder, as evidence the brain resolves
 attendees: []           # the same people as the Attendees: line, by slug (known present; Phase 4 adds the rest)
 invitees: []            # Step 4's roster, the claim; omitted with calendar_event when no event overlapped
 calendar_event: calendar/YYYY/MM/YYYY-MM-DD-title-id8   # Step 4's event; omit the key when there was none

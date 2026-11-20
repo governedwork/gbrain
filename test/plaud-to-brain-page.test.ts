@@ -46,6 +46,7 @@ function recordOf(over: Partial<PlaudMeetingRecord> = {}): PlaudMeetingRecord {
     transcript_segments: SEGMENTS,
     raw_transcript_text: SEGMENTS.map((s) => `${s.speaker_raw}: ${s.text}`).join('\n'),
     source_summary: '## Sammanfattning\nVi bestämde X.',
+    recorded_by: 'me@example.com',
     ...over,
   };
 }
@@ -85,6 +86,8 @@ describe('the page', () => {
     expect(fm).toContain('type: "meeting"');
     expect(fm).toContain('title: "11-03 Möte: Konfiguration av Google Ads"');
     expect(fm).toContain('date: "2026-11-03"');
+    expect(fm).toContain('effective_date: "2026-11-03"');
+    expect(fm).toContain('recorded_by: "me@example.com"');
     expect(fm).toContain('time: "13:42 +01:00"');
     expect(fm).toContain('duration: "34m"'); // 2 012 000 ms is 33.5 minutes, rounded
     expect(fm).toContain('source: "plaud"');
@@ -94,6 +97,19 @@ describe('the page', () => {
     expect(fm).toContain('tags: ["plaud"]');
     expect(fm).toContain('calendar_event: "calendar/2026/11/2026-11-03-mote-abcd1234"');
     expect(fm).toContain('facts_backstop: false');
+  });
+
+  test('effective_date is the local date, recorded_by the connection owner\'s email, on every page', () => {
+    const bare = renderMeetingPage(recordOf({ attendees: [], invitees: [], calendar_event: '', tags: [], source_summary: '', recorded_by: 'owner@example.org' }));
+    const fm = frontmatterOf(bare.content);
+    expect(fm).toContain('effective_date: "2026-11-03"');
+    expect(fm).toContain('recorded_by: "owner@example.org"');
+    expect(parseMarkdown(bare.content, `${bare.slug}.md`).frontmatter).toMatchObject({ effective_date: '2026-11-03', recorded_by: 'owner@example.org' });
+  });
+
+  test('a recorded_by that is not an email is refused, never written', () => {
+    expect(() => renderMeetingPage(recordOf({ recorded_by: '' }))).toThrow('recorded_by');
+    expect(() => renderMeetingPage(recordOf({ recorded_by: 'people/me' }))).toThrow('recorded_by');
   });
 
   test('the summary is marked as the recorder\'s claim and kept verbatim', () => {
@@ -196,10 +212,12 @@ describe('the whole page, byte for byte', () => {
     'type: "meeting"',
     'title: "11-03 Möte: Konfiguration av Google Ads"',
     'date: "2026-11-03"',
+    'effective_date: "2026-11-03"',
     'time: "13:42 +01:00"',
     'duration: "34m"',
     'source: "plaud"',
     'source_id: "of_4f6d3ff675f1a9bac96913943aa125c4"',
+    'recorded_by: "me@example.com"',
   ];
   const TITLE_LINES = [
     '# 11-03 Möte: Konfiguration av Google Ads',
