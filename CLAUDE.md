@@ -525,10 +525,8 @@ against the current base on the wardrobe, posts the required `lander/verdict` an
 session on the presence board when the PR bounces, is held or merges. Never `gh pr merge`, never `--auto`,
 never a watch loop.
 
-The lander's check has two steps. Per PR: `bun run typecheck`, then the test files the change names — a
-changed `test/*.test.ts`, and `test/<name>.test.ts` of each changed `src/**/<name>.ts`. Once per base: the
-whole unit suite (`bun run test`); a red it finds holds the queue until the base is fixed. Both run with
-`GBRAIN_TEST_SKIP_LAUNCHD=1`. The whole suite on Linux, the PostgreSQL arms and E2E corpus included, is the
-`fork-suite` workflow, required beside `lander/verdict` (what it runs: the header of
-`.github/workflows/fork-suite.yml`). Run the tests your change can break beyond the ones it names,
-`bun run verify`, and anything else it needs yourself, and say in the PR what you ran.
+The lander's check before merge is `bun run typecheck` alone, on Bun 1.4.4. After the merge, the
+`fork-suite` workflow runs the whole suite on Linux on every push to `brains-v*`, the PostgreSQL arms and E2E
+corpus included (what it runs: the header of `.github/workflows/fork-suite.yml`); the lander reads a red there
+as the base unverified and routes it. So run the tests your change can break, `bun run verify`, and
+anything else it needs yourself, and say in the PR what you ran.
