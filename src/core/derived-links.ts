@@ -10,6 +10,7 @@ import { replaceWantedLinks, type WantedLinksReplacement } from './wanted-links-
 import { applyTemporalEvidence, relationshipKeysForOrigin, type TemporalBody } from './link-temporal-apply.ts';
 import { primeRelationSemantics } from './link-semantics-pack.ts';
 import { effectiveRangesEnabled, LINK_EXTRACTION_GENERATION_KEY, type LineGrammarSettings } from './line-grammar.ts';
+import { isNoAutoLinkPage } from './trust/auto-links.ts';
 
 export interface DerivedLinkOrigin {
   slug: string;
@@ -252,13 +253,20 @@ export async function replaceDerivedLinksBatchOrReplay(engine: Pick<BrainEngine,
 }
 
 /** Under the caller's guards: check the origin read, then replace its derived links and temporal evidence. */
-async function publishDerivedLinks(tx: BrainEngine, origin: DerivedLinkOrigin, producers: string[], rows: LinkBatchInput[],
-  opts: DerivedLinkReplacementOptions, snapshot: PageSnapshot | null): Promise<{ created: number; removed: number }> {
+async function publishDerivedLinks(tx: BrainEngine, origin: DerivedLinkOrigin, producers: string[], candidateRows: LinkBatchInput[],
+  candidateOpts: DerivedLinkReplacementOptions, snapshot: PageSnapshot | null): Promise<{ created: number; removed: number }> {
   assertPageRevision(snapshot, { expectedRevision: origin.expectedRevision });
   if (!snapshot || snapshot.sourceIncarnation !== origin.sourceIncarnation || snapshot.page.deleted_at) {
     throw new Error('Derived link origin changed or was deleted');
   }
   const id = snapshot.page.id;
+  // governedwork/captain#485: an external_untrusted origin's body seeds no edge and no wanted row (trust/auto-links.ts).
+  // Only its frontmatter rows are published, so the replacement below removes the body edges it made before.
+  const untrusted = await isNoAutoLinkPage(tx, id);
+  const rows = untrusted ? candidateRows.filter(row => row.link_source === 'frontmatter') : candidateRows;
+  const opts = untrusted && candidateOpts.wanted
+    ? { ...candidateOpts, wanted: { ...candidateOpts.wanted, rows: candidateOpts.wanted.rows.filter(row => row.producer !== 'body') } }
+    : candidateOpts;
   // The wanted-page replacement and every read the checks below need are sent together, then judged in order.
   // Temporal evidence (tense, dated transitions, relationship state) is part
   // of the same derived projection: captured before, replaced after.

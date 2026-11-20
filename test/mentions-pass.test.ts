@@ -398,3 +398,61 @@ describe('gazetteer guards', () => {
     expect(meetings.entries_created).toBeGreaterThanOrEqual(1);
   });
 });
+
+/**
+ * governedwork/captain#485: an external_untrusted page (verbatim fetched text) seeds no automatic edge from its body.
+ * Fails when: the mention pass, the stale sweep's body links or NER link an untrusted page's body (the label word
+ * "Filed" linked to companies/filed), or a page lowered after its scan keeps its plain mention edge.
+ */
+describe('external_untrusted pages seed no automatic edge (captain#485)', () => {
+  const lower = (slug: string) => engine.executeRaw("UPDATE pages SET trust_tier = 'external_untrusted' WHERE slug = $1", [slug]);
+  const edgesFrom = async (slug: string) => (await engine.executeRaw<{ t: string; src: string; kind: string | null }>(
+    `SELECT t.slug AS t, l.link_source AS src, l.link_kind AS kind FROM links l JOIN pages f ON f.id = l.from_page_id JOIN pages t ON t.id = l.to_page_id
+      WHERE f.slug = $1 ORDER BY 1, 2, 3`, [slug])).map(r => `${r.t} ${r.src}${r.kind ? ` ${r.kind}` : ''}`);
+  const BODY = 'Filed under research. See [[people/bob]].';
+
+  test('the same body links from a trusted page and not from an untrusted one (mentions and body links)', async () => {
+    await page(engine, 'companies/filed', 'company', 'Filed', 'A company.');
+    await page(engine, 'people/bob', 'person', 'Bob Example', 'A person.');
+    await page(engine, 'sources/shares/trusted', 'note', 'Trusted share', BODY);
+    await page(engine, 'sources/shares/fetched', 'note', 'Fetched share', BODY);
+    await lower('sources/shares/fetched');
+    await sweep(engine);
+    expect(await edgesFrom('sources/shares/trusted')).toEqual(['companies/filed mentions', 'people/bob markdown']);
+    expect(await edgesFrom('sources/shares/fetched')).toEqual([]);
+    expect(await countMentionDuePages(engine)).toBe(0);
+  });
+
+  test('a page lowered after its scan loses its plain mention edge on the next pass; a manual edge and links into it stay', async () => {
+    await page(engine, 'companies/filed', 'company', 'Filed', 'A company.');
+    await page(engine, 'people/bob', 'person', 'Bob Example', 'A person.');
+    await page(engine, 'sources/shares/fetched', 'note', 'Fetched share', 'Filed under research.');
+    await sweep(engine);
+    expect(await mentionLinks(engine)).toEqual(['sources/shares/fetched -> companies/filed']);
+    await engine.addLink('sources/shares/fetched', 'people/bob', 'by hand', 'mentions', 'manual'); // gbrain-allow-direct-insert: fixture edge a caller wrote by name
+    await engine.addLink('people/bob', 'sources/shares/fetched', 'cites', 'mentions', 'manual'); // gbrain-allow-direct-insert: fixture edge into the untrusted page
+    await lower('sources/shares/fetched');
+    expect(await countMentionDuePages(engine)).toBe(1);
+    const r = await sweep(engine);
+    expect(r.mentions?.removed).toBe(1);
+    expect(await edgesFrom('sources/shares/fetched')).toEqual(['people/bob manual']);
+    expect(await edgesFrom('people/bob')).toEqual(['sources/shares/fetched manual']);
+    expect(await countMentionDuePages(engine)).toBe(0);
+  });
+
+  test('NER types no edge from an untrusted page and removes the one it typed before; the trusted control keeps its edge', async () => {
+    await page(engine, 'companies/acme', 'company', 'Acme Example', 'Ticker: ACMX');
+    await page(engine, 'people/dana', 'person', 'Dana Example', 'Dana works at ACMX.');
+    await page(engine, 'people/erin', 'person', 'Erin Example', 'Erin works at ACMX.');
+    await sweep(engine);
+    const { extractNerLinks } = await import('../src/core/extract-ner.ts');
+    expect((await extractNerLinks(engine)).created).toBe(2);
+    expect(await mentionLinks(engine)).toEqual(expect.arrayContaining(['people/dana -> companies/acme (typed_ner)', 'people/erin -> companies/acme (typed_ner)']));
+    await lower('people/erin');
+    await sweep(engine);
+    await extractNerLinks(engine);
+    const links = await mentionLinks(engine);
+    expect(links).toContain('people/dana -> companies/acme (typed_ner)');
+    expect(links.filter(l => l.startsWith('people/erin'))).toEqual([]);
+  });
+});

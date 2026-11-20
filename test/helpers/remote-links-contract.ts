@@ -20,7 +20,7 @@ import { withEnv } from './with-env.ts';
  * test and the PostgreSQL E2E wrapper. Each scenario owns its own source and
  * OAuth client, so scenarios can share one database.
  */
-export const remoteLinksCases = ['links', 'other_producers', 'confined', 'config_off', 'superseded', 'restart', 'revoked', 'trusted_local', 'reconcile', 'wanted'] as const;
+export const remoteLinksCases = ['links', 'other_producers', 'confined', 'config_off', 'superseded', 'restart', 'revoked', 'trusted_local', 'reconcile', 'wanted', 'untrusted'] as const;
 export type RemoteLinksCase = typeof remoteLinksCases[number];
 
 const config = { engine: 'pglite' as const, embedding_disabled: true };
@@ -61,12 +61,12 @@ export async function exerciseRemoteLinks(engine: BrainEngine, scenario: RemoteL
       const remote: Partial<OperationContext> = { remote: true, auth: { token: 'fixture', clientId, principal: { kind: 'oauth_client', id: clientId },
         scopes: ['read', 'write'], sourceId, ...(scenario === 'confined' ? { boundSlugPrefixes: ['notes/', 'people/'] } : {}) } as OperationContext['auth'] };
 
-      const write = async (content: string, slug = 'notes/example', overrides: Partial<OperationContext> = remote): Promise<WriteRequest> => {
+      const write = async (content: string, slug = 'notes/example', overrides: Partial<OperationContext> = remote, extra: Record<string, unknown> = {}): Promise<WriteRequest> => {
         const [source] = await engine.executeRaw<{ incarnation: string }>('SELECT incarnation FROM sources WHERE id=$1', [sourceId]);
         const ctx: OperationContext = { engine, config, dryRun: false, remote: false, sourceId, logger: { info() {}, warn() {}, error() {} }, ...overrides };
         const authority = await submissionAuthority(ctx, 'put_page', sourceId, source.incarnation, slug);
         const current = await engine.readPageSnapshot(slug, { sourceId });
-        const intent = { content, ...(current ? { expected_revision: current.revision } : {}) };
+        const intent = { content, ...extra, ...(current ? { expected_revision: current.revision } : {}) };
         await admitWrite(engine, { principal: authority.principal, authority, operation: 'put_page', sourceId, sourceIncarnation: source.incarnation,
           slug, pageId: current?.page.id ?? null, requestId: randomUUID(), callerIntent: intent, intent });
         const row = (await claimNextWrite(engine, localHostId()))!;
@@ -120,6 +120,37 @@ export async function exerciseRemoteLinks(engine: BrainEngine, scenario: RemoteL
         } finally {
           await engine.executeRaw("DELETE FROM config WHERE key='wanted_pages.remote'");
         }
+        return;
+      }
+
+      if (scenario === 'untrusted') {
+        // governedwork/captain#485: fetched web text (content_origin tool_output) stores the page external_untrusted.
+        const wanted = () => engine.executeRaw(`SELECT w.target_ref FROM wanted_links w JOIN pages p ON p.id=w.origin_page_id
+          WHERE p.source_id=$1 AND p.slug='notes/example'`, [sourceId]);
+        const tier = async () => (await engine.executeRaw<{ trust_tier: string }>("SELECT trust_tier FROM pages WHERE source_id=$1 AND slug='notes/example'", [sourceId]))[0]?.trust_tier;
+        // The control: the same body from a remote agent links its targets and records the missing one as wanted.
+        await write(MENTIONS(sourceId));
+        await runLinks();
+        expect(await tier()).not.toBe('external_untrusted');
+        expect(await links()).toEqual([mention('companies/acme-example'), mention('people/alice-example')]);
+        expect(await wanted()).toEqual([{ target_ref: 'people/ghost-example' }]);
+        await engine.addLink('notes/example', 'people/alice-example', 'by hand', 'works_at', 'manual', undefined, undefined, // gbrain-allow-direct-insert: fixture edge a caller wrote by name
+          { fromSourceId: sourceId, toSourceId: sourceId, originSourceId: sourceId });
+        await engine.addLink('people/alice-example', 'notes/example', 'cites', 'mentions', 'manual', undefined, undefined, // gbrain-allow-direct-insert: fixture edge into the page
+          { fromSourceId: sourceId, toSourceId: sourceId, originSourceId: sourceId });
+        // The same body as fetched web text: no target, and the edges and wanted row this producer made before are removed.
+        const fetched = await write(`${MENTIONS(sourceId)}\nFetched again.\n`, 'notes/example', remote, { content_origin: 'tool_output' });
+        await runLinks();
+        expect(await tier()).toBe('external_untrusted');
+        expect((await effect(fetched)).outcome).toMatchObject({ links: 'committed', added: 0, removed: 2, skipped_targets: [], reason: 'untrusted_page' });
+        expect(await links()).toEqual([{ to_slug: 'people/alice-example', link_type: 'works_at', link_source: 'manual' }]);
+        expect(await links('people/alice-example')).toEqual([{ to_slug: 'notes/example', link_type: 'mentions', link_source: 'manual' }]);
+        expect(await wanted()).toEqual([]);
+        // A later remote write without an origin keeps the page untrusted, and still links nothing.
+        await write(`${MENTIONS(sourceId)}\nA third paragraph.\n`);
+        await runLinks();
+        expect(await tier()).toBe('external_untrusted');
+        expect((await links()).filter(link => link.link_source === 'mcp-remote-mention')).toEqual([]);
         return;
       }
 
