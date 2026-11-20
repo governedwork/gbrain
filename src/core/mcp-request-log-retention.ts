@@ -12,8 +12,9 @@
  * stay exact. Audit rows (AUDIT_LOG_OPERATIONS) are never pruned. A NULL
  * token_name counts under ''. The cutoff is fixed once per run.
  *
- * It runs in two places: the cycle purge phase (Postgres, and PGLite with no
- * live serve), and a resident hourly ticker in the process that holds a PGLite
+ * It runs in two places: the cycle bookkeeping_gc phase (Postgres, and PGLite
+ * with no live serve; never the page purge, so `gbrain dream --phase
+ * bookkeeping_gc` runs it alone), and a resident hourly ticker in the process that holds a PGLite
  * brain's lock (`gbrain serve` and `gbrain serve --http`), under a small
  * wall-clock budget that yields between batches so live MCP traffic keeps the
  * single connection. Each run records its time, count and cap state
@@ -195,7 +196,7 @@ export interface McpLogPruneTicker {
 
 /**
  * The lock owner's resident prune: PGLite only (Postgres brains prune in the
- * cycle purge phase). One run in flight at a time; its own unref'd timer.
+ * cycle bookkeeping_gc phase). One run in flight at a time; its own unref'd timer.
  */
 export function startMcpLogPruneTicker(engine: BrainEngine, opts: McpLogPruneTickerOpts = {}): McpLogPruneTicker {
   let inflight: Promise<McpLogPruneResult | null> | null = null;

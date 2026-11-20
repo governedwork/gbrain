@@ -62,12 +62,13 @@ async function rollup(engine: BrainEngine): Promise<Map<string, { requests: numb
   return new Map(rows.map(r => [r.token_name, { requests: Number(r.requests), last_used_at: iso(r.last_used_at), pruned_through: iso(r.pruned_through) }]));
 }
 
-async function purgeDetails(engine: BrainEngine): Promise<Record<string, unknown>> {
-  const report = await runCycle(engine, { brainDir: mkdtempSync(join(tmpdir(), 'gb-mcp-log-cycle-')), phases: ['purge'] });
-  const phase = report.phases.find(p => p.phase === 'purge')!;
-  expect(phase.status).not.toBe('fail');
-  return phase.details;
+async function phaseDetails(engine: BrainEngine, phase: 'bookkeeping_gc' | 'purge'): Promise<Record<string, unknown>> {
+  const report = await runCycle(engine, { brainDir: mkdtempSync(join(tmpdir(), 'gb-mcp-log-cycle-')), phases: [phase] });
+  const result = report.phases.find(p => p.phase === phase)!;
+  expect(result.status).toBe('ok');
+  return result.details;
 }
+const gcDetails = (engine: BrainEngine) => phaseDetails(engine, 'bookkeeping_gc');
 
 for (const kind of testBackends()) {
   describe(`request-log retention (${kind}, repo-less)`, () => {
@@ -91,17 +92,17 @@ for (const kind of testBackends()) {
       await engine.unsetConfig(MCP_LOG_RETENTION_KEY);
     });
 
-    test('retention is off by default: the cycle purge deletes nothing and reports nothing', async () => {
+    test('retention is off by default: bookkeeping_gc deletes nothing and reports nothing', async () => {
       await seed(engine, 'alice-client', 'query', 5, 400);
       expect(await readMcpLogRetentionDays(engine)).toBeNull();
-      const details = await purgeDetails(engine);
+      const details = await gcDetails(engine);
       expect(details.purged_mcp_request_log_count).toBeUndefined();
       expect(await logCount(engine)).toBe(5);
       expect((await rollup(engine)).size).toBe(0);
       expect(await runMcpLogRetention(engine)).toBeNull();
     }, 60_000);
 
-    test('retention 30: the cycle purge moves every row class past the window into the tally and lifetime totals stay exact', async () => {
+    test('retention 30: bookkeeping_gc moves every row class past the window into the tally and lifetime totals stay exact', async () => {
       // Every row class the dashboard's total_requests counts today.
       await seed(engine, 'alice-client', 'query', 3, 40);
       await seed(engine, 'alice-client', 'tools/list', 2, 41);
@@ -117,7 +118,7 @@ for (const kind of testBackends()) {
         .map(r => [r.token_name, { requests: r.n, last_used_at: new Date(r.last as string).toISOString() }]));
 
       await engine.setConfig(MCP_LOG_RETENTION_KEY, '30');
-      const details = await purgeDetails(engine);
+      const details = await gcDetails(engine);
       expect(details.purged_mcp_request_log_count).toBe(11);
       expect(await logCount(engine)).toBe(3);
       expect(await logCount(engine, "created_at < now() - interval '30 days'")).toBe(0);
@@ -134,6 +135,45 @@ for (const kind of testBackends()) {
       const last = await readLastMcpLogPrune(engine);
       expect(last).toMatchObject({ deleted: 11, capped: false });
       expect(Date.now() - Date.parse(last!.at)).toBeLessThan(60_000);
+    }, 60_000);
+
+    test('the prune runs in bookkeeping_gc alone: purge leaves the log, and bookkeeping_gc never purges a soft-deleted page', async () => {
+      await seed(engine, 'alice-client', 'query', 4, 40);
+      await engine.setConfig(MCP_LOG_RETENTION_KEY, '30');
+      const slug = `notes/reqlog-gc-keeps-${kind}`;
+      await engine.putPage(slug, { type: 'note', title: 'kept', compiled_truth: 'a page deleted past its restore window' });
+      await engine.softDeletePage(slug);
+      await engine.executeRaw("UPDATE pages SET deleted_at = now() - interval '100 hours' WHERE slug = $1", [slug]);
+      const pageRows = async () => (await engine.executeRaw('SELECT 1 FROM pages WHERE slug = $1', [slug])).length;
+
+      const gc = await gcDetails(engine);
+      expect(gc.purged_mcp_request_log_count).toBe(4);
+      expect(await logCount(engine)).toBe(0);
+      expect(await pageRows()).toBe(1);
+
+      await seed(engine, 'alice-client', 'query', 3, 40);
+      const purge = await phaseDetails(engine, 'purge');
+      expect(purge.purged_mcp_request_log_count).toBeUndefined();
+      expect(await logCount(engine)).toBe(3);
+      await engine.executeRaw('DELETE FROM pages WHERE slug = $1', [slug]);
+    }, 60_000);
+
+    test('a failed prune warns bookkeeping_gc and names the error; it is never silently skipped', async () => {
+      await seed(engine, 'alice-client', 'query', 2, 40);
+      await engine.setConfig(MCP_LOG_RETENTION_KEY, '30');
+      const real = engine.executeRaw.bind(engine);
+      const spy = spyOn(engine, 'executeRaw').mockImplementation((async (sql: string, params?: unknown[]) => {
+        if (sql.includes('WITH victims AS MATERIALIZED')) throw new Error('simulated prune failure');
+        return real(sql, params as never);
+      }) as typeof engine.executeRaw);
+      try {
+        const report = await runCycle(engine, { brainDir: mkdtempSync(join(tmpdir(), 'gb-mcp-log-cycle-')), phases: ['bookkeeping_gc'] });
+        const result = report.phases.find(p => p.phase === 'bookkeeping_gc')!;
+        expect(result.status).toBe('warn');
+        expect(result.details.mcp_request_log_retention_error).toBe('simulated prune failure');
+        expect(result.summary).toContain('request-log retention failed');
+      } finally { spy.mockRestore(); }
+      expect(await logCount(engine)).toBe(2);
     }, 60_000);
 
     test('surface_change, memory_setting_change and access_admin audit rows survive past the window', async () => {
