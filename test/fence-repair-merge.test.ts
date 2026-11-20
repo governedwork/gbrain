@@ -164,6 +164,15 @@ describe('merge_fences', () => {
     expect(old).toMatchObject({ active: false, supersededBy: 1, kind: 'fact', context: 'superseded by #1; original kind: signal' });
   });
 
+  test('L109: a merge leaves a live facts row\'s "superseded by #N" prose as written', () => {
+    const body = [facts(FIRST), facts([factsRow(40, 'Alpha claim'), factsRow(41, 'Live claim', { ctx: 'superseded by #40 in an old memo' })])].join('\n');
+    const r = run(page(body));
+    expectRepaired(r);
+    const live = parseFactsFence(r.page.compiled_truth).facts.find(f => f.claim === 'Live claim')!;
+    expect(live).toMatchObject({ active: true, context: 'superseded by #40 in an old memo' });
+    expect(live.supersededBy).toBeUndefined();
+  });
+
   test('near-duplicates (same claim, different confidence) are both kept', () => {
     const body = [facts([factsRow(1, 'Alpha claim')]), facts([factsRow(1, 'Alpha claim', { conf: '0.7' })])].join('\n');
     const r = run(page(body));
@@ -186,6 +195,16 @@ describe('merge_fences', () => {
     expect(classes(r)).toEqual(['merge_fences', 'renumber']);
     expect(r.page.compiled_truth).toBe(takes([takesRow(1, 'Alpha take'), takesRow(2, 'Beta take'), takesRow(3, 'Gamma take'), takesRow(4, 'Delta take', { src: 'superseded by #2' })]));
     expect(parseTakesFence(r.page.compiled_truth).takes.map(t => [t.rowNum, t.claim])).toEqual([[1, 'Alpha take'], [2, 'Beta take'], [3, 'Gamma take'], [4, 'Delta take']]);
+    expectRepaired(r);
+  });
+
+  test('a takes row citing a chain follows the LAST citation to the renumbered row; the earlier one is history', () => {
+    const body = [takes([takesRow(1, 'Alpha take'), takesRow(2, 'Beta take')]),
+      takes([takesRow(1, 'Gamma take'), takesRow(2, 'Delta take'), takesRow(3, 'Epsilon take', { src: 'superseded by #1; superseded by #2' })])].join('\n');
+    const r = run(page(body));
+    expect(classes(r)).toEqual(['merge_fences', 'renumber']);
+    expect(parseTakesFence(r.page.compiled_truth).takes.map(t => [t.rowNum, t.claim, t.source ?? ''])).toEqual([
+      [1, 'Alpha take', 'notes'], [2, 'Beta take', 'notes'], [4, 'Gamma take', 'notes'], [5, 'Delta take', 'notes'], [3, 'Epsilon take', 'superseded by #1; superseded by #5']]);
     expectRepaired(r);
   });
 

@@ -185,7 +185,7 @@ describe('(b) writers stamp counterparty_source_id', () => {
         messages: [{
           id: 'm1', threadId: 'thread-alice-inbound', from: 'Alice Example <alice@example.invalid>', fromAddress: 'alice@example.invalid',
           to: ['me@example.invalid'], cc: [], subject: 'Quarterly plan', bodyText: 'Can you review the plan?', dateIso: '2026-09-10T10:00:00Z',
-          internalDateMs: Date.parse('2026-09-10T10:00:00Z'), labelIds: ['INBOX'], listUnsubscribe: false,
+          internalDateMs: Date.parse('2026-09-10T10:00:00Z'), labelIds: ['INBOX'], listUnsubscribe: false, senderAuth: { spf: 'none', dkim: 'none', dmarc: 'none', dkim_domain: null },
         }],
       };
       const verdict = await applyThreadLoopVerdict(engine, G1, thread, new Set(['me@example.invalid']), null, new Date('2026-09-20T10:00:00Z'));

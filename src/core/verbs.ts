@@ -518,7 +518,7 @@ const forget: Operation = {
     recordFunnelEvent('withdrawal');
     return out;
   },
-  // NO cliHints: `gbrain forget` is a CLI_ONLY command (recall.ts runForget)
+  // NO cliHints: `gbrain forget` is a CLI_ONLY command (forget.ts runForget)
   // that dispatches BEFORE cliOps — a cliHint here would be silently
   // shadowed. The CLI surface for forgetting stays the existing command;
   // this verb is the MCP/protocol surface.

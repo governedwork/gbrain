@@ -4310,34 +4310,16 @@
             "via": "unsafe"
           },
           {
-            "paramCount": 3,
+            "paramCount": 0,
             "unsafeOptions": {
               "cancelFence": false,
               "prepare": true,
-              "simple": false
+              "simple": true
             },
             "via": "unsafe"
           },
           {
-            "paramCount": 2,
-            "unsafeOptions": {
-              "cancelFence": false,
-              "prepare": true,
-              "simple": false
-            },
-            "via": "unsafe"
-          },
-          {
-            "paramCount": 3,
-            "unsafeOptions": {
-              "cancelFence": false,
-              "prepare": true,
-              "simple": false
-            },
-            "via": "unsafe"
-          },
-          {
-            "paramCount": 3,
+            "paramCount": 1,
             "unsafeOptions": {
               "cancelFence": false,
               "prepare": true,
@@ -4391,7 +4373,43 @@
             "via": "unsafe"
           },
           {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
             "paramCount": 3,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 3,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 0,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": true
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 1,
             "unsafeOptions": {
               "cancelFence": false,
               "prepare": true,
@@ -4446,6 +4464,42 @@
           },
           {
             "paramCount": 3,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 3,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 3,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 1,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 1,
             "unsafeOptions": {
               "cancelFence": false,
               "prepare": true,
@@ -4473,7 +4527,34 @@
             "via": "unsafe"
           },
           {
+            "paramCount": 0,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": true
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 1,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
             "paramCount": 3,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 1,
             "unsafeOptions": {
               "cancelFence": false,
               "prepare": true,

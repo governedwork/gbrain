@@ -31,7 +31,8 @@ import {
   invalidatePackCache,
   loadActivePack,
   loadActivePackForEngine,
-  loadResolvedPackByName,
+  loadActivePackDeclared,
+  loadDeclaredPackByName,
   removeAliasFromType,
   removeLinkTypeFromPack,
   removePrefixFromType,
@@ -51,6 +52,7 @@ import {
   updateTypeOnPack,
   __setPackLocatorForTests,
   _resetPackLocatorForTests,
+  type DeclaredPack,
 } from '../core/schema-pack/index.ts';
 import type { SchemaPackManifest, PackPrimitive } from '../core/schema-pack/manifest-v1.ts';
 import { PACK_PRIMITIVES } from '../core/schema-pack/manifest-v1.ts';
@@ -58,6 +60,8 @@ import { bundledPackPath } from '../core/schema-pack/bundled-assets.ts';
 import { gbrainPath, loadConfig, configPath, toEngineConfig, isThinClient, type GBrainConfig } from '../core/config.ts';
 import { opError } from '../core/ops/contract.ts';
 import { readDbSchemaPack } from '../core/schema-pack/best-effort.ts';
+import { primeBrainResidentPack } from '../core/schema-pack/load-active.ts';
+import { bindBrainResidentPackStore, isPackStoreFailure } from '../core/schema-pack/db-store.ts';
 import { sanitizeTypeForDisplay } from '../core/schema-pack/type-usage.ts';
 import { yamlScalar } from '../core/frontmatter-inference.ts';
 import { ROUTERS, SCHEMA_SUBCOMMANDS, subcommandHelpRequested } from '../cli/subcommands.ts';
@@ -200,8 +204,15 @@ Resolution chain (7-tier, tier 1 trust-gated):
 async function readDbSchemaPackConfig(cfg: GBrainConfig | null): Promise<string | undefined> {
   if (!cfg) return undefined;
   try {
-    return await withConnectedEngine((engine) => readDbSchemaPack(engine));
-  } catch {
+    return await withConnectedEngine(async (engine) => {
+      const dbConfig = await readDbSchemaPack(engine);
+      // Ours (governedwork fork): the caller resolves after this connection closes; read the brain's pack heads now.
+      await primeBrainResidentPack({ cfg, remote: false, dbConfig, packStore: engine });
+      return dbConfig;
+    });
+  } catch (err) {
+    // Ours (governedwork fork): the brain answered but its stored packs could not be read; the pack it names may live there.
+    if (isPackStoreFailure(err)) throw err;
     return undefined;
   }
 }
@@ -490,9 +501,12 @@ async function withConnectedEngine<T>(fn: (engine: import('../core/engine.ts').B
   const connectConfig = toEngineConfig(cfg);
   const engine = await createEngine(connectConfig);
   await engine.connect(connectConfig);
+  // Ours (governedwork fork): brain-resident packs resolve like disk packs in every schema subcommand.
+  const unbind = bindBrainResidentPackStore(engine);
   try {
     return await fn(engine);
   } finally {
+    unbind();
     await engine.disconnect();
   }
 }
@@ -789,6 +803,9 @@ async function runLintCmd(args: string[]): Promise<void> {
   // schema_pack (#4653) on the SAME connection the DB-backed rules use.
   const lint = async (engine?: import('../core/engine.ts').BrainEngine) => {
     let pack: SchemaPackManifest | null;
+    // Ours (governedwork fork): the pack as declared, for the borrow_from rules. Left unset on the
+    // raw-fallback branch, where they report borrow_checks_skipped instead.
+    let declared: DeclaredPack | undefined;
     if (name) {
       const p = packPathByName(name);
       let raw: SchemaPackManifest | null;
@@ -800,8 +817,11 @@ async function runLintCmd(args: string[]): Promise<void> {
         // raw-manifest lint. Fall back to the raw child (with a stderr
         // warning) when the chain can't be resolved, e.g. missing parent.
         try {
-          pack = (await loadResolvedPackByName(name)).manifest;
+          const loaded = await loadDeclaredPackByName(name);
+          pack = loaded.resolved.manifest;
+          declared = loaded.declared;
         } catch (e) {
+          // pack-store-failure-ok: a CLI read that prints the error.
           const msg = e instanceof Error ? e.message : String(e);
           console.error(`warn: could not resolve extends chain for pack \`${name}\` (${msg}); linting raw manifest only`);
           pack = raw;
@@ -811,13 +831,15 @@ async function runLintCmd(args: string[]): Promise<void> {
       }
     } else {
       const dbConfig = engine ? await readDbSchemaPack(engine) : await readDbSchemaPackConfig(cfg);
-      pack = (await loadActivePack({ cfg, remote: false, dbConfig })).manifest;
+      const loaded = await loadActivePackDeclared({ cfg, remote: false, dbConfig });
+      pack = loaded.resolved.manifest;
+      declared = loaded.declared;
     }
     if (!pack) {
       console.error(`Pack not found: ${name}`);
       process.exit(1);
     }
-    return { pack, report: await runAllLintRules(pack, engine ? { engine } : undefined) };
+    return { pack, report: await runAllLintRules(pack, { ...(engine ? { engine } : {}), declared }) };
   };
   const { pack, report } = withDb ? await withConnectedEngine(lint) : await lint();
   if (json) {

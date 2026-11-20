@@ -1126,14 +1126,7 @@ async function runGitHubSyncInner(engine: BrainEngine, sourceId: string, cfg: Gi
   // Active pack for pack-aware typing, mirroring performSyncInner.
   let activePack: GitHubSyncDeps['opts'] extends never ? never : { page_types: ReadonlyArray<{ name: string; path_prefixes: ReadonlyArray<string> }> } | undefined;
   activePack = undefined;
-  if (!opts.noSchemaPack) {
-    try {
-      const { loadActivePack } = await import('./schema-pack/load-active.ts');
-      const { loadConfig } = await import('./config.ts');
-      const resolved = await loadActivePack({ cfg: loadConfig(), remote: false, sourceId });
-      activePack = { page_types: resolved.manifest.page_types };
-    } catch { /* fall back to legacy typing */ }
-  }
+  if (!opts.noSchemaPack) activePack = await (await import('./schema-pack/sync-typing.ts')).syncTypingPack(sourceId);
 
   // Keep previous scope before this run resolves its refreshed repo list.
   // A repo added to an existing source needs a history bootstrap even when

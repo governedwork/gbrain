@@ -45,7 +45,8 @@ import type { Principal, WriteRequest } from '../persistence/model.ts';
 import { serializeMarkdown, serializePageToMarkdown } from '../markdown.ts';
 import type { PageType } from '../types.ts';
 import type { PageSnapshot } from '../page-state/types.ts';
-import { assertInlineBody } from '../page-body/page-shape.ts';
+import { assertInlineBody, isSegmentedPage } from '../page-body/page-shape.ts';
+import { segmentedRevertRefusal } from '../page-state/versions.ts';
 import type { PageVersion } from '../page-state/version-types.ts';
 import type { WriteThroughResult } from '../write-through.ts';
 import { maintenanceAttribution, principalAttribution, withWriteAttribution } from '../persistence/attribution.ts';
@@ -95,13 +96,33 @@ function changedSincePreview(ref: string, what: string): Error {
     'Run the command again: it shows the page as it is now and asks for a new confirmation.');
 }
 
-/** The page with the CEO-21 marker removed (or set to `marker`) and `labels` applied (GST-2518), as canonical markdown. */
-function markdownWithoutMarker(snapshot: PageSnapshot, marker: TrustTier | null = null, labels?: Record<string, unknown>): string {
+/** The page's frontmatter with the CEO-21 marker removed (or set to `marker`) and `labels` applied (GST-2518). */
+function frontmatterWithMarker(snapshot: PageSnapshot, marker: TrustTier | null = null, labels?: Record<string, unknown>): Record<string, unknown> {
   const { trust_tier: _marker, ...rest } = withLabels((snapshot.page.frontmatter ?? {}) as Record<string, unknown>, labels ?? {});
-  const frontmatter = marker ? { ...rest, trust_tier: marker } : rest;
-  return serializeMarkdown(frontmatter, snapshot.page.compiled_truth ?? '', snapshot.page.timeline ?? '', {
+  return marker ? { ...rest, trust_tier: marker } : rest;
+}
+
+/** The page with the CEO-21 marker removed (or set to `marker`) and `labels` applied (GST-2518), as canonical markdown. An inline (or read-back) body only. */
+function markdownWithoutMarker(snapshot: PageSnapshot, marker: TrustTier | null = null, labels?: Record<string, unknown>): string {
+  return serializeMarkdown(frontmatterWithMarker(snapshot, marker, labels), snapshot.page.compiled_truth ?? '', snapshot.page.timeline ?? '', {
     type: (snapshot.page.type as PageType) ?? 'note', title: snapshot.page.title ?? '', tags: snapshot.tags,
   });
+}
+
+/**
+ * governedwork fork (F16): the canonical markdown of a marker or label change written through the put path (an unmanaged
+ * brain's importFromContent, or a managed write the segmented flip declines): a segmented body is read back whole, as
+ * GBrain's put path reads one, up to 24 MiB; over it refuses page_body_segmented. A managed brain never builds it.
+ */
+async function markerMarkdown(engine: BrainEngine, snapshot: PageSnapshot, marker: TrustTier | null, labels: Record<string, unknown> | undefined, site: string): Promise<string> {
+  if (!isSegmentedPage(snapshot.page)) return markdownWithoutMarker(snapshot, marker, labels);
+  const { wholeBodySnapshot } = await import('../persistence/segmented-apply.ts');
+  return markdownWithoutMarker((await wholeBodySnapshot(engine, snapshot, site))!, marker, labels);
+}
+
+/** governedwork fork (F16): a page or version stored in segments has no whole content to restore: GBrain's revert_version refusal. */
+function assertRevertableVersion(snapshot: PageSnapshot, version: PageVersion, slug: string): void {
+  if (isSegmentedPage(snapshot.page) || version.body_storage === 'segmented') throw segmentedRevertRefusal(slug, version.id);
 }
 
 /** One version's canonical markdown, the way revert_version restores it (page-prepare.ts). */
@@ -199,7 +220,19 @@ export interface PageActionResult {
   prior_tier: TrustTier;
   marker_removed?: boolean;
   version_id?: number;
+  /**
+   * governedwork fork (F15): the page's knowledge_revision exactly as the action left it, read inside the action's own
+   * transaction (on a managed brain, the publication receipt's revision, read in the publication transaction after
+   * apply), so a caller reading the page back can tell this write from a later one.
+   */
+  revision?: string;
 }
+
+/** The page's knowledge_revision as `tx` sees it (undefined when the page is gone). */
+async function revisionIn(tx: BrainEngine, sourceId: string, slug: string): Promise<string | undefined> {
+  return (await tx.readPageSnapshot(slug, { sourceId }))?.revision;
+}
+const withRevision = (revision: string | undefined) => revision ? { revision } : {};
 
 type OwnerPageIntent = {
   mode: 'confirm' | 'revert' | 'repair_marker' | 'restore_provenance' | 'write_labels';
@@ -235,27 +268,30 @@ export async function confirmPage(engine: BrainEngine, input: PageActionInput): 
   if (!state) throw opError('page_not_found', `No live page ${ref}.`, 'Check the ref; gbrain trust review lists pages waiting for you.');
   if (state.revision !== input.expectedRevision) throw changedSincePreview(ref, 'its confirmation');
   if (input.labels) {
-    await publishOwnerPage(engine, input, { mode: 'confirm', expected_revision: input.expectedRevision, via: input.confirmation.via, proposal: input.proposal, labels: input.labels },
-      markdownWithoutMarker(state.snapshot, null, input.labels), 'user_confirmed');
-    return { status: 'confirmed', ref, tier: 'user_confirmed', prior_tier: state.tier, marker_removed: state.hasMarker };
+    // GST-2518 (0.60.694): the label write; the answered revision is the one it left, labels included.
+    const revision = await publishOwnerPage(engine, input, { mode: 'confirm', expected_revision: input.expectedRevision, via: input.confirmation.via, proposal: input.proposal, labels: input.labels },
+      () => markerMarkdown(engine, state.snapshot, null, input.labels, 'trust confirm'), 'user_confirmed');
+    return { status: 'confirmed', ref, tier: 'user_confirmed', prior_tier: state.tier, marker_removed: state.hasMarker, ...withRevision(revision) };
   }
   if (state.tier === 'user_confirmed' && !state.hasMarker) {
-    await engine.transaction(tx => closeProposal(tx, input.proposal, input.by));
-    return { status: 'unchanged', ref, tier: state.tier, prior_tier: state.tier };
+    const revision = await engine.transaction(async tx => { await closeProposal(tx, input.proposal, input.by); return revisionIn(tx, input.sourceId, input.slug); });
+    return { status: 'unchanged', ref, tier: state.tier, prior_tier: state.tier, ...withRevision(revision) };
   }
   if (!state.hasMarker) {
+    // The tier change moves no revision (the knowledge_revision trigger ignores trust_tier); read inside the tx, after it.
+    let revision: string | undefined;
     const ok = await setRowTier(engine, {
       table: 'pages', id: state.pageId, sourceId: input.sourceId, tier: 'user_confirmed', ceiling: 'user_confirmed', by: input.by,
       note: { via: input.confirmation.via, action: 'confirm' },
       expect: async tx => (await tx.readPageSnapshot(input.slug, { sourceId: input.sourceId }))?.revision === input.expectedRevision,
-      also: tx => closeProposal(tx, input.proposal, input.by),
+      also: async tx => { await closeProposal(tx, input.proposal, input.by); revision = await revisionIn(tx, input.sourceId, input.slug); },
     });
     if (!ok) throw changedSincePreview(ref, 'its confirmation');
-    return { status: 'confirmed', ref, tier: 'user_confirmed', prior_tier: state.tier, marker_removed: false };
+    return { status: 'confirmed', ref, tier: 'user_confirmed', prior_tier: state.tier, marker_removed: false, ...withRevision(revision) };
   }
-  await publishOwnerPage(engine, input, { mode: 'confirm', expected_revision: input.expectedRevision, via: input.confirmation.via, proposal: input.proposal },
-    markdownWithoutMarker(state.snapshot), 'user_confirmed');
-  return { status: 'confirmed', ref, tier: 'user_confirmed', prior_tier: state.tier, marker_removed: true };
+  const revision = await publishOwnerPage(engine, input, { mode: 'confirm', expected_revision: input.expectedRevision, via: input.confirmation.via, proposal: input.proposal },
+    () => markerMarkdown(engine, state.snapshot, null, undefined, 'trust confirm'), 'user_confirmed');
+  return { status: 'confirmed', ref, tier: 'user_confirmed', prior_tier: state.tier, marker_removed: true, ...withRevision(revision) };
 }
 
 /** #6550: the marker a repaired page carries: its stored tier, none at owner tiers (CEO-21 stamps none there). */
@@ -277,9 +313,9 @@ export async function writePageLabels(engine: BrainEngine, input: PageActionInpu
   if (!state) throw opError('page_not_found', `No live page ${ref}.`, 'Check the ref; gbrain trust review lists pages waiting for you.');
   if (state.revision !== input.expectedRevision) throw changedSincePreview(ref, ACTION_NAMES.write_labels);
   const tier = minTrust(input.tier, state.tier);
-  await publishOwnerPage(engine, input, { mode: 'write_labels', expected_revision: input.expectedRevision, via: input.confirmation.via, proposal: input.proposal,
-    labels: input.labels, tier }, markdownWithoutMarker(state.snapshot, repairedMarker(tier), input.labels), tier);
-  return { status: 'restored', ref, tier, prior_tier: state.tier };
+  const revision = await publishOwnerPage(engine, input, { mode: 'write_labels', expected_revision: input.expectedRevision, via: input.confirmation.via, proposal: input.proposal,
+    labels: input.labels, tier }, () => markerMarkdown(engine, state.snapshot, repairedMarker(tier), input.labels, 'trust label change'), tier);
+  return { status: 'restored', ref, tier, prior_tier: state.tier, ...withRevision(revision) };
 }
 /** Owner page modes only the trusted local CLI may run. */
 const LOCAL_ONLY_MODES: ReadonlyArray<OwnerPageIntent['mode']> = ['repair_marker', 'restore_provenance'];
@@ -291,9 +327,9 @@ export async function repairPageMarker(engine: BrainEngine, input: PageActionInp
   if (!state) throw opError('page_not_found', `No live page ${ref}.`, 'Run gbrain trust backfill --repair-unknown-markers again to see the current candidates.');
   if (state.revision !== input.expectedRevision) throw changedSincePreview(ref, ACTION_NAMES.repair_marker);
   const marker = repairedMarker(state.tier);
-  await publishOwnerPage(engine, input, { mode: 'repair_marker', expected_revision: input.expectedRevision, via: input.confirmation.via },
-    markdownWithoutMarker(state.snapshot, marker), state.tier);
-  return { status: 'repaired', ref, tier: state.tier, prior_tier: state.tier, marker };
+  const revision = await publishOwnerPage(engine, input, { mode: 'repair_marker', expected_revision: input.expectedRevision, via: input.confirmation.via },
+    () => markerMarkdown(engine, state.snapshot, marker, undefined, 'trust marker repair'), state.tier);
+  return { status: 'repaired', ref, tier: state.tier, prior_tier: state.tier, marker, ...withRevision(revision) };
 }
 
 /** The markdown and tier the provenance restore writes for a page now, refused when it is not the previewed change. */
@@ -316,8 +352,9 @@ export async function restorePageProvenance(engine: BrainEngine, input: PageActi
   const intent: OwnerPageIntent = { mode: 'restore_provenance', expected_revision: input.expectedRevision, via: input.confirmation.via,
     planned: input.planned, include_ambiguous: input.includeAmbiguous === true };
   const { content, tier } = await plannedProvenanceRestore(engine, state, intent);
-  await publishOwnerPage(engine, input, intent, content, tier);
-  return { status: 'restored', ref, tier, prior_tier: state.tier };
+  // #7891 (0.60.486) provenance restore: the revision its restore left.
+  const revision = await publishOwnerPage(engine, input, intent, async () => content, tier);
+  return { status: 'restored', ref, tier, prior_tier: state.tier, ...withRevision(revision) };
 }
 
 /** The tier a version restores: its snapshot tier, `unknown` for legacy versions. */
@@ -331,22 +368,24 @@ export async function revertPageToVersion(engine: BrainEngine, input: PageAction
   if (state.revision !== input.expectedRevision) throw changedSincePreview(ref, 'the revert');
   const version = await readPageVersion(engine, state.pageId, input.versionId);
   if (!version) throw opError('not_found', `Version ${input.versionId} is not in the history of ${ref}.`, `List the page's versions with gbrain history ${input.slug} and pass one of their ids to --version.`);
+  assertRevertableVersion(state.snapshot, version, input.slug);
   const tier = versionTier(version);
-  await publishOwnerPage(engine, input, { mode: 'revert', expected_revision: input.expectedRevision, version_id: input.versionId, via: input.confirmation.via, proposal: input.proposal },
-    versionMarkdown(state.snapshot, version), tier);
-  return { status: 'reverted', ref, tier, prior_tier: state.tier, version_id: input.versionId };
+  const revision = await publishOwnerPage(engine, input, { mode: 'revert', expected_revision: input.expectedRevision, version_id: input.versionId, via: input.confirmation.via, proposal: input.proposal },
+    async () => versionMarkdown(state.snapshot, version), tier);
+  return { status: 'reverted', ref, tier, prior_tier: state.tier, version_id: input.versionId, ...withRevision(revision) };
 }
 
 /**
  * Publishes an owner page write at `tier`. A content rewrite by an owner-tier
  * writer restamps the page (CEO-12); user_confirmed needs the promotion
  * ceiling, and a lower restored tier lowers it (min with the prior tier).
+ * governedwork fork (F15): answers the page's revision as the write left it: read in the write's own transaction after
+ * the write (and its write-through and proposal close), or, managed, the publication receipt's.
  */
-async function publishOwnerPage(engine: BrainEngine, input: PageActionInput, intent: OwnerPageIntent, markdown: string, tier: TrustTier): Promise<void> {
-  if (await managed(engine)) {
-    await submitOwnerPage(engine, input, intent);
-    return;
-  }
+async function publishOwnerPage(engine: BrainEngine, input: PageActionInput, intent: OwnerPageIntent, content: () => Promise<string>, tier: TrustTier): Promise<string | undefined> {
+  // F16: the markdown is built only on the put path; a managed brain's preparer builds (or flips) its own.
+  if (await managed(engine)) return submitOwnerPage(engine, input, intent);
+  const markdown = await content();
   const { importFromContent } = await import('../import-file.ts');
   const attribution = await attributionFor(engine, input.by);
   const trust = ownerTrust(tier, intent.mode, intent.via);
@@ -362,6 +401,7 @@ async function publishOwnerPage(engine: BrainEngine, input: PageActionInput, int
   // #7960: the file is written (and on a hardened checkout committed) inside the transaction, Git first; when the
   // database commit then fails, the file and its commit are put back so a failed apply leaves both sides unchanged.
   let rendered = null as WriteThroughResult | null;
+  let revision: string | undefined;
   try {
     await engine.transaction(tx => withWriteAttribution(tx, { ...attribution, trust }, () => withTrustPromotion(tx, tier, () =>
       withTrustKeep(tx, FENCE_TABLES, async () => {
@@ -382,11 +422,13 @@ async function publishOwnerPage(engine: BrainEngine, input: PageActionInput, int
           rendered = written;
         }
         await closeProposal(tx, intent.proposal, input.by);
+        revision = await revisionIn(tx, input.sourceId, input.slug);
       }))));
   } catch (error) {
     if (rendered?.path && file?.ok && file.target) await restoreOwnerRepairFile(engine, input, file.target, rendered);
     throw error;
   }
+  return revision;
 }
 
 /**
@@ -441,8 +483,8 @@ export async function ownerRepairFile(engine: BrainEngine, sourceId: string, slu
   return file.ok ? { ok: true, target: { expectedFileBytes: file.expectedFileBytes, writeRoot: resolved.target.writeRoot } } : { ok: false, reason: 'file_database_drift' };
 }
 
-/** Admits the journaled owner page mutation and waits for its publication (the decide_proposal precedent). */
-async function submitOwnerPage(engine: BrainEngine, input: PageActionInput, intent: OwnerPageIntent): Promise<void> {
+/** Admits the journaled owner page mutation and waits for its publication (the decide_proposal precedent); answers the receipt's revision. */
+async function submitOwnerPage(engine: BrainEngine, input: PageActionInput, intent: OwnerPageIntent): Promise<string | undefined> {
   const { initializeLocalPersistence, requestPrincipalForContext } = await import('../persistence/page-mutations.ts');
   const { submissionAuthority } = await import('../persistence/authority.ts');
   const { admitWrite } = await import('../persistence/journal.ts');
@@ -465,7 +507,8 @@ async function submitOwnerPage(engine: BrainEngine, input: PageActionInput, inte
     pageId: snapshot?.page.id ?? null, requestId: randomUUID(), callerIntent: intent, intent, authority,
     worktreeId: binding?.worktree_id ?? null, topologyGeneration: binding?.topology_generation ?? null,
   });
-  writeResponse(await waitForWrite(engine, row, config, 30_000));
+  const receipt = writeResponse(await waitForWrite(engine, row, config, 30_000));
+  return typeof receipt.revision === 'string' ? receipt.revision : undefined;
 }
 
 /**
@@ -485,26 +528,33 @@ export async function prepareTrustOwnerPageMutation(engine: BrainEngine, row: Wr
   const ref = pageRef(row.source_id, row.slug);
   const state = await readPageTrustState(engine, row.source_id, row.slug);
   if (!state || state.revision !== intent.expected_revision) throw changedSincePreview(ref, ACTION_NAMES[intent.mode]);
-  let content: string;
+  // F16: content is set only by the modes that rewrite the body (revert, restore_provenance); the marker and label modes
+  // change frontmatter alone.
+  let content: string | undefined;
   let tags: string[] | undefined;
   let tier: TrustTier = 'user_confirmed';
   if (intent.mode === 'revert') {
     const version = Number.isSafeInteger(intent.version_id) ? await readPageVersion(engine, state.pageId, intent.version_id!) : null;
     if (!version) throw opError('not_found', `Version ${String(intent.version_id)} is not in the history of ${ref}.`, `List versions with gbrain history ${row.slug}.`);
+    assertRevertableVersion(state.snapshot, version, row.slug);
     content = versionMarkdown(state.snapshot, version);
     tags = version.tags ?? undefined;
     tier = versionTier(version);
-  } else if (intent.mode === 'repair_marker') {
-    tier = state.tier;
-    content = markdownWithoutMarker(state.snapshot, repairedMarker(tier));
-  } else if (intent.mode === 'restore_provenance') ({ content, tier } = await plannedProvenanceRestore(engine, state, intent));
-  else if (intent.mode === 'write_labels') {
-    tier = minTrust(intent.tier!, state.tier);
-    content = markdownWithoutMarker(state.snapshot, repairedMarker(tier), intent.labels);
-  } else content = markdownWithoutMarker(state.snapshot, null, intent.labels);
+  } else if (intent.mode === 'repair_marker') tier = state.tier;
+  else if (intent.mode === 'restore_provenance') ({ content, tier } = await plannedProvenanceRestore(engine, state, intent));
+  else if (intent.mode === 'write_labels') tier = minTrust(intent.tier!, state.tier);
+  const marker = intent.mode === 'repair_marker' || intent.mode === 'write_labels' ? repairedMarker(tier) : null;
   // The request keeps its own operation, so page-prepare stamps no CEO-21 marker and files no lower_page item for it.
-  const { preparePageMutation } = await import('../persistence/page-prepare.ts');
-  const page = await preparePageMutation(engine, row, config, { content, expectedRevision: intent.expected_revision, ...(tags ? { tags } : {}) });
+  const { preparePageMutation, prepareSegmentedMetadataMutation } = await import('../persistence/page-prepare.ts');
+  // governedwork fork (F16): a marker or label change on a segmented page is a frontmatter flip over its live segments, at
+  // any size (the tag flip of spec 6.4): the body is never read whole; the labels (readable_by included) land in the
+  // frontmatter, whose trigger derives page_readers, and the page's label guard (page_label_guards) is keyed by the page
+  // and stays. Null (a writer whose gate scans the whole body) takes the put path.
+  const flipped = content === undefined && isSegmentedPage(state.snapshot.page)
+    ? await prepareSegmentedMetadataMutation(engine, row, state.snapshot, { frontmatter: frontmatterWithMarker(state.snapshot, marker, intent.labels) }) : null;
+  const page = flipped ?? await preparePageMutation(engine, row, config, {
+    content: content ?? await markerMarkdown(engine, state.snapshot, marker, intent.labels, ACTION_NAMES[intent.mode]),
+    expectedRevision: intent.expected_revision, ...(tags ? { tags } : {}) });
   const apply = page.apply;
   page.trust = ownerTrust(tier, intent.mode, intent.via);
   page.apply = (tx, preimage) => withTrustPromotion(tx, tier, () => withTrustKeep(tx, FENCE_TABLES, async () => {

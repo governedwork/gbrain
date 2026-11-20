@@ -13,6 +13,7 @@ op	storage_register	coordinator	submitPageMutation through the storage door (tru
 op	storage_update	coordinator	submitPageMutation through the storage door bound to expected_revision (trusted local only); on a hosted shelf the change commits before it is indexed.
 op	delete_page	coordinator	submitPageMutation soft delete or trusted-local purge.
 op	restore_page	coordinator	submitPageMutation restores a recorded version.
+op	rename_page	coordinator	submitPageMutation admits a journaled rename; prepareRenameMutation moves the row with updateSlug inside publication under both page keys.
 op	purge_deleted_pages	coordinator	purgeDeletedPagesCoordinated purges each expired tombstone through delete_page purge.
 op	promote_guest_note	coordinator	Writes the owner page through submitPageMutation put_page and records the link in guest_promotions; the guest note is never changed.
 op	capture	coordinator	submitPageMutation admits a journaled page mutation.
@@ -78,6 +79,7 @@ op	forget_fact	coordinator	submitForgetMutation records a coordinated fact withd
 op	code_traversal_cache_clear	no_canonical_write	Derived traversal cache only.
 op	migrate_embeddings	no_canonical_write	Embedding projections under the migration budget; no canonical content.
 op	schema_apply_mutations	no_canonical_write	Schema-pack files outside the brain database.
+op	put_schema_pack	no_canonical_write	Ours (governedwork fork): a brain-resident pack revision in schema_pack_revisions/schema_pack_heads, outside the guarded canonical tables.
 op	run_onboard	no_canonical_write	Runs remediation steps; each step keeps its own writer boundary.
 op	run_skillopt	no_canonical_write	Skill files and proposals outside the brain database.
 op	loops_close	coordinator	open_loops state rows; the commitment fact is retired (expired, fence row struck) through the loop-fact-retirement coordinator mutation (#5869).
@@ -92,6 +94,7 @@ op	loops_unmute	no_canonical_write	Loop suppression rows.
 op	rate_answer	no_canonical_write	Writes only retrieval_* feedback tables (answer ratings and learned weights), never a guarded canonical table or file.
 op	purge_fact	coordinator	submitPurgeFactMutation admits a journaled write and deletes the purged rows under withCoordinatedWrite (trusted local CLI only).
 op	unpurge_page	no_canonical_write	Deletes only purge tombstone rows (page_purges, fact_purges, take_purges); restores no canonical row (trusted local CLI only).
+op	prune_page_versions	coordinator	Deletes page_versions rows of one page (an unguarded table), marks the kept predecessor successor_pruned and the page's version_history_gap_at (markPrunedHistory), and records their revisions in page_version_prunes; a pruned segmented version's manifest rows and texts are swept under withCoordinatedWrite for the page's source (trusted local CLI only).
 op	confirm_memory	coordinator	applyOwnerAction raises the row to user_confirmed through the owner action path (journaled owner page mutation or withCoordinatedWrite on a managed brain).
 cli	src/commands/enrich.ts	coordinator	gbrain enrich preflights maintenance authority, then publishMaintenancePage per page.
 cli	src/commands/extract-conversation-facts.ts	coordinator	Bulk conversation facts publish in batches of pages as receipted managed_maintenance_conversation_facts requests after a maintenance preflight.

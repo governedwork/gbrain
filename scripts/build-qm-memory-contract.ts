@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * GST-359 D: docs/contracts/qm-memory-provider/v1.json to v5.json, the QM memory-provider contracts, generated from the
+ * GST-359 D: docs/contracts/qm-memory-provider/v1.json to v6.json, the QM memory-provider contracts, generated from the
  * live operation registry, the actor model and the error catalogue. test/qm-memory-contract.test.ts fails on drift.
  *   bun scripts/build-qm-memory-contract.ts          write every fixture
  *   bun scripts/build-qm-memory-contract.ts --check  exit 1 when a committed fixture is stale
@@ -10,6 +10,8 @@
  * among them, and each memory_recall fact's arm (F5). GST-2407 v4 adds memory_propose (an owner-approved write on a shared
  * page) with its proposal receipt, the E1 scope_read marking on each personal tool, and each memory_recall fact's own_page.
  * GST-2407 v5 marks context_pack scope_read: a call that names its source reads only that source as its audience.
+ * Ours (governedwork fork, F5): v6 publishes volunteer_context as served with the fork's hook shape (`format`) and its
+ * per-session dedupe (session_id's description); v3 to v5 keep the volunteer_context they published.
  */
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -25,13 +27,14 @@ import { IDEMPOTENCY_KEY_RE, MEMORY_RECALL_MAX_CHARS, MEMORY_RECALL_QUERY_CHARS,
 import { WRITE_REQUEST_STATES } from '../src/core/persistence/types.ts';
 import { TERMINAL_STATES } from '../src/core/persistence/model.ts';
 
-export type QmContractVersion = 1 | 2 | 3 | 4 | 5;
+export type QmContractVersion = 1 | 2 | 3 | 4 | 5 | 6;
 export const QM_CONTRACT_PATHS: Record<QmContractVersion, string> = {
   1: join(import.meta.dir, '..', 'docs', 'contracts', 'qm-memory-provider', 'v1.json'),
   2: join(import.meta.dir, '..', 'docs', 'contracts', 'qm-memory-provider', 'v2.json'),
   3: join(import.meta.dir, '..', 'docs', 'contracts', 'qm-memory-provider', 'v3.json'),
   4: join(import.meta.dir, '..', 'docs', 'contracts', 'qm-memory-provider', 'v4.json'),
   5: join(import.meta.dir, '..', 'docs', 'contracts', 'qm-memory-provider', 'v5.json'),
+  6: join(import.meta.dir, '..', 'docs', 'contracts', 'qm-memory-provider', 'v6.json'), // ours (governedwork fork, F5)
 };
 export const QM_CONTRACT_PATH = QM_CONTRACT_PATHS[1];
 /** The personal tools v4 marks scope_read, frozen: context_pack is marked from v5 on. */
@@ -40,13 +43,24 @@ const V4_SCOPE_READ_OPS: ReadonlySet<string> = new Set(['entity', 'find_experts'
 const V1_PARAMS: Record<string, readonly string[]> = { memory_recall: ['query', 'max_chars', 'acting_user'], memory_write: ['facts', 'idempotency_key', 'acting_user'] };
 /** The arguments v2 publishes per tool, frozen: #8694's query_keep appears from v3 on. */
 const V2_PARAMS: Record<string, readonly string[]> = { memory_recall: [...V1_PARAMS.memory_recall!, 'source_id', 'source_ids'], memory_write: [...V1_PARAMS.memory_write!, 'source_id'] };
+/**
+ * Ours (governedwork fork, F5): the personal-tool arguments, and argument descriptions, v3 to v5 published before the
+ * fork changed them, frozen. The fork's volunteer_context takes `format` (output-format.ts) and dedupes per session
+ * (session_id's description says so); a published version never changes, so both appear from v6 on.
+ */
+const V3_TO_V5_PARAMS: Record<string, readonly string[]> = {
+  volunteer_context: ['window', 'prior_context', 'max_pages', 'min_trust', 'min_confidence', 'session_id', 'turn', 'stats', 'days', 'source_ids'],
+};
+const V3_TO_V5_PARAM_DESCRIPTIONS: Record<string, Record<string, string>> = {
+  volunteer_context: { session_id: 'Optional caller session id, logged for attribution.' },
+};
 /** The deferred operations v1 published, frozen: GST-1158 F9 deferred more from v2 on. */
 const V1_DEFERRED_OPS: readonly string[] = ['capture', 'extract_facts', 'list_write_conflicts', 'takes_add', 'takes_resolve', 'takes_supersede', 'takes_update'];
 /**
  * Operations deferred after v5 was published (GBRA-504 promote_guest_note). A published version never changes, so v1 to
  * v5 leave them out and every later version lists them; an attested call is refused them either way.
  */
-const DEFERRED_AFTER_V5: ReadonlySet<string> = new Set(['promote_guest_note']);
+const DEFERRED_AFTER_V5: ReadonlySet<string> = new Set(['promote_guest_note', 'rename_page' /* ours (governedwork fork, F1): deferred on the fork line */]);
 /** Catalogue summaries v1 published before they changed, frozen. */
 const V1_SUMMARIES: Record<string, string> = {
   actor_not_attested: "A call named the person it serves (the x-qm-actor header or the acting_user argument) in a way gbrain does not honour: the credential holds no attest right, the operation is not in its attested operations, the argument differs from the header or comes without an attested header, or the id is not 1-256 visible ASCII characters; or a write that saves only as an attested person (memory_write) named none; or the request carries x-qm-audience, a channel audience gbrain does not serve yet. Nothing was read or written.",
@@ -169,8 +183,11 @@ const V2_REASON_FIXES: Partial<typeof ACTOR_REASON_FIXES> = {
 function toolEntry(name: string, version: QmContractVersion) {
   const op = operations.find(o => o.name === name);
   if (!op) throw new Error(name + ' is not in the operation registry');
-  const frozen = version === 1 ? V1_PARAMS[name] : version === 2 ? V2_PARAMS[name] : undefined;
-  const params = Object.entries(op.params).filter(([k]) => !frozen || frozen.includes(k));
+  const v3ToV5 = version >= 3 && version <= 5;
+  const frozen = version === 1 ? V1_PARAMS[name] : version === 2 ? V2_PARAMS[name] : v3ToV5 ? V3_TO_V5_PARAMS[name] : undefined;
+  const descriptions = v3ToV5 ? V3_TO_V5_PARAM_DESCRIPTIONS[name] ?? {} : {};
+  const params = Object.entries(op.params).filter(([k]) => !frozen || frozen.includes(k))
+    .map(([k, v]) => [k, descriptions[k] === undefined ? v : { ...v, description: descriptions[k] }] as const);
   return {
     name, description: op.description, scope: op.scope ?? 'read', mutating: op.mutating === true,
     input_schema: { type: 'object', properties: Object.fromEntries(params.map(([k, v]) => [k, paramDefToSchema(v)])),
@@ -326,7 +343,7 @@ export function renderQmMemoryContract(version: QmContractVersion): string {
 
 if (import.meta.main) {
   let stale = false;
-  for (const version of [1, 2, 3, 4, 5] as const) {
+  for (const version of [1, 2, 3, 4, 5, 6] as const) {
     const path = QM_CONTRACT_PATHS[version];
     const fresh = renderQmMemoryContract(version);
     if (process.argv.includes('--check')) {

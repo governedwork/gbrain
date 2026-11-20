@@ -79,4 +79,37 @@ const unpurge_page: Operation = {
   cliHints: { name: 'unpurge-page', hidden: true },
 };
 
-export const purgeOperations: Operation[] = [purge_fact, list_page_purges, unpurge_page];
+/**
+ * Ours (governedwork fork, ledger L144): an owner prune of a page's version history short of a page purge. A page
+ * rewritten in place keeps removed text in its versions; this drops chosen versions (or all but the newest N) and
+ * leaves the live page as it is. Dry run unless `yes: true`.
+ */
+const prune_page_versions: Operation = {
+  name: 'prune_page_versions',
+  // A replay of a pruned id answers not_found: the versions are gone, so the call is not idempotent.
+  idempotent: false,
+  outputRedaction: 'no_stored_text',
+  description: 'Owner-only, trusted local CLI on the brain host (`gbrain history prune <slug> --keep <n>`, or `--version <id>` instead of `--keep`). Deletes versions from a page\'s history, by id or all but the newest keep, so text a rewrite removed leaves get_versions; the live page is unchanged. A version an open trust proposal or overwritten-edit restore still needs is kept and listed in held. Segment text only the pruned versions held is released for the regular segment sweep. A dry run (the default) lists the version ids it would prune; yes: true prunes. Returns pruned (versions deleted), the ids and held.',
+  params: {
+    slug: { type: 'string', required: true, description: 'Slug of the page whose history to prune.' },
+    source_id: { type: 'string', description: 'Source of the page (default: the routed source).' },
+    version_ids: { type: 'array', items: { type: 'number' }, description: 'Version ids to prune (from get_versions). Exactly one of version_ids or keep.' },
+    keep: { type: 'number', description: 'Prune all but the newest keep versions (0 prunes the whole history). Exactly one of version_ids or keep.' },
+    dry_run: { type: 'boolean', description: 'List the versions that would be pruned and change nothing (the default unless yes is true).' },
+    yes: { type: 'boolean', description: 'Confirm the prune: true deletes the versions; pruned versions cannot be restored.' },
+  },
+  mutating: true,
+  scope: 'admin',
+  // The refusal names the dry run (it prints the ids and prunes nothing); the user adds --yes after reading it.
+  cliOnly: { argv: ['gbrain', 'history', 'prune', '<slug>', '--keep', '<keep>'],
+    argvWhen: { version_ids: ['gbrain', 'history', 'prune', '<slug>', '--version', '<version_id>'] } },
+  handler: async (ctx, p) => {
+    if (ctx.remote !== false) throw (await import('./callable.ts')).cliOnlyRefusal(prune_page_versions, p);
+    const { runPrunePageVersions } = await import('../page-state/version-prune.ts');
+    return runPrunePageVersions(ctx, p);
+  },
+  area: 'pages',
+  cliHints: { name: 'prune-page-versions', hidden: true },
+};
+
+export const purgeOperations: Operation[] = [purge_fact, list_page_purges, unpurge_page, prune_page_versions];

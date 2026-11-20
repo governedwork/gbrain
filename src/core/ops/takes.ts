@@ -11,6 +11,7 @@ import { MERGE_PRECONDITION_PARAMS, WRITE_REQUEST_PARAM } from '../persistence/p
 import { opError, type Operation, type OperationContext } from './contract.ts';
 import { MIN_TRUST_PARAM, resolveReadEligibility } from '../eligibility/policy.ts';
 import { stampRowTrust } from '../eligibility/stamp.ts';
+import { withContestedTakeIds } from '../takes-contested.ts';
 import { fenceTranscriptText, quotesTier, unquoteTranscriptText } from '../search/transcript-quote.ts';
 import { opTransport, paramUse } from './op-fix.ts';
 import {
@@ -22,6 +23,7 @@ import {
   validatePageSlug,
 } from './context.ts';
 import { embedQueryWithPrefix } from '../search/query-prefix.ts';
+import { parseWholePages } from '../think/whole-pages.ts';
 import { ALL_SOURCES } from '../source-id.ts';
 import { privatePagesFilterForCaller } from '../search/private-visibility.ts';
 import { keepRoomEvidence } from '../access/room.ts';
@@ -89,6 +91,7 @@ const takes_list: Operation = {
   description: 'List takes (typed/weighted/attributed claims) filtered by holder/kind/active/etc.',
   scope: 'read',
   params: {
+    id: { type: 'number', description: 'This one take (its id as takes_list answers it); the other filters still apply' },
     page_slug: { type: 'string', description: 'Filter to this page' },
     holder: { type: 'string', description: 'Filter to this holder (world|garry|brain|<slug>)' },
     kind: { type: 'string', description: 'Filter to this kind (fact|take|bet|hunch)' },
@@ -100,10 +103,16 @@ const takes_list: Operation = {
     min_trust: MIN_TRUST_PARAM,
   },
   handler: async (ctx, p) => {
+    if (p.id !== undefined && p.id !== null && !(typeof p.id === 'number' && Number.isSafeInteger(p.id) && p.id > 0)) {
+      throw opError('invalid_params', 'takes_list: id must be a positive integer (a take id as takes_list answers it).', 'Pass id as a whole number, e.g. 42, or omit it to list takes.');
+    }
     const eligibility = await resolveReadEligibility(ctx, { minTrust: p.min_trust });
+    // #2200-class: honor federated/source scope (via the take's page.source_id). Per-token holder allow-list: a
+    // server-side filter for MCP-bound calls; local CLI callers leave it unset and see all holders.
+    const policy = { ...await readPolicyOpts(ctx), takesHoldersAllowList: readHolders(ctx), eligibility };
     const rows = await ctx.engine.listTakes({
-      // #2200-class: honor federated/source scope (via the take's page.source_id).
-      ...await readPolicyOpts(ctx),
+      ...policy,
+      ...(typeof p.id === 'number' ? { id: p.id } : {}),
       page_slug: p.page_slug as string | undefined,
       holder: p.holder as string | undefined,
       kind: p.kind as never,
@@ -112,12 +121,9 @@ const takes_list: Operation = {
       sortBy: p.sort_by as never,
       limit: p.limit as number | undefined,
       offset: p.offset as number | undefined,
-      // Per-token allow-list — server-side filter for MCP-bound calls.
-      // Local CLI callers leave takesHoldersAllowList unset and see all holders.
-      takesHoldersAllowList: readHolders(ctx),
-      eligibility,
     });
-    return quoteTakes(ctx, await stampRowTrust(ctx.engine, 'takes', rows, r => r.id));
+    // Fork: a contested take names its proposal's other take (take_id) only when this caller reads it (takes-contested.ts).
+    return quoteTakes(ctx, await withContestedTakeIds(ctx.engine, await stampRowTrust(ctx.engine, 'takes', rows, r => r.id), policy));
   },
   cliHints: { name: 'takes-list' },
 };
@@ -332,6 +338,10 @@ const think: Operation = {
     since: { type: 'string', description: 'Start of temporal window (YYYY-MM-DD or YYYY-MM). Omit both bounds and a question naming one explicit date (2026-09-15, 2026-09, September 2026) is bounded to it; the result says window_source.' },
     until: { type: 'string', description: 'End of temporal window' },
     reference_date: { type: 'string', description: 'YYYY-MM-DD the question\'s relative time words resolve against (default: today in brain.timezone).' },
+    whole_pages: { type: 'array', items: { type: 'string' }, description: 'Up to 5 page slugs (usually the anchor) to read in full and put first, within token_budget (default 24000; remote max 32000). The response\'s evidence_pages says for every page in the prompt whether it reached the model whole, as an excerpt, or not at all — about the inspected evidence, not the whole brain.' },
+    return_unit: { type: 'string', enum: ['chunk', 'window', 'section', 'page', 'auto'], description: "Evidence unit for the gathered pages, as query takes it (default: the think.return_unit config, else 'auto')." },
+    return_window: { type: 'number', description: 'Neighbor chunks each side for window (1-3).' },
+    token_budget: { type: 'number', description: 'Token budget for the delivered evidence (remote max 32000); also bounds whole_pages.' },
   },
   // Local CLI can persist with save/take; remote/MCP callers are forced
   // read-only below before runThink/persistSynthesis sees those flags.
@@ -349,6 +359,7 @@ const think: Operation = {
     const thinkScope = thinkSourceScopeOpts(ctx);
     const requestedModel = p.model ? String(p.model) : undefined;
     const thinkModel = remote ? await remoteThinkModel(ctx.engine, requestedModel) : { model: requestedModel };
+    const wholePages = parseWholePages(p.whole_pages);
     const { runThink, persistSynthesis } = await import('../think/index.ts');
     const result = await runThink(ctx.engine, {
       question: String(p.question),
@@ -365,6 +376,10 @@ const think: Operation = {
       since: p.since ? String(p.since) : undefined,
       until: p.until ? String(p.until) : undefined,
       ...(typeof p.reference_date === 'string' ? { referenceDate: p.reference_date } : {}),
+      ...(p.return_unit !== undefined ? { returnUnit: p.return_unit } : {}),
+      ...(p.return_window !== undefined ? { returnWindow: p.return_window } : {}),
+      ...(p.token_budget !== undefined ? { tokenBudget: p.token_budget } : {}),
+      ...(wholePages ? { wholePages } : {}),
       takesHoldersAllowList: readHolders(ctx),
       ...thinkScope,
       excludePrivate: (await readPolicyOpts(ctx)).excludePrivate,

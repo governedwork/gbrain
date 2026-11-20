@@ -31,6 +31,8 @@ import { join } from 'node:path';
 import { collectMigration } from '../src/core/advisor/collect-migration.ts';
 import { collectUninstalledBrainPack } from '../src/core/advisor/collect-uninstalled-brain-pack.ts';
 import { LATEST_VERSION } from '../src/core/migrate.ts';
+import { FORK_SCHEMA_EPOCH } from '../src/core/fork-schema-epoch.generated.ts';
+import { FORK_SCHEMA_EPOCH_KEY } from '../src/core/fork-schema.ts';
 import { saveState, SKILLPACK_STATE_SCHEMA_VERSION, type SkillpackStateEntry } from '../src/core/skillpack/state.ts';
 import { saveNagState, SKILLPACK_NAG_SCHEMA_VERSION, DEFAULT_NAG_CEILING, type NagEntry } from '../src/core/skillpack/nag-state.ts';
 import { deriveBrainId } from '../src/core/skillpack/brain-resident-locate.ts';
@@ -54,7 +56,8 @@ function ctx(engine: unknown, over: Partial<AdvisorContext> = {}): AdvisorContex
 describe('collect-migration', () => {
   function versionEngine(version: string | null): BrainEngine {
     return {
-      getConfig: async (key: string) => (key === 'version' ? version : null),
+      // Ours (governedwork fork): a brain this build migrated also carries its fork schema stamp.
+      getConfig: async (key: string) => (key === 'version' ? version : key === FORK_SCHEMA_EPOCH_KEY ? FORK_SCHEMA_EPOCH : null),
     } as unknown as BrainEngine;
   }
 

@@ -34,6 +34,8 @@ export const ACTOR_DEFERRED_OPS: ReadonlySet<string> = new Set([
   'takes_add', 'takes_update', 'takes_resolve', 'takes_supersede',
   'add_timeline_entry', 'add_link', 'remove_link', 'add_tag', 'remove_tag',
   'put_page', 'put_pages', 'edit_page', 'append_page', 'delete_page', 'restore_page', 'revert_version',
+  // Ours (governedwork fork): rename_page (F1) moves a page's slug every reader of it sees; a page write.
+  'rename_page',
   'begin_page_upload', 'upload_page_part', 'commit_page_upload', 'abort_page_upload',
   'put_raw_data', 'extract_entities', 'questions_pin', 'questions_refresh', 'questions_unpin',
   'rate_answer', 'log_ingest', 'loops_mute', 'loops_unmute',

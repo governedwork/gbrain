@@ -64,6 +64,78 @@ describe('hasPendingMigrations', () => {
       }
     });
   }, 30000);
+
+  // Ours (governedwork fork): the brain-resident schema pack tables reach a brain only through the schema
+  // blob replay, and the replay ran only when upstream's version number was behind. A brain an upstream
+  // binary created at the same LATEST_VERSION has neither the tables nor the fork's stamp.
+  test('L102: an upstream-created brain at LATEST_VERSION without the fork tables reports pending migrations, and migrating creates them', async () => {
+    const { tryRunPendingMigrations } = await import('../src/core/migrate.ts');
+    const { operationsByName } = await import('../src/core/operations.ts');
+    const { SCHEMA_PACK_API_VERSION } = await import('../src/core/schema-pack/manifest-v1.ts');
+    const { _resetBrainResidentPacksForTests } = await import('../src/core/schema-pack/db-store.ts');
+    const { _resetPackCacheForTests } = await import('../src/core/schema-pack/registry.ts');
+    const engine = new PGLiteEngine();
+    // Cold: a snapshot-loaded test engine skips initSchema, so it could not show the replay that heals the brain.
+    await withColdPglite(() => engine.connect({}));
+    _resetBrainResidentPacksForTests();
+    _resetPackCacheForTests();
+    try {
+      await engine.initSchema();
+      // Simulate the upstream-created brain: same schema version, no fork tables, no fork stamp.
+      await engine.executeRaw("DELETE FROM config WHERE key = 'fork_schema_epoch'");
+      await engine.executeRaw('DROP TABLE schema_pack_heads');
+      await engine.executeRaw('DROP TABLE schema_pack_revisions');
+      expect(await engine.getConfig('version')).toBe(String(LATEST_VERSION));
+      const tables = async () => (await engine.executeRaw<{ heads: boolean; revisions: boolean }>(
+        "SELECT to_regclass('public.schema_pack_heads') IS NOT NULL AS heads, to_regclass('public.schema_pack_revisions') IS NOT NULL AS revisions"))[0];
+      expect(await tables()).toEqual({ heads: false, revisions: false });
+
+      expect(await hasPendingMigrations(engine)).toBe(true);
+
+      // The connect path (completeEngineStartup) runs exactly this when the probe says pending.
+      expect((await tryRunPendingMigrations(engine)).status).toBe('ok');
+      expect(await tables()).toEqual({ heads: true, revisions: true });
+      expect(await engine.getConfig('fork_schema_epoch')).toBeTruthy();
+      expect(await hasPendingMigrations(engine)).toBe(false);
+
+      // And a pack publish works on the healed brain.
+      const ctx = { engine, config: {}, logger: { info() {}, warn() {}, error() {} }, dryRun: false, remote: false, sourceId: 'default' } as never;
+      const manifest = {
+        api_version: SCHEMA_PACK_API_VERSION, name: 'healed-pack', version: '0.1.0', description: '', gbrain_min_version: '0.38.0',
+        extends: 'gbrain-base', borrow_from: [],
+        page_types: [{ name: 'client', primitive: 'entity', path_prefixes: ['clients/'], aliases: [], extractable: false, expert_routing: false }],
+        link_types: [], frontmatter_links: [], takes_kinds: ['fact', 'take', 'bet', 'hunch'], enrichable_types: [], filing_rules: [],
+      };
+      const published = await operationsByName.put_schema_pack!.handler(ctx, { name: 'healed-pack', manifest, expected_revision: null }) as { revision: string };
+      const [head] = await engine.executeRaw<{ revision: string }>("SELECT revision::text AS revision FROM schema_pack_heads WHERE name = 'healed-pack'");
+      expect(head?.revision).toBe(published.revision);
+    } finally {
+      _resetBrainResidentPacksForTests();
+      _resetPackCacheForTests();
+      await engine.disconnect();
+    }
+  }, 60000);
+
+  test('L102: the fork schema stamp keeps every build that replayed it, so builds sharing a brain do not replay each other on every connect', async () => {
+    const { tryRunPendingMigrations } = await import('../src/core/migrate.ts');
+    const { FORK_SCHEMA_EPOCH } = await import('../src/core/fork-schema-epoch.generated.ts');
+    const engine = new PGLiteEngine();
+    await withColdPglite(() => engine.connect({}));
+    try {
+      await engine.initSchema();
+      // Another fork build (a rollback target, the other side of a rolling deploy) stamped the brain last.
+      await engine.setConfig('fork_schema_epoch', 'another-build');
+      expect(await hasPendingMigrations(engine)).toBe(true);
+      expect((await tryRunPendingMigrations(engine)).status).toBe('ok');
+      expect((await engine.getConfig('fork_schema_epoch'))!.split(',').sort()).toEqual(['another-build', FORK_SCHEMA_EPOCH].sort());
+      expect(await hasPendingMigrations(engine)).toBe(false);
+      // A newer build then replays its own blob and adds its epoch: this build still finds its own and stays put.
+      await engine.setConfig('fork_schema_epoch', `${FORK_SCHEMA_EPOCH},a-newer-build`);
+      expect(await hasPendingMigrations(engine)).toBe(false);
+    } finally {
+      await engine.disconnect();
+    }
+  }, 60000);
 });
 
 // ─────────────────────────────────────────────────────────────────

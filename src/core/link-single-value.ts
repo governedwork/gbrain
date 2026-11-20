@@ -57,7 +57,9 @@ export async function declaredSingleValueTypes(engine: BrainEngine, sourceId: st
     return new Set(pack.manifest.link_types
       .filter(lt => lt.cardinality === 'one_per_from' && (lt.temporal ?? RELATION_SEMANTICS[lt.name]) === 'state')
       .map(lt => lt.name));
-  } catch {
+  } catch (err) {
+    // Ours (governedwork fork): an unreadable pack store is not "no pack" (db-store.ts isPackStoreFailure).
+    if ((await import('./schema-pack/db-store.ts')).isPackStoreFailure(err)) throw err;
     return new Set();
   }
 }

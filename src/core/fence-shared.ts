@@ -119,6 +119,31 @@ export function stripStrikethrough(s: string): { text: string; struck: boolean }
   return { text: s, struck: false };
 }
 
+const PERCENT_CELL_RE = /^\s*([+-]?(?:\d+(?:\.\d+)?|\.\d+))\s*%\s*$/;
+
+/**
+ * A whole-cell percent (`50%`, `50 %`): its value in hundredths (0.5), or
+ * null when the cell is not one. The one percent reader: the takes weight
+ * (`parseWeightCell`) and fence repair's `confidence_format` read it, so a
+ * cell repair would rewrite as 0.5 is the cell the parser reads as 0.5.
+ */
+export function percentCellValue(text: string): number | null {
+  const percent = PERCENT_CELL_RE.exec(text);
+  return percent ? Number(percent[1]) / 100 : null;
+}
+
+/**
+ * A takes weight cell. A whole-cell percent reads as hundredths (`50%` is
+ * 0.5; parseFloat alone read its prefix, 50, and the next takes write
+ * rendered the row back as `50.0`). Every other shape reads exactly as
+ * parseFloat reads it (`0.7 (high)` is 0.7), so a row an earlier hand edit
+ * wrote stays readable: a rebuild, a purge overlay and the fence check keep
+ * it. Used by the takes parser and the take extractor's dedup read.
+ */
+export function parseWeightCell(raw: string): number {
+  return percentCellValue(raw) ?? parseFloat(raw);
+}
+
 /**
  * Trim a cell's surrounding whitespace and collapse empty / whitespace-only
  * cells to `undefined`. The `''` → `undefined` mapping is what callers want

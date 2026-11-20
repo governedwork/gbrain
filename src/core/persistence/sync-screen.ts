@@ -28,7 +28,7 @@ import { QUOTE_SCREEN_VERSION } from '../fence-repair/quote-markers.ts';
 import { fenceFileLine } from '../fence-repair/hold-fix.ts';
 import { slugConflictHoldMessage } from '../import-file.ts';
 import { isImageFilePath, isMultimodalEnabled, resolveSlugForPath } from '../sync.ts';
-import { loadActivePackForEngine } from '../schema-pack/engine-resolution.ts';
+import { loadActivePackForEngineOrNull } from '../schema-pack/engine-resolution.ts';
 import { VERSION } from '../../version.ts';
 import { digest, sha256 } from './digest.ts';
 import { readPageBodyPolicy, type PageBodyPolicy } from '../page-body/limits.ts';
@@ -56,7 +56,7 @@ export interface SyncScreenRun { policy: SyncHoldPolicy; sanity: ImportSanityCon
 export async function loadSyncScreenRun(engine: BrainEngine, sourceId: string, processingOptions: SyncProcessingOptions | undefined, remote: boolean): Promise<SyncScreenRun | null> {
   const policy = await readSyncHoldPolicy(engine);
   if (policy.mode === 'fail') return null;
-  const activePack = processingOptions?.noSchemaPack ? undefined : (await loadActivePackForEngine(engine, { remote, sourceId }).catch(() => null))?.manifest;
+  const activePack = processingOptions?.noSchemaPack ? undefined : (await loadActivePackForEngineOrNull(engine, { remote, sourceId }))?.manifest;
   let normalize: Promise<boolean> | undefined;
   return { policy, sanity: await loadImportSanityConfig(engine), activePack, normalize: () => normalize ??= fencesNormalizeEnabled(engine) };
 }
@@ -381,7 +381,7 @@ export async function screenFrozenContent(screenInput: SyncImportScreenInput, ru
  */
 export async function unreadPageImportScreen(engine: BrainEngine, input: { sourceId: string; root: string; path: string; slug: string; content: string;
   snapshot: SyncImportScreenInput['snapshot'] }): Promise<ImportScreenResult> {
-  const activePack = (await loadActivePackForEngine(engine, { remote: false, sourceId: input.sourceId }).catch(() => null))?.manifest;
+  const activePack = (await loadActivePackForEngineOrNull(engine, { remote: false, sourceId: input.sourceId }))?.manifest;
   const run: SyncScreenRun = { policy: await readSyncHoldPolicy(engine), sanity: await loadImportSanityConfig(engine), activePack, normalize: () => fencesNormalizeEnabled(engine) };
   return screenFrozenContent({ content: input.content, rawHash: sha256(input.content), lineEndingOnly: false, slug: input.slug, sourcePath: input.path, path: input.path,
     root: input.root, snapshot: input.snapshot, base: input.snapshot, renamed: false, activePack, sanity: run.sanity,

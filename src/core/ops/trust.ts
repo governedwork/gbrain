@@ -20,6 +20,7 @@ import { applyOwnerAction, previewOwnerAction } from '../trust/owner-actions.ts'
 import { parseTrustRef } from '../trust/refs.ts';
 import { currentVerifiedLocalWriter } from '../persistence/identity.ts';
 import { PAGE_MUTATION_PARAMS } from '../persistence/params.ts';
+import { callerAccessAllowedSql } from '../search/private-visibility.ts';
 
 const confirm_memory: Operation = {
   name: 'confirm_memory',
@@ -32,6 +33,8 @@ const confirm_memory: Operation = {
     + 'for the user to run. Never call this on your own judgment: confirm only what the user explicitly confirmed.',
   params: {
     ref: { type: 'string', required: true, description: 'What to confirm: f<id> (fact), t<id> (take) or p:<source>/<slug> (page).' },
+    binding: { type: 'string', description: 'Optional: the binding a dry run of this call answered for the preview the user approved. '
+      + 'The confirm then applies only to that exact state, and is refused with preview_changed when the row moved since.' },
   },
   scope: 'write',
   handler: async (ctx, p) => {
@@ -46,16 +49,32 @@ const confirm_memory: Operation = {
       const allowed = ctx.auth?.allowedSources ?? (ctx.auth?.sourceId ? [ctx.auth.sourceId] : null);
       const [sourceRow] = ref.kind === 'page' ? [{ source_id: ref.sourceId! }] : await ctx.engine.executeRaw<{ source_id: string }>(
         ref.kind === 'fact' ? 'SELECT source_id FROM facts WHERE id = $1' : 'SELECT p.source_id FROM takes t JOIN pages p ON p.id = t.page_id WHERE t.id = $1', [ref.id]);
-      if (allowed && sourceRow && !allowed.includes(sourceRow.source_id)) {
-        throw opError('not_found', `No ${ref.kind} ${preview.ref} visible to this connection.`, 'Check the ref and the source your connection may use.');
-      }
+      // governedwork fork (F13): a page is visible to the connection only when the caller reads it (its readers, folder
+      // rules and origins), not merely its source: the owner's page confirm writes in the page's own source on that ground
+      // (access/attest-sources.ts ownerPageReadSource).
+      const hidden = allowed && sourceRow && !allowed.includes(sourceRow.source_id)
+        || ref.kind === 'page' && !(await ctx.engine.executeRaw(`SELECT 1 FROM pages p WHERE p.source_id = $1 AND p.slug = $2 AND p.deleted_at IS NULL
+          AND ${callerAccessAllowedSql('p')}`, [ref.sourceId, ref.slug])).length;
+      if (hidden) throw opError('not_found', `No ${ref.kind} ${preview.ref} visible to this connection.`, 'Check the ref and the source your connection may use.');
     }
-    if (ctx.dryRun) return { dry_run: true, action: 'confirm_memory', ref: preview.ref, raises: preview.raises, summary: preview.summary };
-    if (!preview.raises) return { action: 'confirm', ref: preview.ref, status: 'unchanged', tier: 'user_confirmed' };
+    // governedwork fork (F14): a caller's expected binding (a dry run's, for the preview its user approved) holds the whole
+    // confirm to that state: refused here when it already moved, and by applyOwnerAction's own binding check (#7657) and its
+    // atomic re-read inside the write when it moves meanwhile.
+    const expected = p.binding === undefined ? null : p.binding;
+    if (expected !== null && (typeof expected !== 'string' || expected.length === 0)) {
+      throw opError('invalid_params', 'binding is the string a dry run of confirm_memory answered.', 'Run confirm_memory with dry_run: true and pass its binding.');
+    }
+    if (expected !== null && expected !== preview.binding) {
+      throw opError('preview_changed', `${preview.ref} changed after it was previewed; nothing was changed.`,
+        'Preview it again (dry_run: true) and ask the user to confirm what it shows now.');
+    }
+    if (ctx.dryRun) return { dry_run: true, action: 'confirm_memory', ref: preview.ref, raises: preview.raises, summary: preview.summary, binding: preview.binding };
+    // governedwork fork (F15): an unchanged page answers the revision its preview read (nothing is written).
+    if (!preview.raises) return { action: 'confirm', ref: preview.ref, status: 'unchanged', tier: 'user_confirmed', ...(ref.kind === 'page' && preview.revision ? { detail: { revision: preview.revision } } : {}) };
     const confirmation = await requireOwnerConfirmation(ctx, { ref: preview.ref, token: preview.token, summary: preview.summary, command: preview.command });
     const principal = ctx.auth?.principal ?? currentVerifiedLocalWriter()?.principal ?? null;
     return applyOwnerAction(ctx.engine, { action: 'confirm', ref: raw }, {
-      binding: preview.binding, confirmation, by: principal, config: ctx.config, ...(ctx.remote !== false ? { ctx } : {}),
+      binding: expected ?? preview.binding, confirmation, by: principal, config: ctx.config, ...(ctx.remote !== false ? { ctx } : {}),
     });
   },
 };

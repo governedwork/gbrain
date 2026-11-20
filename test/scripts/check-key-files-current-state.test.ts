@@ -94,6 +94,23 @@ describe("check-key-files-current-state.sh", () => {
     expect(run({ GBRAIN_CLAUDE_MD_MAX_BYTES: "10000" }).status).toBe(0);
   });
 
+  // Ours (governedwork fork): the fork's "## This fork:" section has its own cap and is not counted against upstream's.
+  it("measures the fork section against its own cap, not upstream's, and ends it at the next heading", () => {
+    seedClean();
+    const upstream = "# CLAUDE.md\n\n" + "u".repeat(900) + "\n";
+    const fork = "## This fork: how a pull request lands\n\n" + "f".repeat(1_500) + "\n";
+    writeDoc("CLAUDE.md", upstream + fork);
+    expect(run({ GBRAIN_CLAUDE_MD_MAX_BYTES: "1000" }).status).toBe(0);
+    const overFork = run({ GBRAIN_CLAUDE_MD_MAX_BYTES: "1000", GBRAIN_CLAUDE_MD_FORK_MAX_BYTES: "1000" });
+    expect(overFork.status).toBe(1);
+    expect(overFork.stderr).toContain("fork section is");
+    // A heading after the fork section is upstream's again: it counts against upstream's cap.
+    writeDoc("CLAUDE.md", upstream + fork + "## Later upstream section\n\n" + "u".repeat(200) + "\n");
+    const overUpstream = run({ GBRAIN_CLAUDE_MD_MAX_BYTES: "1000" });
+    expect(overUpstream.status).toBe(1);
+    expect(overUpstream.stderr).toContain("(without the fork section), over the 1000 cap");
+  });
+
   it("FAILS when docs/TESTING.md exceeds its ratchet cap, naming file, size, cap and the trimming rule", () => {
     seedClean();
     writeDoc("docs/TESTING.md", "# Testing\n\n" + "x".repeat(5_000) + "\n");

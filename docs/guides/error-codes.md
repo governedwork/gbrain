@@ -3694,13 +3694,21 @@ Reasons: `host_mismatch`, `transfer_in_progress`, `clone_in_progress`, `binding_
 
 More: [docs/guides/troubleshooting.md#owner-unavailable](../../docs/guides/troubleshooting.md#owner-unavailable)
 
+### pack_store_unreadable
+
+<a id="pack_store_unreadable"></a>
+
+| Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
+|---|---|---|---|---|---|---|
+| The brain's stored schema packs could not be read, so the active pack, which may live there, was not resolved and nothing was done without it. | A pack GBrain does not bundle may be stored in the brain itself. Reading it as "no pack" would let a write skip the pack's vocabulary and typing, so the command fails instead; it is usually a passing database failure. | Retry the command. If it keeps failing, check the database connection and schema with `gbrain doctor --json`. Run: gbrain doctor --json | agent | `repeat the read that failed` | 1 | yes |
+
 ### page_body_rows_unreadable
 
 <a id="page_body_rows_unreadable"></a>
 
 | Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
 |---|---|---|---|---|---|---|
-| This large page's segment rows readable on this connection do not cover its body, so the read returned nothing rather than a short or empty body. | A segmented page keeps its body in manifest rows that must tile the stored body from its first byte to body_bytes; a role that sees the page row but not its manifest rows (a row-level security policy or grant that covers pages only), or rows missing from the database, would otherwise read as an empty or truncated page with nothing to say so. | Give the role that reads the brain the same access to page_body_manifest and page_segment_texts it has to pages (the brain host's operator), then read again; run gbrain doctor --json to check the segment tables. When doctor segmented_tiling lists the page, its rows are missing: preview gbrain repair segmented-tiling --source <id>, which republishes it from Git. | host_admin | `gbrain doctor --json` | 1 | no |
+| This large page's segment rows readable on this connection do not cover its body, so the read returned nothing rather than a short or empty body. | A segmented page keeps its body in manifest rows that must tile the stored body from its first byte to body_bytes; a role that sees the page row but not its manifest rows (a row-level security policy or grant that covers pages only), or rows missing from the database, would otherwise read as an empty or truncated page with nothing to say so. | Give the role that reads the brain the same access to page_body_manifest and page_segment_texts it has to pages (the brain host's operator), then read again; run gbrain doctor --json to check the segment tables. When doctor segmented_tiling lists the page, its rows are missing: preview gbrain repair segmented-tiling --source <id>, which republishes it from Git; on a source without a Git checkout, revert_version (force: true) to the newest segmented version that reads (get_versions lists them) republishes its body instead. | host_admin | `gbrain doctor --json` | 1 | no |
 
 More: [docs/guides/windowed-reads.md#page_body_rows_unreadable](../../docs/guides/windowed-reads.md#page_body_rows_unreadable)
 
@@ -5439,6 +5447,14 @@ More: [docs/guides/skillpacks-as-scaffolding.md#updating-installed-skills](../..
 | Another gbrain skillpack command holds this workspace's writer lock (.gbrain-skillpack.lock). | One writer per skills root keeps an update and a restore from interleaving. Side effects: nothing was written. A lock left by a crash is reclaimed after 10 minutes. | Wait for the other command to finish and run this one again. Run: gbrain skillpack restore --list --json | agent | `repeat the read that failed` | 2 | yes |
 
 More: [docs/guides/skillpacks-as-scaffolding.md#updating-installed-skills](../../docs/guides/skillpacks-as-scaffolding.md#updating-installed-skills)
+
+### slug_conflict
+
+<a id="slug_conflict"></a>
+
+| Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
+|---|---|---|---|---|---|---|
+| The rename target slug is already held in this source: by a live page, a soft-deleted page, or a slug alias that redirects to another page. | A slug names one page per source, and a soft-deleted page keeps its slug until it is purged. Taking the slug would overwrite that page or drop the alias's redirect, so the rename stops and nothing moves. | Choose a new_slug that no page, soft-deleted page or alias holds in this source (reading the target slug with deleted pages included shows what holds it), then submit the rename with a new request_id. | agent | `repeat the read that failed` | 1 | no |
 
 ### slug_page_mismatch
 

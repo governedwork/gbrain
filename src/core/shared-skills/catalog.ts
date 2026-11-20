@@ -194,6 +194,19 @@ async function detail(active: OperationContext, params: SharedSkillSelector) {
 export async function getSharedSkill(ctx: OperationContext, params: SharedSkillSelector): Promise<SharedSkillDetail> {
   return catalogRead(ctx, 'get_skill', async active => (await detail(active, params)).result);
 }
+/** Media types whose bytes are meant to be read as text: text/*, JSON and YAML (incl. +json/+yaml suffixes). */
+const TEXT_MEDIA_TYPE = /^(?:text\/[a-z0-9.+-]+|application\/(?:json|yaml|x-yaml|[a-z0-9.-]+\+(?:json|yaml)))$/i;
+/**
+ * The file as UTF-8 text when its media type is textual and its bytes are valid UTF-8 without NUL;
+ * otherwise undefined. `content` stays base64 either way, so binary-safe callers are unaffected.
+ */
+export function assetText(mediaType: string, base64: string): string | undefined {
+  if (!TEXT_MEDIA_TYPE.test(mediaType)) return undefined;
+  const bytes = Buffer.from(base64, 'base64');
+  if (bytes.includes(0)) return undefined;
+  const text = bytes.toString('utf8');
+  return Buffer.from(text, 'utf8').equals(bytes) ? text : undefined;
+}
 export async function getSharedSkillAsset(ctx: OperationContext, params: SharedSkillSelector & { path: string }) {
   return catalogRead(ctx, 'get_skill_asset', async active => {
     if (!params.revision) {
@@ -209,9 +222,11 @@ export async function getSharedSkillAsset(ctx: OperationContext, params: SharedS
         `Request one of the paths in the files list get_skill returns for revision ${result.revision} of ${result.pack_id}/${result.name}; other paths are not approved for this connection.`,
         { fix: skillHeadFix(result.source_id, result.pack_id, result.name, result.revision) });
     }
+    const text = assetText(file.media_type, file.content);
     return { schema_version: 2 as const, brain_id: result.brain_id, source_id: result.source_id, source_incarnation: result.source_incarnation,
       pack_id: result.pack_id, name: result.name, revision: result.revision, path: file.path,
-      encoding: 'base64' as const, content: file.content, sha256: file.sha256, size: file.size, media_type: file.media_type };
+      encoding: 'base64' as const, content: file.content, ...(text === undefined ? {} : { text }),
+      sha256: file.sha256, size: file.size, media_type: file.media_type };
   });
 }
 export { submitSharedSkillMutation, adoptSharedSkillpack, importSharedSkillProposal } from './publication.ts';

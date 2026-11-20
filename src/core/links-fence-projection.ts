@@ -11,7 +11,7 @@
  * identity index that includes it, statements are written without a source, as before the migration, so a second
  * row's same-date statement is not dropped in place of a stored one. Database-only manual edges
  * (origin_field NULL) and every derived producer are left alone. A row whose
- * target is not a live page in the source, or whose type the active schema
+ * target is neither a live page in the source nor a slug alias of one, or whose type the active schema
  * pack does not declare, yields no edge and stays in the file.
  */
 import type { BrainEngine } from './engine.ts';
@@ -44,6 +44,12 @@ export async function projectLinksFence(tx: Tx, page: { id: number | string; sou
   const targets = rows.length ? await tx.executeRaw<{ id: number; slug: string }>(
     'SELECT id, slug FROM pages WHERE source_id=$1 AND slug=ANY($2::text[]) AND deleted_at IS NULL', [sourceId, [...new Set(rows.map(row => row.to))]]) : [];
   const ids = new Map(targets.map(target => [target.slug, Number(target.id)]));
+  // Ours (governedwork fork, rename_page): a row written against a renamed page's old slug follows its slug alias, as a
+  // body link does (links-preparation.ts), so the next projection of the linking page keeps the edge instead of dropping it.
+  const unresolved = [...new Set(rows.map(row => row.to))].filter(to => !ids.has(to));
+  if (unresolved.length) for (const alias of await tx.executeRaw<{ alias_slug: string; id: number }>(
+    `SELECT a.alias_slug, p.id FROM slug_aliases a JOIN pages p ON p.source_id=a.source_id AND p.slug=a.canonical_slug AND p.deleted_at IS NULL
+      WHERE a.source_id=$1 AND a.alias_slug=ANY($2::text[])`, [sourceId, unresolved])) ids.set(alias.alias_slug, Number(alias.id));
   const desired = rows.flatMap(row => ids.has(row.to) ? [{ to_page_id: ids.get(row.to)!, link_type: row.type, link_source: row.source,
     context: sanitizeForJsonb(row.context), validFrom: row.validFrom, validUntil: row.validUntil }] : []);
   const [existing, existingTransitions] = await Promise.all([

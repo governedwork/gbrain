@@ -69,7 +69,7 @@ function planFactsKind(plan: RowPlan, kindCell: CellText, contextCell: CellText 
   }
   const before = contextCell?.text ?? '';
   const after = appendOriginalKind(before, kindCell.text);
-  if (supersededRef(before) !== supersededRef(after) || forgotten(before) !== forgotten(after)) {
+  if (supersededRef(before, 'facts') !== supersededRef(after, 'facts') || forgotten(before) !== forgotten(after)) {
     residual(plan, 'facts', 'kind', 'enum_unmapped');
     return;
   }

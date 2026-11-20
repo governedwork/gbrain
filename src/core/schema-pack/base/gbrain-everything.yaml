@@ -47,18 +47,29 @@ extends: gbrain-investor
 # Borrow types + link_types from the other two lens packs. This is the
 # composition mechanism that makes "three lenses" real without a
 # multi-active-pack architecture.
+#
+# Ours (governedwork fork): `atom` is declared below instead of borrowed from
+# gbrain-creator. gbrain-base (inherited through gbrain-investor) also
+# declares `atom` (primitive: annotation), and the borrowed creator `atom`
+# (primitive: concept) silently replaced it — the borrow_replaces_inherited_type
+# lint rule reports exactly that. Declaring creator's definition here keeps
+# what this pack resolves to byte-identical and makes the replacement explicit.
 borrow_from:
-  - pack: gbrain-creator
-    types:
-      - atom
-      # concept already in base
   - pack: gbrain-engineer
     types:
       - learning
       # code + project already in base
 
-# No new page types declared here — everything comes via extends + borrow.
-page_types: []
+# Ours (governedwork fork): gbrain-creator's `atom`, verbatim, overriding
+# gbrain-base's — see the borrow_from comment above. Concept already in base.
+page_types:
+  - name: atom
+    primitive: concept
+    path_prefixes:
+      - atoms/
+    aliases: []
+    extractable: false
+    expert_routing: false
 
 # Union of creator + engineer phase declarations. Investor pack declares
 # no phases (consumes existing pipeline), so nothing inherited from the

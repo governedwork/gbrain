@@ -48,7 +48,7 @@ import type { PreparedContentImport } from './prepared-import.ts';
 import type { PreparedMutation } from './coordinator.ts';
 import type { WriteRequest } from './model.ts';
 import { assertKnowledgePublicationAllowed } from '../shared-skills/knowledge-guard.ts';
-import { loadActivePackForEngine, checkApprovedSchemaForEngine } from '../schema-pack/engine-resolution.ts';
+import { loadActivePackForEngineOrNull, checkApprovedSchemaForEngine } from '../schema-pack/engine-resolution.ts';
 import type { CompanyBrainPlan } from '../company-brain/types.ts';
 import { companyBrainProfile } from '../company-brain/profile.ts';
 import { companyBrainPolicyFingerprint } from '../company-brain/policy.ts';
@@ -828,7 +828,7 @@ async function prepareSyncMutation(unbounded: BrainEngine, row: WriteRequest, _c
   // Wave B: a Markdown file over the single-string ceiling (never a company-brain or image entry) streams; its body is never read here.
   if (p.body_ref && typeof p.sourcePath === 'string' && typeof p.path === 'string') {
     enterClaimStep(clock, 'schema_pack', undefined, 'db');
-    const pack = p.processingOptions?.noSchemaPack ? undefined : await loadActivePackForEngine(engine, { remote: row.authority.remote, sourceId: row.source_id }).catch(() => null);
+    const pack = p.processingOptions?.noSchemaPack ? undefined : await loadActivePackForEngineOrNull(engine, { remote: row.authority.remote, sourceId: row.source_id });
     const renamed = moved && moved.slug !== row.slug ? moved : undefined;
     const base = renamed ? await engine.readPageSnapshot(renamed.slug, { ...source, includeDeleted: true }) : snapshot;
     if (renamed && (base?.page.id !== renamed.pageId || base.revision !== renamed.revision || base.page.deleted_at != null)) {
@@ -858,7 +858,7 @@ async function prepareSyncMutation(unbounded: BrainEngine, row: WriteRequest, _c
     `A company-brain source imports with its pinned schema pack, so ${row.source_id} cannot sync with --no-schema-pack.`);
   enterClaimStep(clock, 'schema_pack', undefined, 'db');
   const pack = p.processingOptions?.noSchemaPack ? undefined : schema ? (await checkApprovedSchemaForEngine(engine, { name: schema.name, identity: schema.identity, resolvedManifestHash: schema.resolved_digest },
-    { remote: false, sourceId: row.source_id })).pack : await loadActivePackForEngine(engine, { remote: row.authority.remote, sourceId: row.source_id }).catch(() => null), activePack = pack?.manifest;
+    { remote: false, sourceId: row.source_id })).pack : await loadActivePackForEngineOrNull(engine, { remote: row.authority.remote, sourceId: row.source_id }), activePack = pack?.manifest;
   // A renamed page is prepared where it stands; publication moves it, then re-prepares at the new slug (reusing an unchanged segmented staging).
   const renamed = moved && moved.slug !== row.slug ? moved : undefined;
   if (renamed) enterClaimStep(clock, 'rename_source', undefined, 'db');

@@ -113,9 +113,9 @@ export const EQUALS_READERS: Readonly<Record<string, readonly string[]>> = {
   export: ['--dir', '--source', '--type', '--slug-prefix', '--repo'],
   // core/consent.ts:126 via requireEmbedBackfillConsent (features.ts:306, --auto-fix paid fixes only).
   features: ['--max-usd', '--max-cost'],
-  // recall.ts:1183-1188 runForget (plain) and forget-purge.ts:44 flagValue (:114-123, purge); --match is purge-only, ignored by plain forget in any form.
+  // forget.ts flagValue via commonFlags (plain forget, one id or a batch; ours, governedwork fork L146) and forget-purge.ts:44 flagValue (:114-123, purge); --match is purge-only, ignored by plain forget in any form.
   forget: ['--request-id', '--source', '--match'],
-  // forget-purge.ts:131 flagValue --reason (runForgetPurge, routed on --purge at recall.ts:1170); plain forget reads only the separate token (recall.ts:1181).
+  // forget-purge.ts:131 flagValue --reason (runForgetPurge, routed on --purge at the top of forget.ts runForget); plain forget splits --reason= at the entry and its id scan consumes the value as the separate token.
   'forget --purge': ['--reason', '--reason-scan-limit'],
   // frontmatter.ts:356 runValidate.
   'frontmatter validate': ['--path'],

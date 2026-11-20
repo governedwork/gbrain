@@ -31,7 +31,7 @@ test('supersedeRow puts the pointer on the old row after its provenance; the new
   const rows = parseTakesFence(body).takes;
   expect(rows.find(t => t.rowNum === 1)).toMatchObject({ active: false, source: `call notes; superseded by #${newRowNum}` });
   expect(rows.find(t => t.rowNum === newRowNum)!.source).toBeUndefined();
-  expect(takesPreparation.toCanonicalBatchInput(7, rows.find(t => t.rowNum === 1)!).superseded_by).toBe(newRowNum);
+  expect(takesPreparation.toCanonicalBatchInput(7, rows.find(t => t.rowNum === 1)!, rows).superseded_by).toBe(newRowNum);
 });
 
 test('a legacy self-reference on the superseded row is replaced, not chained', () => {
@@ -39,7 +39,7 @@ test('a legacy self-reference on the superseded row is replaced, not chained', (
   const rows = parseTakesFence(body).takes;
   expect(rows.find(t => t.rowNum === 2)!.source).toBe(`superseded by #${newRowNum}`);
   expect(rows.find(t => t.rowNum === newRowNum)!.source).toBe('board memo');
-  expect(takesPreparation.toCanonicalBatchInput(7, rows.find(t => t.rowNum === 2)!).superseded_by).toBe(newRowNum);
+  expect(takesPreparation.toCanonicalBatchInput(7, rows.find(t => t.rowNum === 2)!, rows).superseded_by).toBe(newRowNum);
 });
 
 let engine: PGLiteEngine;
@@ -70,6 +70,6 @@ test('coordinated takes_supersede stores superseded_by on the old row and keeps 
   expect(after.find(r => r.row_num === 3)!.source ?? '').not.toContain('superseded by');
 
   const fence = parseTakesFence(readFileSync(join(root, 'page.md'), 'utf8')).takes;
-  await engine.addTakesBatch(fence.map(t => takesPreparation.toCanonicalBatchInput(pageId, t)));
+  await engine.addTakesBatch(fence.map(t => takesPreparation.toCanonicalBatchInput(pageId, t, fence)));
   expect((await rows()).find(r => r.row_num === 1)!.superseded_by).toBe(3);
 });

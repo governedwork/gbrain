@@ -59,6 +59,8 @@ const RECEIPT_COVERAGE: Record<string, Coverage> = {
   'src/core/persistence/sync-run.ts': { sites: 1, tables: ['sources'], other: 'the managed sync freshness heartbeat on its own source row' },
   'src/core/persistence/sync-pass-run.ts': { sites: 2, tables: ['sources'], other: 'the pass\'s up-to-date and no-checkpoint freshness stamps (#6712 PR 4b) on its own source row, with the pass row' },
   'src/core/page-body/ingest.ts': { sites: 1, tables: [], other: 'segmentWriteScope: staged segment texts and manifest rows of an unpublished generation, and segment GC sweeps (page_segment_texts and page_body_manifest are guarded but hold no live body until the publication flips the generation)' },
+  // Ours (governedwork fork, ledger L144).
+  'src/core/page-state/version-prune.ts': { sites: 1, tables: [], other: 'prune_page_versions: the page-scoped segment GC sweep after an owner prune deleted segmented versions (page_versions is unguarded; the sweep drops manifest rows and texts no retained version or live generation references)' },
 };
 
 /** Facts/takes writers allowed without a receipt this wave, each with its TODO above. */

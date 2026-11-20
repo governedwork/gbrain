@@ -230,6 +230,9 @@ const PARAM_FACTORY: Record<string, Record<string, unknown>> = {
   // A valid mode, so the call reaches the publish gate (pinned off in beforeAll) instead of failing validation.
   set_memory_writeback: { mode: 'off' },
   memory_conversation_mode: { mode: 'all' },
+  // The sweep's default source has a working tree, so rename is refused
+  // (source_writeback_required); the envelope is still sentinel-checked.
+  rename_page: { slug: 'notes/sweep-fresh-rename', new_slug: 'notes/sweep-fresh-renamed' },
 };
 
 // Per-(op × shape) overrides for ops whose behavior legitimately differs
@@ -237,7 +240,7 @@ const PARAM_FACTORY: Record<string, Record<string, unknown>> = {
 // carries ctx.auth; the scalar shape — like the stdio transport — doesn't).
 // These operations enforce durable write authority inside the shared dispatcher.
 // Other scope checks remain transport-owned and outside this privacy harness.
-const COORDINATED_WRITES = new Set(['put_page', 'put_pages', 'capture', 'delete_page', 'restore_page', 'revert_version', 'edit_page', 'append_page',
+const COORDINATED_WRITES = new Set(['put_page', 'put_pages', 'capture', 'delete_page', 'restore_page', 'rename_page', 'revert_version', 'edit_page', 'append_page',
   'remember', 'forget', 'add_tag', 'remove_tag', 'add_timeline_entry',
   'takes_add', 'takes_update', 'takes_supersede', 'takes_resolve',
   'get_write_request', 'list_write_requests', 'cancel_write_request']);
@@ -385,6 +388,7 @@ const EXPECTED_OUTCOME: Record<string, Outcome> = {
   purge_fact: 'error',
   list_page_purges: 'error',
   unpurge_page: 'error',
+  prune_page_versions: 'error',
   // Owner confirmation needs a memory_confirm grant; the sweep's connection has none (refused before any read).
   confirm_memory: 'error',
   // GBRA-504: promoting a guest note is the brain owner's call; the sweep's connection is refused before any read.
@@ -396,6 +400,7 @@ const EXPECTED_OUTCOME: Record<string, Outcome> = {
   put_pages: 'ok',
   delete_page: 'ok',
   restore_page: 'ok',
+  rename_page: 'error',
   capture: 'ok',
   add_tag: 'ok',
   remove_tag: 'ok',
@@ -427,6 +432,8 @@ const EXPECTED_OUTCOME: Record<string, Outcome> = {
   extract_facts: 'error',
   forget_fact: 'error',
   schema_apply_mutations: 'error',
+  put_schema_pack: 'error', // ours (governedwork fork)
+  get_schema_pack: 'error', // ours (governedwork fork)
   reload_schema_pack: 'ok',
   run_onboard: 'ok',
   run_skillopt: 'error',

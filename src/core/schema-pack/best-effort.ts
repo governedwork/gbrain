@@ -12,6 +12,9 @@
 //   - Pack load succeeds → return the ResolvedPack.
 //   - Pack load fails (any reason: corrupt file, missing pack, federation
 //     divergence, trust-gate reject) → return null.
+//   - Ours (governedwork fork): a failure reading the brain's stored packs
+//     (db-store.ts isPackStoreFailure) is raised, not null: the active pack
+//     may live there, and a write must not go ahead without it.
 //   - Caller MUST interpret null as "EMPTY FILTER" semantics. A null
 //     return is NOT a license to fall back to hardcoded defaults like
 //     ['person', 'company']; that silently re-introduces types the
@@ -24,7 +27,7 @@
 
 import type { BrainEngine } from '../engine.ts';
 import type { OperationContext } from '../operations.ts';
-import { loadActivePackForEngine } from './engine-resolution.ts';
+import { loadActivePackForEngine, packOrNull } from './engine-resolution.ts';
 export { readDbSchemaPack } from './engine-resolution.ts';
 import type { ResolvedPack } from './registry.ts';
 
@@ -48,14 +51,11 @@ import type { ResolvedPack } from './registry.ts';
 export async function loadActivePackBestEffort(
   ctx: OperationContext,
 ): Promise<ResolvedPack | null> {
-  try {
-    return await loadActivePackForEngine(ctx.engine, {
-      remote: ctx.remote ?? true,
-      sourceId: ctx.sourceId,
-    });
-  } catch {
-    return null;
-  }
+  // Ours (governedwork fork): packOrNull — a failure reading the brain's stored packs is raised, never null.
+  return packOrNull(loadActivePackForEngine(ctx.engine, {
+    remote: ctx.remote ?? true,
+    sourceId: ctx.sourceId,
+  }));
 }
 
 /**
@@ -71,11 +71,8 @@ export async function loadActivePackForLocalEngine(
   engine: Pick<BrainEngine, 'getConfig'>,
   options: { sourceId?: string } = {},
 ): Promise<ResolvedPack | null> {
-  try {
-    return await loadActivePackForEngine(engine, { remote: false, ...options });
-  } catch {
-    return null;
-  }
+  // Ours (governedwork fork): packOrNull — a failure reading the brain's stored packs is raised, never null.
+  return packOrNull(loadActivePackForEngine(engine, { remote: false, ...options }));
 }
 
 /**

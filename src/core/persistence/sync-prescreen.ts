@@ -28,7 +28,7 @@
 import { realpathSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import type { BrainEngine } from '../engine.ts';
-import { loadActivePackForEngine } from '../schema-pack/engine-resolution.ts';
+import { loadActivePackForEngineOrNull } from '../schema-pack/engine-resolution.ts';
 import { isKeepDbSlug, loadStorageConfig } from '../storage-config.ts';
 import { readSyncImportProvenances, syncImportParserFor, type SyncImportParser, type SyncImportProvenance } from './sync-holds.ts';
 import { pinnedWindowBlock, readTreeBlobs, seedPinnedWindow, type TreeBlob } from './sync-blobs.ts';
@@ -82,7 +82,7 @@ export async function prescreenSyncEntries(engine: BrainEngine, discovered: Sync
     const read = await readSyncImportProvenances(engine, discovered.sourceId, discovered.incarnation, candidates.slice(i, i + PROVENANCE_CHUNK).map(entry => Number(entry.pageId)));
     for (const [id, record] of read) records.set(id, record);
   }
-  const pack = input.noSchemaPack ? null : await loadActivePackForEngine(engine, { remote: false, sourceId: discovered.sourceId }).catch(() => null);
+  const pack = input.noSchemaPack ? null : await loadActivePackForEngineOrNull(engine, { remote: false, sourceId: discovered.sourceId });
   const guarded: SyncEntry[] = [];
   for (const entry of candidates) {
     const hold = input.held.get(entry.path);

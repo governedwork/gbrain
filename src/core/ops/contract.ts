@@ -17,6 +17,7 @@ import { publicWriteReceipt, type WriteErrorCode, type WriteReceipt } from '../p
 // renderer below when it loads.
 import type { Action, Notice } from '../agent-output.ts';
 import type { RegistryCode } from '../error-registry.ts';
+import type { TextRenderer } from './output-format.ts'; // ours (governedwork fork)
 import type { WriteAuthority } from '../persistence/model.ts';
 import type { TrustTier } from '../trust/tier.ts';
 import type { StdioSurfaceState } from '../../mcp/surface.ts';
@@ -875,7 +876,11 @@ export interface Operation {
    * lists it on MCP, and a call returns `cli_only` whose fix is this exact
    * command (`<name>` tokens are inputs the agent fills from its call).
    */
-  cliOnly?: { argv: readonly string[] };
+  cliOnly?: {
+    argv: readonly string[];
+    /** Ours (governedwork fork): the command to name instead when the refused call carried this param (first match wins). */
+    argvWhen?: Readonly<Record<string, readonly string[]>>;
+  };
   /**
    * WP1 honest catalog: the op is callable by remote callers only when this
    * config gate resolves true (dual-plane, DB > file > absent=false). Network
@@ -935,6 +940,13 @@ export interface Operation {
     stdin?: string;
     hidden?: boolean;
   };
+  /**
+   * Ours (governedwork fork): loads the op's text renderer (ops/output-format.ts). An op that sets it spreads
+   * OUTPUT_FORMAT_PARAMS into `params`, and a caller's `format: 'text' | 'hook'` then gets that text (or a harness
+   * hook document carrying it) instead of the JSON result. The handler never sees `format`: the MCP dispatcher and the
+   * CLI renderer shape the output after the handler and its output redaction ran.
+   */
+  renderText?: () => Promise<TextRenderer>;
 }
 
 /**

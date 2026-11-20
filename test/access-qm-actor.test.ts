@@ -507,7 +507,7 @@ for (const kind of testBackends()) {
         // GST-2249 W1: every other page write waits for owner approval too.
         ['append_page', { slug: PAGES.alice.slug, content: 'x' }], ['put_pages', { pages: [{ slug: PAGES.alice.slug, content: '# x\n' }] }],
         ['delete_page', { slug: PAGES.alice.slug }], ['restore_page', { slug: PAGES.alice.slug }],
-        ['revert_version', { slug: PAGES.alice.slug, version_id: 1 }],
+        ['revert_version', { slug: PAGES.alice.slug, version_id: 1 }], ['rename_page', { slug: PAGES.alice.slug, new_slug: 'people/renamed-example' }],
         ['add_tag', { slug: PAGES.alice.slug, tag: 'x' }], ['remove_tag', { slug: PAGES.alice.slug, tag: 'x' }],
         ['remove_link', { from: PAGES.alice.slug, to: PAGES.bob.slug }],
         ['begin_page_upload', { slug: PAGES.alice.slug, total_bytes: 1 }], ['upload_page_part', { upload_id: 'x', part: 1, content: 'x' }],

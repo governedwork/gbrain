@@ -45,7 +45,7 @@ import { digest } from './digest.ts';
 import { readSyncTail } from './sync-tail-record.ts';
 import { movedDriftHolds } from './sync-prescreen.ts';
 import { CARRIED_SAMPLE, carriedHolds, clearGitHold, clearGitHoldRetryPaths, holdRescreenDue, readGitHoldRetryPaths, readSyncHoldPolicy, readGitSourceHolds, readSyncImportProvenances, settledDeletionHolds, syncImportParserFor } from './sync-holds.ts';
-import { loadActivePackForEngine } from '../schema-pack/engine-resolution.ts';
+import { loadActivePackForEngineOrNull } from '../schema-pack/engine-resolution.ts';
 import { loadConfig } from '../config.ts';
 import { startPersistenceConsumer } from './service.ts';
 import { clearManagedSyncFailureAfterSuccess } from './sync-failures.ts';
@@ -408,7 +408,7 @@ async function pinPass(engine: BrainEngine, input: SyncPassInput, lease: NonNull
   // what they read, and its outcome is still decided first.
   const pin = Promise.all([readPassRow(engine, sourceId, incarnation),
     readSyncAdmission(engine), engine.getConfig('sync.include_working_tree'), selectionPatterns(engine, opts),
-    input.processingOptions.noSchemaPack ? null : loadActivePackForEngine(engine, { remote: false, sourceId }).catch(() => null),
+    input.processingOptions.noSchemaPack ? null : loadActivePackForEngineOrNull(engine, { remote: false, sourceId }),
     readSyncTail(engine, sourceId), readGitHoldRetryPaths(engine, sourceId, incarnation), readGitSourceHolds(engine, { sourceIds: [sourceId] }),
     passIdleProbe(engine, { sourceId, incarnation, worktreeId: context.binding.worktree_id, requestHwm: null, openAtStamp: null }),
     engine.executeRaw(`SELECT 1 FROM op_checkpoints WHERE op='managed-sync-failure' AND fingerprint=ANY($1::text[]) LIMIT 1`, [passFailureKeys(sourceId, incarnation)]),

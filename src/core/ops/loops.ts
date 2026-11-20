@@ -24,6 +24,7 @@ import type { Action, Notice } from '../agent-output.ts';
 import { hostFix, invalidParam, opTransport, paramUse, readFix } from './op-fix.ts';
 import { resolveRequestedScope, sourceScopeOpts } from './context.ts';
 import { validateSourceId } from '../utils.ts';
+import { privatePagesFilterForCaller } from '../search/private-visibility.ts';
 import { isGmailHoldKey } from '../google/types.ts';
 import { closedLoopWithActiveFact, retireLoopFact } from '../persistence/loop-fact-retirement.ts';
 import {
@@ -37,6 +38,15 @@ import {
   type LoopType,
   type OpenLoopRow,
 } from '../loops/loops-store.ts';
+import {
+  classifySender,
+  isMachineSenderClass,
+  loadSenderPolicy,
+  LOOPS_MACHINE_SENDERS_CONFIG_KEY,
+  LOOPS_PERSON_SENDERS_CONFIG_KEY,
+  type SenderClass,
+  type SenderClassPolicy,
+} from '../google/sender-class.ts';
 
 const STALE_AFTER_MS = 24 * 3_600_000;
 
@@ -242,12 +252,31 @@ interface LoopView {
   detector: string;
   confidence: number;
   page_slug: string | null;
+  /** Fork: the counterparty address's sender class; null when the label could not be computed (machine_mail_notice says why). */
+  sender_class: SenderClass | null;
+  /** Fork: a reply-owed loop from a machine sender. It stays open; it is not presented as reply owed. */
+  label?: 'machine_mail';
   /** Trusted-local only. */
   quote?: string;
   deep_link?: string;
 }
 
-function loopView(l: OpenLoopRow, trusted: boolean, deepLinks: Map<string, string>): LoopView {
+/** Fork: how open_loops presents machine-mail loops (`machine_mail` param). */
+type MachineMailMode = 'separate' | 'inline' | 'only';
+
+/** Fork: the sender class of a loop's counterparty, or null when the policy could not be loaded. */
+type SenderClassifier = (l: OpenLoopRow) => SenderClass | null;
+
+function senderClassifier(policy: SenderClassPolicy | null): SenderClassifier {
+  return (l) => policy === null ? null : classifySender(l.counterparty_email, policy);
+}
+
+/** A reply-owed loop whose counterparty is a machine sender: labelled, never closed. */
+function isMachineMail(l: Pick<LoopView, 'loop_type' | 'sender_class'>): boolean {
+  return l.loop_type === 'unanswered_inbound' && isMachineSenderClass(l.sender_class);
+}
+
+function loopView(l: OpenLoopRow, trusted: boolean, deepLinks: Map<string, string>, classify: SenderClassifier): LoopView {
   const base: LoopView = {
     id: l.id,
     loop_type: l.loop_type,
@@ -261,7 +290,9 @@ function loopView(l: OpenLoopRow, trusted: boolean, deepLinks: Map<string, strin
     detector: l.detector,
     confidence: l.confidence,
     page_slug: l.page_slug,
+    sender_class: classify(l),
   };
+  if (isMachineMail(base)) base.label = 'machine_mail';
   if (trusted) {
     const q = l.evidence.find((e) => e.quote)?.quote;
     if (q) base.quote = q;
@@ -288,6 +319,15 @@ interface CounterpartyGroup {
   /** #5871: loops beyond the LOOPS_PER_GROUP shown; loop_count stays the total. */
   loops_omitted: number;
   context?: unknown;
+}
+
+/** Fork: reply-owed loops from machine senders, grouped by sender, apart from the people waiting on you. */
+interface MachineMailSection {
+  loop_count: number;
+  /** Senders in the section; `groups` shows at most `limit` of them. */
+  group_count: number;
+  groups: Array<CounterpartyGroup & { sender_class: SenderClass | null }>;
+  groups_omitted: number;
 }
 
 /** #5871: loops with neither a counterparty slug nor an email. Not a person, so never ranked. */
@@ -329,7 +369,7 @@ function renderLoopLine(lines: string[], l: LoopView, nowMs: number): void {
   // deliberately carry no age (it would freeze at detection time).
   const ageDays = Math.max(0, Math.floor((nowMs - Date.parse(l.last_activity_at)) / 86_400_000));
   const age = Number.isFinite(ageDays) ? ` (${ageDays}d)` : '';
-  lines.push(`- [${l.loop_type}] ${l.summary}${age}${due}`);
+  lines.push(`- [${l.loop_type}${l.label ? ' · machine mail, no reply owed' : ''}] ${l.summary}${age}${due}`);
   if (l.quote) lines.push(`  > "${l.quote}"`);
   if (l.deep_link) lines.push(`  ${l.deep_link}`);
 }
@@ -342,11 +382,19 @@ function renderNoCounterparty(lines: string[], none: NoCounterpartyLoops | null,
   if (none.loops_omitted > 0) lines.push(`+${none.loops_omitted} more`);
 }
 
+function renderMachineMail(lines: string[], machine: MachineMailSection | null): void {
+  if (!machine) return;
+  lines.push('', `## Machine mail — no reply owed (${machine.loop_count} open from ${machine.group_count} ${machine.group_count === 1 ? 'sender' : 'senders'})`);
+  for (const g of machine.groups) lines.push(`- ${g.counterparty_email ?? g.counterparty} [${g.sender_class ?? 'machine'}] (${g.loop_count} open)`);
+  if (machine.groups_omitted > 0) lines.push(`+${machine.groups_omitted} more senders`);
+}
+
 function renderText(groups: CounterpartyGroup[], none: NoCounterpartyLoops | null, stale: boolean, noGoogleSources: boolean | null,
   coverage: { completeness: 'complete' | 'partial'; held: HeldItemView[] }, nowMs: number,
-  partialStaleSources: string[]): string {
+  partialStaleSources: string[], machine: MachineMailSection | null, machineNotice: string | null): string {
   const lines: string[] = [];
   const { held } = coverage;
+  if (machineNotice) lines.push(`⚠ ${machineNotice}`);
   if (noGoogleSources === null) lines.push('⚠ the sources could not be read — whether a google source exists and when it last synced are unknown.');
   else if (stale) lines.push('⚠ google sources have not synced recently — this may be out of date.');
   else if (partialStaleSources.length > 0) {
@@ -357,7 +405,7 @@ function renderText(groups: CounterpartyGroup[], none: NoCounterpartyLoops | nul
   const partial = coverage.completeness === 'partial';
   const what = noGoogleSources === null ? 'the sources could not be read, so held mail is unknown.'
     : held.length ? `${held.length} held item(s) could not be imported:` : 'the held-item state could not be read.';
-  if (partial && groups.length === 0 && !none) {
+  if (partial && groups.length === 0 && !none && !machine) {
     lines.push(`No open loops found, but coverage is partial: ${what}`, ...partialLines(held));
     return lines.join('\n');
   }
@@ -365,6 +413,12 @@ function renderText(groups: CounterpartyGroup[], none: NoCounterpartyLoops | nul
   if (groups.length === 0 && none) {
     lines.push('No person is waiting on you; these open loops name no counterparty:');
     renderNoCounterparty(lines, none, nowMs);
+    renderMachineMail(lines, machine);
+    return lines.join('\n');
+  }
+  if (groups.length === 0 && machine) {
+    lines.push('No person is waiting on you; the open loops are machine mail, which owes no reply:');
+    renderMachineMail(lines, machine);
     return lines.join('\n');
   }
   if (groups.length === 0) {
@@ -389,6 +443,7 @@ function renderText(groups: CounterpartyGroup[], none: NoCounterpartyLoops | nul
     if (g.loops_omitted > 0) lines.push(`+${g.loops_omitted} more`);
   }
   renderNoCounterparty(lines, none, nowMs);
+  renderMachineMail(lines, machine);
   return lines.join('\n');
 }
 
@@ -411,7 +466,11 @@ const open_loops: Operation = {
     'no_google_sources: null, the sources could not be read); present the ' +
     'answer as partial and name the held items and their retry command. The grouped view also returns withheld_noise ' +
     '(null when none): open reply-owed loops from senders whose mail the detector now treats as automated, with a ' +
-    'per-sender preview_command for closing them.',
+    'per-sender preview_command for closing them. Every loop carries sender_class (from the counterparty address only: ' +
+    'person, unknown, or a machine class no_reply/sign_in/receipt/alert/machine). A reply-owed loop from a machine sender ' +
+    'carries label "machine_mail": it stays open but is not reply owed, so the grouped view lists it in machine_mail ' +
+    '(null when none) instead of groups, and reply_owed_count excludes it. When the label cannot be computed, ' +
+    'machine_mail_notice says why and every loop is returned as before with sender_class null.',
   params: {
     group_by: { type: 'string', enum: ['counterparty', 'none'], description: "Default 'counterparty' (ranked groups)." },
     status: { type: 'string', enum: ['open', 'done', 'dropped', 'stale'], description: "Default 'open', except with `id`, where any status matches." },
@@ -423,6 +482,7 @@ const open_loops: Operation = {
     source_id: { type: 'string', description: "Scope to one source (e.g. the google source, when the caller's transport is bound elsewhere). Remote callers must hold a grant covering it." },
     all_sources: { type: 'boolean', description: 'Trusted local: span every source in the brain. Remote callers stay inside their grant.' },
     as_of: { type: 'string', description: 'Reference time (ISO 8601) for due-date proximity, loop age and rendered ages. Default: now. Pin it to reproduce a ranking.' },
+    machine_mail: { type: 'string', enum: ['separate', 'inline', 'only'], description: `Machine-mail loops: 'separate' (default; grouped view lists them in machine_mail), 'inline' (left in their counterparty groups, labelled), or 'only' (just them). Senders are classed by address; ${LOOPS_PERSON_SENDERS_CONFIG_KEY} and ${LOOPS_MACHINE_SENDERS_CONFIG_KEY} in brain config override the built-in rules.` },
   },
   scope: 'read',
   annotations: { readOnlyHint: true },
@@ -434,6 +494,7 @@ const open_loops: Operation = {
         { def: open_loops.params.as_of, example: '2026-04-03T09:00:00Z' });
     }
     const groupBy = (p.group_by as string | undefined) ?? 'counterparty';
+    const machineMode = requestedMachineMailMode(ctx, p.machine_mail);
     const loopId = requestedLoopId(ctx, p.id);
     let status = (p.status ?? undefined) as LoopStatus | undefined;
     if (status === undefined && loopId === undefined) status = 'open';
@@ -480,6 +541,7 @@ const open_loops: Operation = {
       );
     }
     const loops = await listOpenLoops(ctx.engine, {
+      ...counterpartyGate(ctx, trusted), // fork: a counterparty page is named only when this caller may read it
       ...(scope.sourceIds ? { sourceIds: scope.sourceIds } : {}),
       ...(scope.sourceId ? { sourceIds: [scope.sourceId] } : {}),
       status,
@@ -498,13 +560,29 @@ const open_loops: Operation = {
     const partialStaleSources = freshness.stale ? [] : freshness.staleSources;
     const coverage = freshness.failed ? { completeness: 'partial' as const, held: [] } : await heldCoverage(ctx, freshness.sources, trusted);
     const deepLinks = trusted ? await deepLinksFor(ctx, loops) : new Map<string, string>();
+    // Fork: the machine-mail label, computed at read time from the counterparty address. Nothing is written.
+    const senderPolicy = await loadSenderPolicy(ctx.engine);
+    const machineNotice = senderPolicy.ok ? null
+      : `Machine mail could not be labelled: ${senderPolicy.reason}. Every loop is shown as before, reply-owed machine mail included.`;
+    if (!senderPolicy.ok && machineMode === 'only') {
+      throw opError('unavailable', `open_loops: ${machineNotice}`,
+        `Fix the brain config keys ${LOOPS_MACHINE_SENDERS_CONFIG_KEY} / ${LOOPS_PERSON_SENDERS_CONFIG_KEY} (comma-separated addresses or @domains; machine entries may add =class), or call without machine_mail 'only'.`);
+    }
+    const classify = senderClassifier(senderPolicy.ok ? senderPolicy.policy : null);
+    const views = loops.map((l) => ({ row: l, view: loopView(l, trusted, deepLinks, classify) }))
+      .filter((x) => machineMode !== 'only' || isMachineMail(x.view));
+    const machineMailCount = senderPolicy.ok ? views.filter((x) => isMachineMail(x.view)).length : null;
+    const replyOwedCount = views.filter((x) => x.view.loop_type === 'unanswered_inbound' && !isMachineMail(x.view)).length;
 
     if (groupBy === 'none') {
       const limit = Math.min(Math.max((p.limit as number | undefined) ?? 50, 1), 500);
       return {
-        loops: loops.slice(0, limit).map((l) => loopView(l, trusted, deepLinks)),
-        count: loops.length,
-        truncated: capped || loops.length > limit,
+        loops: views.slice(0, limit).map((x) => x.view),
+        count: views.length,
+        reply_owed_count: replyOwedCount,
+        machine_mail_count: machineMailCount,
+        machine_mail_notice: machineNotice,
+        truncated: capped || views.length > limit,
         stale: freshness.stale,
         sources: freshness.sources,
         ...(partialStaleSources.length > 0 ? { stale_sources: partialStaleSources } : {}),
@@ -516,18 +594,21 @@ const open_loops: Operation = {
     }
 
     const byKey = new Map<string, CounterpartyGroup>();
+    const machineByKey = new Map<string, CounterpartyGroup>();
     const unattributed: LoopView[] = [];
     const byType: NoCounterpartyLoops['by_type'] = {};
-    for (const l of loops) {
+    for (const { row: l, view } of views) {
       const counterpartySource = l.counterparty_source_id ?? l.source_id;
       // Two people with the same slug in different sources are two groups.
       const key = l.counterparty_slug ? `${counterpartySource}:${l.counterparty_slug}` : l.counterparty_email;
       if (key === null) {
-        unattributed.push(loopView(l, trusted, deepLinks));
+        unattributed.push(view);
         byType[l.loop_type] = (byType[l.loop_type] ?? 0) + 1;
         continue;
       }
-      let g = byKey.get(key);
+      // Fork: machine mail is grouped apart unless the caller asked for it inline.
+      const target = isMachineMail(view) && machineMode !== 'inline' ? machineByKey : byKey;
+      let g = target.get(key);
       if (!g) {
         g = {
           counterparty: l.counterparty_slug ?? key,
@@ -541,12 +622,12 @@ const open_loops: Operation = {
           loops: [],
           loops_omitted: 0,
         };
-        byKey.set(key, g);
+        target.set(key, g);
       }
       g.loop_count++;
       if (l.opened_at < g.oldest_opened_at) g.oldest_opened_at = l.opened_at;
       if (l.due_at && (!g.nearest_due_at || l.due_at < g.nearest_due_at)) g.nearest_due_at = l.due_at;
-      g.loops.push(loopView(l, trusted, deepLinks));
+      g.loops.push(view);
     }
 
     const backlinks = new Map<string, number>();
@@ -582,6 +663,14 @@ const open_loops: Operation = {
       .map((g) => ({ ...g, ...capLoops(g.loops) }));
     const noCounterparty: NoCounterpartyLoops | null = unattributed.length === 0 ? null
       : { loop_count: unattributed.length, by_type: byType, ...capLoops(unattributed) };
+    const machineGroups = [...machineByKey.values()];
+    const machineMail: MachineMailSection | null = machineGroups.length === 0 ? null : {
+      loop_count: machineGroups.reduce((n, g) => n + g.loop_count, 0),
+      group_count: machineGroups.length,
+      groups: rankGroups(machineGroups, new Map(), nowMs).slice(0, limit)
+        .map((g) => ({ ...g, ...capLoops(g.loops), sender_class: g.loops[0]?.sender_class ?? null })),
+      groups_omitted: Math.max(0, machineGroups.length - limit),
+    };
 
     // Entity-card context (zero-LLM, trusted local only).
     if (trusted && (p.include_context as boolean | undefined) !== false) {
@@ -604,8 +693,12 @@ const open_loops: Operation = {
     return {
       groups,
       no_counterparty: noCounterparty,
+      machine_mail: machineMail,
       ...(loopId === undefined ? { withheld_noise: await withheldNoise(ctx, freshness.sources) } : {}),
-      count: loops.length,
+      count: views.length,
+      reply_owed_count: replyOwedCount,
+      machine_mail_count: machineMailCount,
+      machine_mail_notice: machineNotice,
       truncated: capped,
       stale: freshness.stale,
       sources: freshness.sources,
@@ -616,7 +709,7 @@ const open_loops: Operation = {
       redacted: !trusted,
       as_of: new Date(nowMs).toISOString(),
       ...(trusted && loopId === undefined
-        ? { text: renderText(groups, noCounterparty, freshness.stale, noGoogleSources, coverage, nowMs, partialStaleSources) }
+        ? { text: renderText(groups, noCounterparty, freshness.stale, noGoogleSources, coverage, nowMs, partialStaleSources, machineMail, machineNotice) }
         : {}),
     };
   },
@@ -634,6 +727,27 @@ function requestedLoopId(ctx: OperationContext, raw: unknown): number | undefine
   if (typeof raw === 'number' && Number.isSafeInteger(raw) && raw >= 1) return raw;
   throw invalidParam(ctx, 'open_loops', 'id', 'open_loops: id must be a whole number of 1 or more.',
     { def: open_loops.params.id, example: 42 });
+}
+
+/** open_loops `machine_mail`: absent means 'separate'; anything outside the enum is refused. */
+function requestedMachineMailMode(ctx: OperationContext, raw: unknown): MachineMailMode {
+  if (raw === undefined || raw === null) return 'separate';
+  if (raw === 'separate' || raw === 'inline' || raw === 'only') return raw;
+  throw invalidParam(ctx, 'open_loops', 'machine_mail', "open_loops: machine_mail must be 'separate', 'inline' or 'only'.",
+    { def: open_loops.params.machine_mail, example: 'separate' });
+}
+
+/**
+ * Fork: a remote caller is named a counterparty page (its slug, its source, a slug filter's match) only when it may
+ * read that page: the page sits in its grant and passes its page read access (readers, folder rules, privacy;
+ * privatePagesFilterForCaller). Sync resolves a correspondent to a person page in ANY source (google/counterparty.ts);
+ * otherwise the loop comes back by its email alone, never dropped. The grant, not the narrowed scope, decides: a page
+ * in another granted source is the caller's to read. Trusted local reads keep every name.
+ */
+function counterpartyGate(ctx: OperationContext, trusted: boolean): { counterpartyGate?: { sourceIds: string[]; pageSql: string } } {
+  if (trusted) return {};
+  const grant = sourceScopeOpts(ctx);
+  return { counterpartyGate: { sourceIds: grant.sourceIds ?? (grant.sourceId ? [grant.sourceId] : []), pageSql: privatePagesFilterForCaller('cp') } };
 }
 
 function grantedSources(ctx: OperationContext): string[] {

@@ -28,7 +28,8 @@ import { QM_PERSONAL_OPS, qmMemoryToolResult, recallArguments, unlinkedRecallRes
 import { resolveBrainId } from '../core/brain-resolver.ts';
 import { getCliOptions } from '../core/cli-options.ts';
 import { VERB_NAMES, MEMORY_VERBS_VERSION } from '../core/verbs.ts';
-import { cliRenderContext, orderNotices, redactForTransport, renderAction, renderNotice, toAgentError, toolErrorResult, toolResultWithNotices, type Notice, type RenderContext } from '../core/agent-output.ts';
+import { cliRenderContext, orderNotices, redactForTransport, renderAction, renderNotice, toAgentError, toolErrorResult, toolResultWithNotices, noticeBlocks, shapedToolResult, type Notice, type RenderContext } from '../core/agent-output.ts';
+import { outputShaper, shapeText, type OutputShaper } from '../core/ops/output-format.ts'; // ours (governedwork fork)
 import { cliOnlyRefusal, isCallable } from '../core/ops/callable.ts';
 import { hostFix, scopeDeniedError } from '../core/ops/op-fix.ts';
 import { mutedNoticeCodes, processNoticeLedger, __resetProcessNoticeLedgerForTests, type NoticeLedger, type NoticeAudience } from '../core/notice-ledger.ts';
@@ -1185,12 +1186,16 @@ async function roomCapFallback(build: (meta: Record<string, unknown>, extra: Not
 }
 
 function assembleToolResult(
-  call: { name: string; result: unknown; batchError: boolean; evidence: (retrieval: unknown) => string[]; tail: ToolTail | undefined; opts: DispatchOpts },
+  call: { name: string; result: unknown; batchError: boolean; evidence: (retrieval: unknown) => string[]; tail: ToolTail | undefined; opts: DispatchOpts; shaper: OutputShaper | null },
   body: unknown, shown: Notice[], stamped: Notice[], meta: Record<string, unknown>, hook: Record<string, unknown> | undefined,
 ): ToolResult {
-  const built: ToolResult = call.batchError ? toolErrorResult(body as never) : toolResultWithNotices(body, shown, dispatchRenderContext(call.opts));
   const evidenceBlocks = call.evidence(meta.retrieval);
-  if (evidenceBlocks.length > 0) built.content.splice(1, 0, ...evidenceBlocks.map(text => ({ type: 'text' as const, text })));
+  const render = dispatchRenderContext(call.opts);
+  // Ours (governedwork fork): format text|hook (ops/output-format.ts) answers in ONE block, evidence and notices folded in.
+  const built: ToolResult = call.batchError ? toolErrorResult(body as never)
+    : call.shaper ? shapedToolResult(shapeText(call.shaper, body, [...evidenceBlocks, ...noticeBlocks(shown, render)]), shown, render)
+    : toolResultWithNotices(body, shown, render);
+  if (evidenceBlocks.length > 0 && !call.shaper) built.content.splice(1, 0, ...evidenceBlocks.map(text => ({ type: 'text' as const, text })));
   // _meta assembly (WP2 amendment 9): one producer per top-level key,
   // each isolated — handler-emitted keys (retrieval, warnings) attach
   // BEFORE and independently of the metaHook, so a hot-memory hook
@@ -1252,7 +1257,7 @@ async function dispatchResolvedCall(
     return unknownToolEnvelope(name, opts, undefined, await grantBlockedNotices(engine, opts, true));
   }
   // F5: an owner-only op is never listed on MCP; a call gets the exact CLI command.
-  if (op.cliOnly && opts.remote !== false) return errorResult(cliOnlyRefusal(op), opts, { op: name });
+  if (op.cliOnly && opts.remote !== false) return errorResult(cliOnlyRefusal(op, params), opts, { op: name });
 
   // --source-guard (plugin lanes): fail-closed write routing. A user-global
   // plugin serve has no per-workspace source binding, so an ambient-tier
@@ -1463,8 +1468,9 @@ async function dispatchResolvedCall(
     if (!batchError) notices.push(...await sessionSafetyNotices(engine, opts, ctx.config), ...await grantBlockedNotices(engine, opts, false));
     let { hookOut, room } = opts.roomDeclaration && ctx.remote !== false && !batchError ? await markForRoom(engine, opts, name, result, responseMeta.retrieval, ctx, metaHook && (earlyMeta ?? runMetaHook(metaHook, name, ctx))) : { hookOut: undefined, room: null };
     const admitted = admitNotices(room ? [...notices, ...room.notices] : notices, opts);
+    const shaper = batchError ? null : await outputShaper(op, safeParams); // ours (governedwork fork): format text|hook
     const assemble = (body: unknown, shown: Notice[], stamped: Notice[], meta: Record<string, unknown>, hook: Record<string, unknown> | undefined) =>
-      assembleToolResult({ name, result, batchError, evidence, tail, opts }, body, shown, stamped, meta, hook);
+      assembleToolResult({ name, result, batchError, evidence, tail, opts, shaper }, body, shown, stamped, meta, hook);
     if (opts.transport === 'stdio') {
       maybeRefreshBackupStatusInProcess(engine);
     }

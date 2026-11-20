@@ -133,10 +133,20 @@ function notFound(ref: string, what: string): Error {
 
 interface RowTarget { table: 'facts' | 'takes'; id: number; sourceId: string; tier: TrustTier; text: string; binding: string; live: boolean }
 
+/**
+ * governedwork fork (F14): a row's binding covers every column that says what the row asserts, how it is qualified or
+ * who reads it, not only what `recall` or `takes_list` project, so a confirm bound to a preview (`confirm_memory`'s
+ * `binding`) refuses a row edited in any of them. For a fact that includes its visibility (a private fact is read by the
+ * owner and by a private-facts grant, v319) and the labels of its provenance page (its readers and folder rules), which
+ * decide who reads it. Left out: embeddings and their bookkeeping, fence placement (row_num, source_window) and
+ * consolidation, which maintenance moves on its own and which change nothing the owner approved.
+ */
 async function readFactTarget(engine: BrainEngine, id: number): Promise<RowTarget | null> {
   const [row] = await engine.executeRaw<Record<string, unknown>>(
-    `SELECT id, source_id, trust_tier, fact, entity_slug, kind, claim_metric, claim_value, claim_unit, claim_period, value, event_type, dimension, context,
-            expired_at, superseded_by FROM facts WHERE id = $1`, [id]);
+    `SELECT f.id, f.source_id, f.trust_tier, f.fact, f.entity_slug, f.kind, f.claim_metric, f.claim_value, f.claim_unit, f.claim_period, f.value, f.event_type,
+            f.dimension, f.context, f.visibility, f.notability, f.confidence, f.valid_from, f.valid_until, f.source, f.source_session, f.attributed_to,
+            f.source_markdown_slug, p.page_readers AS provenance_readers, p.folder_rule_ids AS provenance_folder_rules, f.expired_at, f.superseded_by
+       FROM facts f LEFT JOIN pages p ON p.source_id = f.source_id AND p.slug = f.source_markdown_slug WHERE f.id = $1`, [id]);
   if (!row) return null;
   return { table: 'facts', id, sourceId: String(row.source_id), tier: storedTrustTier(row.trust_tier), text: String(row.fact ?? ''),
     binding: bindingOf({ ...row, expired_at: row.expired_at ? String(row.expired_at) : null }), live: !row.expired_at };
@@ -144,7 +154,8 @@ async function readFactTarget(engine: BrainEngine, id: number): Promise<RowTarge
 
 async function readTakeTarget(engine: BrainEngine, id: number): Promise<RowTarget | null> {
   const [row] = await engine.executeRaw<Record<string, unknown>>(
-    `SELECT t.id, p.source_id, t.trust_tier, t.claim, t.kind, t.holder, t.active, t.superseded_by
+    `SELECT t.id, p.source_id, t.trust_tier, t.claim, t.kind, t.holder, t.weight, t.since_date, t.until_date, t.source, t.active, t.superseded_by,
+            t.resolved_at, t.resolved_outcome, t.resolved_value, t.resolved_unit, t.resolved_source, t.resolved_by, t.resolved_quality
        FROM takes t JOIN pages p ON p.id = t.page_id WHERE t.id = $1`, [id]);
   if (!row) return null;
   return { table: 'takes', id, sourceId: String(row.source_id), tier: storedTrustTier(row.trust_tier), text: String(row.claim ?? ''),
@@ -477,7 +488,8 @@ function fromDecision(action: OwnerActionName, d: TrustDecisionResult): OwnerAct
 
 function asPageResult(action: OwnerActionName, r: PageActionResult): OwnerActionResult {
   return { action, ref: r.ref, status: r.status, tier: r.tier, prior_tier: r.prior_tier,
-    detail: { ...(r.marker_removed !== undefined ? { marker_removed: r.marker_removed } : {}), ...(r.version_id !== undefined ? { version_id: r.version_id } : {}) } };
+    detail: { ...(r.marker_removed !== undefined ? { marker_removed: r.marker_removed } : {}), ...(r.version_id !== undefined ? { version_id: r.version_id } : {}),
+      ...(r.revision !== undefined ? { revision: r.revision } : {}) } };
 }
 
 /**
@@ -520,7 +532,8 @@ export async function applyOwnerAction(engine: BrainEngine, input: OwnerActionIn
       }
       if (ref?.kind === 'page') {
         const { sourceId, slug } = await resolvePageRef(engine, ref, input.source);
-        if (!preview.raises) return { action: 'confirm', ref: preview.ref, status: 'unchanged', tier: 'user_confirmed', prior_tier: 'user_confirmed' };
+        // governedwork fork (F15): nothing to write; the revision is the one this call's preview read and its binding matched.
+        if (!preview.raises) return { action: 'confirm', ref: preview.ref, status: 'unchanged', tier: 'user_confirmed', prior_tier: 'user_confirmed', detail: { revision: preview.revision! } };
         return asPageResult('confirm', await confirmPage(engine, { sourceId, slug, expectedRevision: preview.revision!, confirmation, by, config: opts.config, ctx: opts.ctx }));
       }
       if (ref?.kind === 'proposal') return fromDecision('confirm', await decideTrustProposal(engine, ref.id, 'accept', decision));

@@ -48,12 +48,14 @@ const LEDGER: Record<string, string> = {
   list_pages: 'test/list-pages-truncation.test.ts',
   find_pages: 'test/page-lookup-7191.test.ts',
   restore_page: 'test/pages-source-scoping-4329.test.ts',
+  rename_page: 'test/rename-page-op.test.ts',
   purge_deleted_pages: 'test/operations-trust-boundary.test.ts',
   purge_fact: 'test/purge-fact.test.ts',
   promote_guest_note: 'test/guest-notes-promotion.test.ts',
   confirm_memory: 'test/trust-owner-actions.test.ts',
   list_page_purges: 'test/page-purge.test.ts',
   unpurge_page: 'test/page-purge.test.ts',
+  prune_page_versions: 'test/versions.test.ts',
   capture: 'test/capture-op.test.ts',
   edit_page: 'test/edit-page.test.ts',
   append_page: 'test/large-pages/append-concurrency.test.ts',
@@ -198,6 +200,8 @@ const LEDGER: Record<string, string> = {
   schema_explain_type: 'test/operations-schema-pack.test.ts',
   schema_review_orphans: 'test/operations-schema-pack.test.ts',
   schema_apply_mutations: 'test/operations-schema-pack.test.ts',
+  put_schema_pack: 'test/fork-brain-resident-schema-packs.test.ts', // ours (governedwork fork)
+  get_schema_pack: 'test/fork-brain-resident-schema-packs.test.ts', // ours (governedwork fork)
   reload_schema_pack: 'test/operations-schema-pack.test.ts',
   run_onboard: 'test/ops-run-onboard-scope-gate.serial.test.ts',
   run_skillopt: 'test/skillopt/run-skillopt-op.serial.test.ts',

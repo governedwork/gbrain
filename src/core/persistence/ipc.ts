@@ -20,7 +20,7 @@ export const PERSISTENCE_IPC_VERSION = 1;
 export const PERSISTENCE_IPC_MAX_BYTES = 32 * 1024 * 1024;
 export const PERSISTENCE_IPC_MAX_CONNECTIONS = 8;
 export const PERSISTENCE_IPC_OPERATIONS = [
-  'put_page', 'put_pages', 'capture', 'delete_page', 'restore_page', 'revert_version', 'edit_page', 'append_page',
+  'put_page', 'put_pages', 'capture', 'delete_page', 'restore_page', 'rename_page', 'revert_version', 'edit_page', 'append_page',
   'remember', 'forget', 'extract_facts', 'get_write_request', 'list_write_requests', 'cancel_write_request',
   'get_page', 'fetch', 'get_recent_transcripts',
   'list_skills', 'get_skill', 'get_skill_asset', 'list_brain_skillpack',
@@ -28,7 +28,7 @@ export const PERSISTENCE_IPC_OPERATIONS = [
   'get_skill_policy', 'set_skill_policy', 'get_skill_retention', 'prune_skill_revisions',
   'retain_skill_revision', 'import_skill_proposal',
   'add_tag', 'remove_tag', 'add_timeline_entry', 'add_link', 'remove_link', 'takes_add', 'takes_update', 'takes_supersede', 'takes_resolve', 'takes_remove', 'takes_rebuild',
-  'purge_fact', 'list_page_purges', 'unpurge_page',
+  'purge_fact', 'list_page_purges', 'unpurge_page', 'prune_page_versions',
 ] as const;
 /**
  * Owner-only operations the resident owner runs for its verified local CLI
@@ -36,11 +36,11 @@ export const PERSISTENCE_IPC_OPERATIONS = [
  * whatever the writer grant's scopes. The CLI asks for the user's typed
  * confirmation before it sends one; the handler re-checks that binding.
  */
-export const LOCAL_CLI_OWNER_OPERATIONS: ReadonlySet<string> = new Set(['purge_fact', 'list_page_purges', 'unpurge_page']);
+export const LOCAL_CLI_OWNER_OPERATIONS: ReadonlySet<string> = new Set(['purge_fact', 'list_page_purges', 'unpurge_page', 'prune_page_versions']);
 export type PersistenceIpcOperation = typeof PERSISTENCE_IPC_OPERATIONS[number];
 const OPERATIONS = new Set<string>(PERSISTENCE_IPC_OPERATIONS);
 const MUTATIONS = new Set<string>([
-  'put_page', 'put_pages', 'capture', 'delete_page', 'restore_page', 'revert_version', 'edit_page', 'append_page', 'remember', 'forget', 'extract_facts',
+  'put_page', 'put_pages', 'capture', 'delete_page', 'restore_page', 'rename_page', 'revert_version', 'edit_page', 'append_page', 'remember', 'forget', 'extract_facts',
   'put_skill', 'delete_skill', 'import_skill_proposal',
   'add_tag', 'remove_tag', 'add_timeline_entry', 'add_link', 'remove_link', 'takes_add', 'takes_update', 'takes_supersede', 'takes_resolve', 'takes_remove', 'takes_rebuild',
 ]);

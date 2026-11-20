@@ -28,7 +28,8 @@ export interface PreimageGap { event_id: number; slug: string; event_type: strin
 
 /**
  * Doctor's scan: page events whose `revision_before` no version of the live page holds, on a page whose
- * versions are never pruned. Bounded to the last `windowDays` unless `deep`.
+ * versions are never pruned by policy, and that no owner prune removed (page_version_prunes, fork: `prune_page_versions`).
+ * Bounded to the last `windowDays` unless `deep`.
  */
 export async function preimageGaps(engine: Pick<BrainEngine, 'executeRaw'>, sourceId: string, opts: { limit?: number; deep?: boolean; windowDays?: number } = {}): Promise<PreimageGap[]> {
   const rows = await engine.executeRaw<PreimageGap>(`SELECT e.id AS event_id, e.slug, e.event_type, e.value->>'revision_before' AS revision, e.recorded_at
@@ -44,6 +45,7 @@ export async function preimageGaps(engine: Pick<BrainEngine, 'executeRaw'>, sour
       AND NOT EXISTS (SELECT 1 FROM page_versions v WHERE v.page_id = p.id AND (v.body_storage = 'segmented'
         OR COALESCE(v.body_bytes, octet_length(COALESCE(v.compiled_truth, '')) + octet_length(COALESCE(v.timeline, ''))) > $4))
       AND NOT EXISTS (SELECT 1 FROM page_versions v WHERE v.page_id = p.id AND v.knowledge_revision = (e.value->>'revision_before')::uuid)
+      AND NOT EXISTS (SELECT 1 FROM page_version_prunes x WHERE x.page_id = p.id AND x.knowledge_revision = (e.value->>'revision_before')::uuid)
     ORDER BY e.id DESC LIMIT ${Math.max(1, Math.floor(opts.limit ?? 100))}`, [sourceId, opts.deep === true, opts.windowDays ?? 30, PAGE_INLINE_MAX_BYTES]);
   return rows.map(r => ({ ...r, event_id: Number(r.event_id), recorded_at: new Date(r.recorded_at).toISOString() }));
 }

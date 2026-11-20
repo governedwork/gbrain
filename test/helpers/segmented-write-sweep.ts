@@ -125,6 +125,13 @@ export const PAGE_OPS: Record<string, Case> = {
   extraction_review: { who: LOCAL, run: op('extraction_review', (_f, slug) => ({ action: 'distinct', slugs: [slug], of: OTHER })) },
   entity_identity_link: { who: LOCAL, run: op('entity_identity_link', (_f, slug) => ({ entity_id: 'acme-example', slug, source_id: SRC })) },
   delete_page: { who: REMOTE, replaces: true, run: op('delete_page', async (f, slug) => ({ slug, expected_revision: await f.revision(slug) })) },
+  // Ours (governedwork fork): rename_page moves the segmented page and a local rename moves it back for the next binding.
+  rename_page: { who: REMOTE, run: async (f, slug, who) => {
+    const moved = slug + '-renamed-' + who;
+    const out = await f.call(who, 'rename_page', { slug, new_slug: moved, expected_revision: await f.revision(slug), request_id: randomUUID() });
+    if (!out.isError) await f.call('local', 'rename_page', { slug: moved, new_slug: slug, expected_revision: await f.revision(moved), request_id: randomUUID() });
+    return out;
+  } },
   restore_page: { who: REMOTE, replaces: true, run: async (f, slug, who) => {
     await f.call('local', 'delete_page', { slug, expected_revision: await f.revision(slug) });
     return f.call(who, 'restore_page', { slug, expected_revision: await f.revision(slug) });
@@ -156,9 +163,13 @@ export const NO_PAGE_TARGET: Record<string, string> = {
   entity_identity_unlink: 'removes an identity row by entity id and slug; no page read',
   purge_fact: 'admin purge of fact rows; a segmented fence read is pinned by the withdrawal suites',
   unpurge_page: 'clears a purge tombstone; the page no longer exists',
+  // Ours (governedwork fork, L144): the page id is read by SQL under the page key lock; no Page object is loaded
+  prune_page_versions: 'deletes page_versions rows of one page by id; no Page object; its segmented-version sweep is pinned in test/versions.test.ts',
   memory_write: 'writes only to the caller\'s member page or memory/scope; the segmented scope page is pinned in remember-segmented-entity-9213',
   set_memory_writeback: 'config', memory_conversation_mode: 'config', mute_notice: 'config',
   code_traversal_cache_clear: 'cache', migrate_embeddings: 'embeddings', schema_apply_mutations: 'schema pack',
+  // Ours (governedwork fork): a brain-resident pack revision lives in schema_pack_revisions/heads, never in a page
+  put_schema_pack: 'brain-resident schema pack rows (schema-pack/db-store.ts), not pages',
   run_onboard: 'onboarding job', run_skillopt: 'skill optimizer',
   loops_close: 'open-loop rows', loops_mute: 'open-loop rows', loops_unmute: 'open-loop rows',
   questions_pin: 'pinned questions', questions_refresh: 'pinned questions', questions_unpin: 'pinned questions',

@@ -41,7 +41,7 @@ import { authorizeWrite, slugDisclosable } from './authority.ts';
 import { remoteLabelsChecked, defaultSourceMemberWriter, defaultSourceWriterIsOwner, defaultSourceWriterReaders, ownerRewriteOf, storedWriterReadsHeld } from './page-visibility.ts';
 import { loadFenceChunkOverlay } from '../eligibility/fence-overlay.ts';
 import { findLiveFileClaimants, type FileClaimant, type FileClaimTarget } from './file-claims.ts';
-import { digest, sha256 } from './digest.ts';
+import { digest, sha256, stableJson } from './digest.ts';
 import { replaceableFile } from '../facts/file-body-guard.ts';
 import { getWorktreeBinding } from './ownership.ts';
 import type { PreparedContentImport } from './prepared-import.ts';
@@ -56,7 +56,7 @@ import { isStagingBodyRef, prepareStagedUpload } from './page-upload.ts';
 import { pipelined } from '../page-state/transactions.ts';
 import { overlayCanonicalBodies } from '../page-state/snapshot.ts';
 import { segmentedRevertRefusal } from '../page-state/versions.ts';
-import { bodyUnread, fenceBody, isSegmentedPage, pageBodySegmentedError, withoutBody } from '../page-body/page-shape.ts';
+import { bodyUnread, fenceBody, guardSegmentedBody, isSegmentedPage, pageBodySegmentedError, withoutBody } from '../page-body/page-shape.ts';
 import { fileBodyDigests, overlaidFileBodyDigests, storedBodyDigests, type ByteSource, type FileReading, type RegionDigests } from '../page-body/body-digests.ts';
 import { ledgerApplies, type BodyLedger } from '../page-body/segment-ledger.ts';
 import { inferredHeadPrefix } from '../page-body/streamed-import.ts';
@@ -74,7 +74,7 @@ import { preserveProtectedTakes } from './protected-takes.ts';
 import { assertPrivateRequestKept, privateRequestGuarded, readPrivateRequest } from './visibility-request.ts';
 import { isAutoLinkEnabled } from '../link-extraction.ts';
 import { prepareAutomaticLinks } from './links-preparation.ts';
-import { loadActivePackForEngine } from '../schema-pack/engine-resolution.ts';
+import { loadActivePackForEngineOrNull } from '../schema-pack/engine-resolution.ts';
 import { preparePageAdvisories, remoteLinkHint, pageNoopAdvisories, timelineRowsRemovedAdvisory } from './page-advisories.ts';
 import { assertKnowledgePublicationAllowed } from '../shared-skills/knowledge-guard.ts';
 import { colonSlugWindowsRefusal, isWindowsColonTarget, nativeFileTarget } from './native-file-target.ts';
@@ -935,17 +935,32 @@ export const segmentedTagWork = { flips: 0, hashStreams: 0 };
 export async function prepareSegmentedTagMutation(engine: BrainEngine, row: WriteRequest, snapshot: PageSnapshot, tags: string[]): Promise<PreparedMutation | null> {
   const tagHold = tagLengthHold(tags);
   if (tagHold) throw contentRefusalError(tagHold, TAG_TOO_LONG_SUGGESTION, { legacy_error: 'invalid_params' });
+  return prepareSegmentedMetadataMutation(engine, row, snapshot, { tags });
+}
+
+/**
+ * governedwork fork (F16): the same metadata flip for a change of the page's tags and/or its frontmatter (the owner's
+ * trust marker and label change, trust/page-handlers.ts): the frontmatter column is written (its triggers derive
+ * page_readers from readable_by, and the trust trigger stamps the tier under the owner's promotion), the body stays in
+ * its segments, and the canonical file streams the new frontmatter ahead of the unchanged body.
+ */
+export async function prepareSegmentedMetadataMutation(engine: BrainEngine, row: WriteRequest, snapshot: PageSnapshot,
+  change: { tags?: string[]; frontmatter?: Record<string, unknown> }): Promise<PreparedMutation | null> {
   const source = { sourceId: row.source_id };
+  const tags = change.tags ?? snapshot.tags;
+  const frontmatter = change.frontmatter ?? snapshot.page.frontmatter ?? {};
   const [, pack, storedTier] = await Promise.all([assertKnowledgePublicationAllowed(engine, row),
-    loadActivePackForEngine(engine, { remote: row.authority.remote, sourceId: row.source_id }).catch(() => null), storedPageTier(engine, row.source_id, row.slug)]);
-  const noop = tags.length === snapshot.tags.length && tags.every(tag => snapshot.tags.includes(tag));
-  const trust = pageWriteTrust(row, snapshot.page.frontmatter);
+    loadActivePackForEngineOrNull(engine, { remote: row.authority.remote, sourceId: row.source_id }), storedPageTier(engine, row.source_id, row.slug)]);
+  const frontmatterChanged = stableJson(frontmatter) !== stableJson(snapshot.page.frontmatter ?? {});
+  const noop = !frontmatterChanged && tags.length === snapshot.tags.length && tags.every(tag => snapshot.tags.includes(tag));
+  const trust = pageWriteTrust(row, frontmatter);
   const gateTrust = pageGateTrust(row, trust, storedTier);
   if (!noop && gateTrust && writeGateApplies(gateTrust.tier, (await loadImportSanityConfig(engine)).writeGate ?? DEFAULT_WRITE_GATE_CONFIG)
     && gateTrust.tier === 'external_untrusted') return null;
   const pageId = Number(snapshot.page.id);
-  const hash = noop ? snapshot.page.content_hash : await segmentedContentHash(engine, snapshot, tags);
-  const file = row.worktree_id ? await prepareFileTarget(engine, row, snapshot, await unreadPageFile(engine, { ...snapshot, tags }), undefined,
+  const hash = noop ? snapshot.page.content_hash : await segmentedContentHash(engine, snapshot, tags, frontmatter);
+  const page = frontmatterChanged ? guardSegmentedBody({ ...withoutBody(snapshot.page), frontmatter } as Page, 'prepareSegmentedMetadataMutation') : snapshot.page;
+  const file = row.worktree_id ? await prepareFileTarget(engine, row, snapshot, await unreadPageFile(engine, { ...snapshot, page, tags }), undefined,
     { activePack: pack?.manifest, remote: row.authority.remote }) : undefined;
   const sealed = snapshot.page.text_projection_revision === snapshot.revision;
   return { observedRevision: snapshot.revision, noop, file, ...await pageDatabaseOnlyPublication(engine, row, file), ...(trust ? { trust } : {}),
@@ -954,18 +969,19 @@ export async function prepareSegmentedTagMutation(engine: BrainEngine, row: Writ
       await tx.createVersion(row.slug, source);
       for (const tag of snapshot.tags) if (!tags.includes(tag)) await tx.removeTag(row.slug, tag, source);
       for (const tag of tags) if (!snapshot.tags.includes(tag)) await tx.addTag(row.slug, tag, source);
-      await tx.executeRaw('UPDATE pages SET content_hash=$2, updated_at=now() WHERE id=$1', [pageId, hash]);
+      if (frontmatterChanged) await tx.executeRaw('UPDATE pages SET frontmatter=$3::text::jsonb, content_hash=$2, updated_at=now() WHERE id=$1', [pageId, hash, JSON.stringify(frontmatter)]);
+      else await tx.executeRaw('UPDATE pages SET content_hash=$2, updated_at=now() WHERE id=$1', [pageId, hash]);
       if (sealed) await sealSegmentedPage(tx, pageId);
       segmentedTagWork.flips++;
       return { ...remoteLinkHint(row), status: 'created_or_updated', slug: row.slug, source_id: row.source_id, chunks: 0, noop: false,
-        searchable: isQuarantined(snapshot.page.frontmatter) ? false : sealed ? true : 'pending', ...await sizeStateField(tx, row.source_id, row.slug, snapshot.page) };
+        searchable: isQuarantined(frontmatter) ? false : sealed ? true : 'pending', ...await sizeStateField(tx, row.source_id, row.slug, page) };
     } };
 }
 
-/** The content_hash of a segmented page with `tags`: its stored body and frontmatter, resumed from the last live manifest row's midstate. */
-async function segmentedContentHash(engine: BrainEngine, snapshot: PageSnapshot, tags: string[]): Promise<string> {
+/** The content_hash of a segmented page with `tags` and `frontmatter`: its stored body, resumed from the last live manifest row's midstate. */
+async function segmentedContentHash(engine: BrainEngine, snapshot: PageSnapshot, tags: string[], frontmatter: Record<string, unknown> = snapshot.page.frontmatter): Promise<string> {
   const pageId = Number(snapshot.page.id);
-  const meta = { frontmatter: snapshot.page.frontmatter, tags };
+  const meta = { frontmatter, tags };
   const last = (await engine.readManifest(pageId)).at(-1);
   const resumed = last ? (() => { try { return ContentHashStream.fromState(last.hashState); } catch { return null; } })() : null;
   if (resumed && resumed.finish({ frontmatter: snapshot.page.frontmatter, tags: snapshot.tags }) === snapshot.page.content_hash) return resumed.finish(meta);
@@ -1045,11 +1061,11 @@ async function prepareInlineOrSegmentedMutation(unbounded: BrainEngine, row: Wri
   const [, stored, pack] = await pipelined(together, [
     () => assertKnowledgePublicationAllowed(engine, row),
     () => engine.readPageSnapshot(row.slug, { ...source, includeDeleted: true }),
-    () => loadActivePackForEngine(engine, { remote: row.authority.remote, sourceId: row.source_id }).catch(() => null),
-  ]) as [unknown, PageSnapshot | null, Awaited<ReturnType<typeof loadActivePackForEngine>> | null];
-  // Wave B (spec 6.3): edit_page on a segmented page splices the touched segments; a declined edit takes the string path.
+    () => loadActivePackForEngineOrNull(engine, { remote: row.authority.remote, sourceId: row.source_id }),
+  ]) as [unknown, PageSnapshot | null, Awaited<ReturnType<typeof loadActivePackForEngineOrNull>>];
+  // Wave B (spec 6.3): edit_page on a segmented page splices the touched segments; a declined edit takes the string path. Ours: revert_version repairs an untiled one (untiled-revert.ts).
   const segmented = row.operation === 'edit_page' && stored && !stored.page.deleted_at && isSegmentedPage(stored.page) && stored.page.id === row.page_id
-    ? await prepareSegmentedEditMutation(engine, row, stored) : null;
+    ? await prepareSegmentedEditMutation(engine, row, stored) : row.operation === 'revert_version' && stored ? await (await import('./untiled-revert.ts')).prepareUntiledRevert(engine, row, stored) : null;
   if (segmented) return segmented;
   // Wave B: a segmented page within the single-string ceiling is compared and merged as strings.
   const snapshot = await materializedSnapshot(unbounded, stored);

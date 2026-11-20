@@ -35,6 +35,7 @@ const load_orphans = () => import('./ops/orphans.ts') as Promise<Record<string, 
 const load_page_append = () => import('./ops/page-append.ts') as Promise<Record<string, unknown>>;
 const load_page_batch = () => import('./ops/page-batch.ts') as Promise<Record<string, unknown>>;
 const load_page_edit = () => import('./ops/page-edit.ts') as Promise<Record<string, unknown>>;
+const load_page_rename = () => import('./ops/page-rename.ts') as Promise<Record<string, unknown>>;
 const load_page_upload = () => import('./ops/page-upload.ts') as Promise<Record<string, unknown>>;
 const load_pages = () => import('./ops/pages.ts') as Promise<Record<string, unknown>>;
 const load_persistence = () => import('./ops/persistence.ts') as Promise<Record<string, unknown>>;
@@ -75,6 +76,7 @@ export const OPERATION_LOADERS: Record<string, readonly [() => Promise<Record<st
   "purge_deleted_pages": [load_pages, "pagesOperations"],
   "capture": [load_pages, "pagesOperations"],
   "fetch": [load_pages, "pagesOperations"],
+  "rename_page": [load_page_rename, "pageRenameOperations"],
   "find_pages": [load_find_pages, "findPagesOperations"],
   "edit_page": [load_page_edit, "pageEditOperations"],
   "append_page": [load_page_append, "pageAppendOperations"],
@@ -229,6 +231,7 @@ export const OPERATION_LOADERS: Record<string, readonly [() => Promise<Record<st
   "purge_fact": [load_purge, "purgeOperations"],
   "list_page_purges": [load_purge, "purgeOperations"],
   "unpurge_page": [load_purge, "purgeOperations"],
+  "prune_page_versions": [load_purge, "purgeOperations"],
   "memory_recall": [load_qm_memory, "qmMemoryOperations"],
   "memory_write": [load_qm_memory, "qmMemoryOperations"],
   "memory_propose": [load_qm_memory, "qmMemoryOperations"],
@@ -255,6 +258,8 @@ export const OPERATION_LOADERS: Record<string, readonly [() => Promise<Record<st
   "schema_review_orphans": [load_schema_packs, "schemaPacksOperations"],
   "schema_apply_mutations": [load_schema_packs, "schemaPacksOperations"],
   "reload_schema_pack": [load_schema_packs, "schemaPacksOperations"],
+  "put_schema_pack": [load_schema_packs, "schemaPacksOperations"],
+  "get_schema_pack": [load_schema_packs, "schemaPacksOperations"],
   "run_onboard": [load_skillopt, "skilloptOperations"],
   "run_skillopt": [load_skillopt, "skilloptOperations"],
   "open_loops": [load_loops, "loopsOperations"],

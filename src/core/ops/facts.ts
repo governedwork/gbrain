@@ -56,6 +56,8 @@ import { withDecideContested, type ContestedLookup } from '../facts/contested-cl
 import type { TrustTier } from '../trust/tier.ts';
 import { AUDIT_ROW_SOURCES } from '../facts/audit-sources.ts';
 import { parseSinceParam } from '../facts/since-parse.ts';
+import { mergeNewest, parseRecallOffset, readRecallPage, type FactRead } from '../facts/recall-page.ts';
+import { parseRecallFactId, readFactById, withTrustContestedFacts } from '../facts/recall-fact-id.ts';
 import { callerSessionKey } from '../access/member-facts.ts';
 import { groupFactsByEntity, parseQuestionParam, questionRecallNotices, rankFactsByQuestion, recallHintNotice, unlinkedNamesakes, type EntityCandidate, type QuestionRecall } from '../facts/question-recall.ts';
 
@@ -313,6 +315,8 @@ const recall: Operation = {
     include_expired: { type: 'boolean', description: 'Also expired; question ranks them.', fullSurfaceOnly: true },
     supersessions: { type: 'boolean', description: 'Supersession log only.', fullSurfaceOnly: true },
     limit: { type: 'number', description: 'Per-arm max (default 50, cap 100).', fullSurfaceOnly: true },
+    offset: { type: 'number', description: 'Skip first N facts of the collapsed newest-first list; page with limit.', fullSurfaceOnly: true },
+    fact_id: { type: 'string', description: 'Read this one fact (facts[].fact_id); not with question, entity, since, session_id, supersessions, query or offset.', fullSurfaceOnly: true },
     grep: { type: 'string', description: 'Text substring.', fullSurfaceOnly: true },
     include_pending: { type: 'boolean', description: 'Pending count.', fullSurfaceOnly: true },
     return_unit: { type: 'string', enum: ['chunk', 'window', 'section', 'page', 'auto'], description: 'results[] unit (see search).', fullSurfaceOnly: true },
@@ -372,26 +376,8 @@ const recall: Operation = {
     const eligibility = await resolveReadEligibility(ctx, { minTrust: p.min_trust }); // #5575 floor + quarantine/rederive hiding
 
     type FactRows = Array<Awaited<ReturnType<typeof ctx.engine.listFactsByEntity>>[number] & { entity_slugs?: string[]; collapsed_count?: number; quoted?: 'transcript' }>;
-    type FactRowItem = FactRows[number];
-    // Per-arm merge key: each arm's engine query ORDERs by a different column
-    // (supersessions by COALESCE(expired_at, valid_until) — #3014, entity by
-    // valid_from, the rest by
-    // created_at) — the cross-source merge must sort by the SAME key or the
-    // truncation at `limit` silently drops the wrong rows. Decorate-sort-
-    // undecorate: the key is computed once per row.
-    const mergeNewest = (lists: FactRows[], keyOf: (rec: Record<string, unknown>) => unknown): FactRows => {
-      if (lists.length === 1) return lists[0];
-      const toTime = (v: unknown): number => {
-        const t = v instanceof Date ? v.getTime() : v ? new Date(String(v)).getTime() : 0;
-        return Number.isFinite(t) ? t : 0;
-      };
-      const decorated = lists.flat().map((r: FactRowItem) => ({
-        r,
-        k: toTime(keyOf(r as unknown as Record<string, unknown>)),
-      }));
-      decorated.sort((a, b) => b.k - a.k);
-      return decorated.slice(0, MAX_SEARCH_LIMIT).map(d => d.r);
-    };
+    // Per-arm merge key: each arm's engine query ORDERs by a different column (supersessions by COALESCE(expired_at, valid_until)
+    // — #3014, entity by valid_from, the rest by created_at); the cross-source merge (recall-page.ts) sorts by the SAME key.
     const byCreated = (rec: Record<string, unknown>) => rec.created_at ?? rec.since_date;
     // The since-arms below pass eventTime:true (COALESCE(valid_from,
     // created_at) — see FactListOpts.eventTime), so their per-source ORDER BY
@@ -415,6 +401,8 @@ const recall: Operation = {
       );
     }
     const question = parseQuestionParam(p);
+    const factId = parseRecallFactId(p); // fork: recall-fact-id.ts, one fact by id under the list reads' own filters
+    const offset = parseRecallOffset(p, question); let pager: { reads: FactRead<FactRows[number]>[]; key: (rec: Record<string, unknown>) => unknown } | null = null; // fork: recall-page.ts
     const entityParam = typeof p.entity === 'string' && p.entity.length > 0 ? (p.entity as string) : null;
     const sessionParam = typeof p.session_id === 'string' && p.session_id.length > 0 ? (p.session_id as string) : null;
     let ranking: QuestionRecall | null = null;
@@ -429,7 +417,9 @@ const recall: Operation = {
       excludeAuditRows: true, eligibility,
     };
 
-    if (question !== null && !readsNoSource) {
+    if (factId !== null) {
+      rows = await readFactById(ctx.engine, factSources, factId, listOpts);
+    } else if (question !== null && !readsNoSource) {
       ranking = await rankFactsByQuestion(ctx, { question, params: p, factSources, limit, entity: entityParam, sessionId: sessionParam, since, grep, includeExpired,
         scope: { sourceIds: factSources, worldOnly, excludePrivate, minTrust: eligibility.floor, suppressFlagged: eligibility.suppressFlagged } });
       ({ rows, ambiguousEntity } = ranking);
@@ -456,36 +446,33 @@ const recall: Operation = {
       const { resolveEntitySlug } = await import('../entities/resolve.ts');
       const resolvedLists = await Promise.all(factSources.map(async (src) => {
         const entitySlug = entityParam ? ((await resolveEntitySlug(ctx.engine, src, entityParam)) ?? entityParam) : undefined;
-        const rows = await readEntityFacts(ctx, src, entitySlug, MAX_SEARCH_LIMIT,
-          s => ctx.engine.listFactsSince(src, since, { ...listOpts, eventTime: true, entitySlug: s, sessionId: sessionParam ?? undefined }));
-        return { slug: entitySlug, rows };
+        const reads = await entityFactReads(ctx, src, entitySlug, (s, at) => ctx.engine.listFactsSince(src, since, { ...listOpts, ...at, eventTime: true, entitySlug: s, sessionId: sessionParam ?? undefined }));
+        return { slug: entitySlug, reads, rows: await readEntityFacts(reads, MAX_SEARCH_LIMIT) };
       }));
+      pager = { reads: resolvedLists.flatMap(l => l.reads), key: byEventTime };
       ambiguousEntity = entityParam ? await unlinkedNamesakes(ctx.engine, resolvedLists.map(l => l.rows.map(r => ({ ...r, entity_slug: l.slug ?? r.entity_slug })))) : null;
       rows = ambiguousEntity ? [] : mergeNewest(resolvedLists.map(l => l.rows), byEventTime);
     } else if (entityParam) {
       const { resolveEntitySlug } = await import('../entities/resolve.ts');
       const resolvedLists = await Promise.all(factSources.map(async (src) => {
         const slug = (await resolveEntitySlug(ctx.engine, src, entityParam)) ?? entityParam;
-        return { slug, rows: await readEntityFacts(ctx, src, slug, MAX_SEARCH_LIMIT, s => ctx.engine.listFactsByEntity(src, s!, { ...listOpts, sessionId: sessionParam ?? undefined })) };
+        const reads = await entityFactReads(ctx, src, slug, (s, at) => ctx.engine.listFactsByEntity(src, s!, { ...listOpts, ...at, sessionId: sessionParam ?? undefined }));
+        return { slug, reads, rows: await readEntityFacts(reads, MAX_SEARCH_LIMIT) };
       }));
+      pager = { reads: resolvedLists.flatMap(l => l.reads), key: (rec) => rec.valid_from ?? rec.created_at };
       ambiguousEntity = await unlinkedNamesakes(ctx.engine, resolvedLists.map(l => l.rows.map(r => ({ ...r, entity_slug: l.slug }))));
       rows = ambiguousEntity ? [] : mergeNewest(resolvedLists.map(l => l.rows), (rec) => rec.valid_from ?? rec.created_at);
     } else if (sessionParam) {
-      rows = mergeNewest(
-        await Promise.all(factSources.map(src =>
-          ctx.engine.listFactsBySession(src, sessionParam, listOpts),
-        )),
-        byCreated,
-      );
+      pager = { reads: factSources.map(src => (at) => ctx.engine.listFactsBySession(src, sessionParam, { ...listOpts, ...at })), key: byCreated };
+      if (offset === null) rows = mergeNewest(await Promise.all(pager.reads.map(read => read({ limit: MAX_SEARCH_LIMIT }))), byCreated);
     } else {
       // No filter: return recent across the granted source(s).
-      rows = mergeNewest(
-        await Promise.all(factSources.map(src =>
-          ctx.engine.listFactsSince(src, new Date(0), { ...listOpts, eventTime: true }),
-        )),
-        byEventTime,
-      );
+      pager = { reads: factSources.map(src => (at) => ctx.engine.listFactsSince(src, new Date(0), { ...listOpts, ...at, eventTime: true })), key: byEventTime };
+      if (offset === null) rows = mergeNewest(await Promise.all(pager.reads.map(read => read({ limit: MAX_SEARCH_LIMIT }))), byEventTime);
     }
+    // Fork: a paged read cuts its page from the arm's whole collapsed order, so a collapsed group never spans two pages.
+    const paged = offset !== null && pager !== null && !ambiguousEntity && !ranking;
+    if (paged) rows = await readRecallPage(pager!.reads, pager!.key, { offset: offset!, limit }, r => collapseFactReads(ctx.engine, r));
 
     // extract-conversation-facts writes durable audit checkpoint rows
     // (source = TERMINAL_AUDIT_SOURCE / NON_EXTRACTABLE_AUDIT_SOURCE) into
@@ -500,7 +487,7 @@ const recall: Operation = {
     if (grep && p.supersessions === true) rows = rows.filter(r => r.fact.toLowerCase().includes(grep));
 
     // #7043: copies of one claim (the fact arms read MAX_SEARCH_LIMIT rows) collapse after the visibility filters, before the limit cut.
-    if (!ranking) rows = (await collapseFactReads(ctx.engine, rows)).slice(0, limit);
+    if (!ranking && !paged) rows = (await collapseFactReads(ctx.engine, rows)).slice(0, limit);
     // v0.32: optional pending-consolidation count piggy-backed on the recall
     // response. Single round trip on thin-client; omitted when not requested
     // so existing callers see no shape change. Sums over the SAME factSources
@@ -594,7 +581,7 @@ const recall: Operation = {
 
     let observedUnavailable = false;
     const out = {
-      facts: await withDecideContested(ctx.engine, await withFactDateHeaders(ctx.engine, await stampRowTrust(ctx.engine, 'facts', packedFacts.map(r => ({ // #5575 A6 trust labels; GBRA-216 dp contested
+      facts: await withTrustContestedFacts(ctx.engine, await withDecideContested(ctx.engine, await withFactDateHeaders(ctx.engine, await stampRowTrust(ctx.engine, 'facts', packedFacts.map(r => ({ // #5575 A6 trust labels; GBRA-216 dp contested
         id: r.id,
         fact: r.fact,
         kind: r.kind,
@@ -626,7 +613,7 @@ const recall: Operation = {
         provenance: r.source, ...(r.attributed_to ? { attributed_to: r.attributed_to } : {}), ...(r.quoted ? { quoted: r.quoted } : {}), ...recallClaimColumns(r),
         ...(r.entity_slugs ? { entity_slugs: r.entity_slugs } : {}), ...(r.collapsed_count ? { collapsed_count: r.collapsed_count } : {}),
         ...(ranking ? { relevance: ranking.relevance.get(r.id), ...(ranking.weighting ? { rank_score: ranking.weighting.rank.get(r.id), confidence_factor: ranking.weighting.factor.get(r.id) } : {}) } : {}),
-      })), f => f.id), { excludePrivate, minTrust: eligibility.floor, suppressFlagged: eligibility.suppressFlagged }, () => { observedUnavailable = true; }), { remote: ctx.remote !== false, excludePrivate, eligibility }, contested),
+      })), f => f.id), { excludePrivate, minTrust: eligibility.floor, suppressFlagged: eligibility.suppressFlagged }, () => { observedUnavailable = true; }), { remote: ctx.remote !== false, excludePrivate, eligibility }, contested), factSources, listOpts), // fork: tp other fact, only if this caller reads it
       total: packedFacts.length,
       facts_order: ranking ? 'relevance' : 'newest',
       ...(quoted.withheld ? { facts_degraded: { reason: 'saved_facts_withheld' } } : ranking?.degraded || contested.degraded || observedUnavailable
@@ -667,16 +654,21 @@ const recall: Operation = {
 };
 
 /**
- * One source's facts about an entity, read under every slug they may be saved
+ * One source's reads of an entity's facts, one per slug they may be saved
  * under (the page, its identity siblings and its bare subject slug,
- * mentions/siblings.ts), newest event first, cut at `limit`.
+ * mentions/siblings.ts), each in engine order; recall-page.ts pages them whole.
  */
-async function readEntityFacts<R extends { valid_from?: Date | string | null; created_at?: Date | string | null }>(ctx: OperationContext, src: string,
-  slug: string | undefined, limit: number, read: (slug: string | undefined) => Promise<R[]>): Promise<R[]> {
+async function entityFactReads<R>(ctx: OperationContext, src: string, slug: string | undefined,
+  read: (slug: string | undefined, page: { limit: number; offset?: number }) => Promise<R[]>): Promise<FactRead<R>[]> {
   const { factEntitySlugs } = await import('../mentions/siblings.ts');
   const slugs = slug ? await factEntitySlugs(ctx.engine, src, slug, { excludePrivate: ctx.remote !== false }).catch(() => [slug]) : [undefined];
+  return slugs.map(s => (page) => read(s, page));
+}
+
+/** The first `limit` of one source's entity reads (entityFactReads), newest event first. */
+async function readEntityFacts<R extends { valid_from?: Date | string | null; created_at?: Date | string | null }>(reads: FactRead<R>[], limit: number): Promise<R[]> {
   const time = (r: R) => { const v = r.valid_from ?? r.created_at; return (v instanceof Date ? v.getTime() : v ? Date.parse(String(v)) : 0) || 0; };
-  return (await Promise.all(slugs.map(read))).flat().sort((a, b) => time(b) - time(a)).slice(0, limit);
+  return (await Promise.all(reads.map(read => read({ limit })))).flat().sort((a, b) => time(b) - time(a)).slice(0, limit);
 }
 
 const AMBIGUOUS_ENTITY_SUGGESTION = 'These are different entities in different sources. Pass source_id to read one, or link them with entity_identity_link if they are the same.';

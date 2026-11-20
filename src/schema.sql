@@ -2970,13 +2970,13 @@ CREATE OR REPLACE FUNCTION gbrain_guard_request_protocol() RETURNS trigger LANGU
       RAISE EXCEPTION 'unsupported_mutation_protocol: skill operations require a typed target' USING ERRCODE='42501';
     END IF;
     IF target='skill_bundle' THEN
-      IF version<>2 OR NEW.page_id IS NOT NULL OR NEW.worktree_id IS NULL THEN
+      IF version<>2 OR NEW.page_id IS NOT NULL OR (NEW.worktree_id IS NULL AND EXISTS (SELECT 1 FROM persistence_source_bindings b WHERE b.source_id=NEW.source_id)) THEN
         RAISE EXCEPTION 'unsupported_mutation_protocol: invalid skill target' USING ERRCODE='42501';
       END IF;
       IF TG_OP='INSERT' AND NOT active THEN
         RAISE EXCEPTION 'writer_not_quiesced: shared publication is disabled' USING ERRCODE='42501';
       END IF;
-      IF (TG_OP='INSERT' OR (NEW.state='running' AND OLD.state IS DISTINCT FROM 'running')) AND NOT EXISTS (SELECT 1 FROM persistence_worktrees w JOIN persistence_writer_protocols p
+      IF (TG_OP='INSERT' OR (NEW.state='running' AND OLD.state IS DISTINCT FROM 'running')) AND NEW.worktree_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM persistence_worktrees w JOIN persistence_writer_protocols p
         ON p.worktree_id=w.id AND p.host_id=w.owner_host_id AND p.owner_epoch=w.owner_epoch AND p.protocol_version=2
         WHERE w.id=NEW.worktree_id AND w.state='active') THEN
         RAISE EXCEPTION 'writer_not_quiesced: canonical owner capability must be revalidated' USING ERRCODE='42501';
@@ -3775,6 +3775,58 @@ CREATE TABLE IF NOT EXISTS sync_notifier_sources (
   owner_seen_at TIMESTAMPTZ,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Ours (governedwork fork): brain-resident schema packs. After every upstream table (v319 at 0.60.737) and
+-- before the search_path hardening, which must stay the last statement.
+-- BEGIN GENERATED from src/core/schema-pack/brain-pack-schema.ts (BRAIN_PACK_SCHEMA_SQL). Edit that file, then run: bun run build:schema
+CREATE TABLE IF NOT EXISTS schema_pack_revisions (
+  revision uuid PRIMARY KEY,
+  name text NOT NULL,
+  source_id text NOT NULL,
+  manifest jsonb NOT NULL,
+  manifest_hash text NOT NULL,
+  parent_revision uuid,
+  published_by text NOT NULL,
+  published_at timestamptz NOT NULL DEFAULT now(),
+  note text
+);
+CREATE INDEX IF NOT EXISTS schema_pack_revisions_name_idx ON schema_pack_revisions(name, published_at);
+CREATE TABLE IF NOT EXISTS schema_pack_heads (
+  name text PRIMARY KEY,
+  revision uuid NOT NULL REFERENCES schema_pack_revisions(revision),
+  source_id text NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+DO $rls$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles r WHERE pg_has_role(current_user, r.oid, 'USAGE') AND (r.rolbypassrls OR r.rolsuper)) THEN
+    ALTER TABLE schema_pack_revisions ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE schema_pack_heads ENABLE ROW LEVEL SECURITY;
+  END IF;
+END $rls$;
+-- END GENERATED from src/core/schema-pack/brain-pack-schema.ts (BRAIN_PACK_SCHEMA_SQL)
+
+-- Ours (governedwork fork): the record of version history an owner pruned (prune_page_versions).
+-- BEGIN GENERATED from src/core/page-state/version-prune-schema.ts (PAGE_VERSION_PRUNES_SCHEMA_SQL). Edit that file, then run: bun run build:schema
+CREATE TABLE IF NOT EXISTS page_version_prunes (
+  page_id INTEGER NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+  knowledge_revision UUID NOT NULL,
+  pruned_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (page_id, knowledge_revision)
+);
+DO $rls$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles pr WHERE pg_has_role(current_user, pr.oid, 'USAGE') AND (pr.rolbypassrls OR pr.rolsuper)) THEN
+    ALTER TABLE page_version_prunes ENABLE ROW LEVEL SECURITY;
+  END IF;
+END $rls$;
+-- END GENERATED from src/core/page-state/version-prune-schema.ts (PAGE_VERSION_PRUNES_SCHEMA_SQL)
+
+-- Ours (governedwork fork): stamps the fork schema epoch; stays after every fork fragment and before the hardening.
+-- BEGIN GENERATED from src/core/fork-schema.ts (forkSchemaEpochSql). Edit that file, then run: bun run build:schema
+INSERT INTO config (key, value) VALUES ('fork_schema_epoch', '6f820dbefe7a2c40')
+  ON CONFLICT (key) DO UPDATE SET value = CASE
+    WHEN position(',' || EXCLUDED.value || ',' IN ',' || config.value || ',') > 0 THEN config.value
+    ELSE config.value || ',' || EXCLUDED.value END;
+-- END GENERATED from src/core/fork-schema.ts (forkSchemaEpochSql)
 
 -- Last statement: pg_temp ends every gbrain function's pinned search_path (#7632), after any CREATE OR REPLACE above reset it.
 -- BEGIN GENERATED from src/core/function-search-path.ts (FUNCTION_SEARCH_PATH_HARDENING_SQL). Edit that file, then run: bun run build:schema

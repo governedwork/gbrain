@@ -796,14 +796,7 @@ async function runGoogleSyncInner(engine: BrainEngine, sourceId: string, cfg: Go
 
   // Active pack for pack-aware typing, mirroring performSyncInner.
   let activePack: ActivePack;
-  if (!opts.noSchemaPack) {
-    try {
-      const { loadActivePack } = await import('../schema-pack/load-active.ts');
-      const { loadConfig } = await import('../config.ts');
-      const resolved = await loadActivePack({ cfg: loadConfig(), remote: false, sourceId });
-      activePack = { page_types: resolved.manifest.page_types };
-    } catch { /* legacy prefix typing */ }
-  }
+  if (!opts.noSchemaPack) activePack = await (await import('../schema-pack/sync-typing.ts')).syncTypingPack(sourceId);
 
   // Scope preflight: a source configured for a service the credential's
   // grant doesn't cover (connect --scopes gmail, source defaults to all

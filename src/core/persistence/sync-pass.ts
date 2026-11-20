@@ -25,7 +25,7 @@ import { resolveSlugRootMode } from '../sync-anchor.ts';
 import { resolveSlugForPath } from '../sync.ts';
 import { join } from 'node:path';
 import { dbOnlyVerdict, hasUnresolvedDbOnlyDeclaration, isDeclaredDbOnlySlug, isKeepDbSlug, loadStorageConfig } from '../storage-config.ts';
-import { loadActivePackForEngine } from '../schema-pack/engine-resolution.ts';
+import { loadActivePackForEngineOrNull } from '../schema-pack/engine-resolution.ts';
 import { currentCompanyBrainSync, getCompanyBrainProfile } from '../company-brain/profile.ts';
 import { sha256 } from './digest.ts';
 import { sourceMirrorReadOnly } from './mirror-read-only.ts';
@@ -988,7 +988,7 @@ async function readLevelSettings(engine: BrainEngine, context: ManagedSyncContex
     syncExcludePatterns(engine, [...input.pass?.exclude ?? []]),
     engine.getConfig('sync.include_hidden'),
     input.workingTree === undefined ? engine.getConfig('sync.include_working_tree') : Promise.resolve(null),
-    input.pass?.noSchemaPack ? Promise.resolve(null) : loadActivePackForEngine(engine, { remote: false, sourceId }).catch(() => null),
+    input.pass?.noSchemaPack ? Promise.resolve(null) : loadActivePackForEngineOrNull(engine, { remote: false, sourceId }),
     sourceMirrorReadOnly(engine, sourceId),
     readMetafilePagesMode(engine),
   ]);

@@ -15,7 +15,9 @@ export const GRANT_TOKEN_IMPLICATIONS = 'Client credentials stay unchanged. Sour
 export function parseAdminGrantRequest(body: Record<string, unknown>, existing?: ClientGrant) {
   const patch: GrantPatch = {};
   const invalid = (field: string, expected: string): never => { throw new GrantError('invalid_grant', `${field} must be ${expected}`); };
-  const arrays = ['federatedRead', 'boundSlugPrefixes', 'allowedOperations', 'boundTools', 'delegatedSlugPrefixes'] as const;
+  // Fork: `takesHolders` (null = GBrain's default ['world']) is an axis like the others, so a client registered or
+  // rescoped over the owner API can hold the takes holders a local `auth rescope --takes-holders` would give it.
+  const arrays = ['federatedRead', 'boundSlugPrefixes', 'allowedOperations', 'boundTools', 'delegatedSlugPrefixes', 'takesHolders'] as const;
   for (const field of arrays) {
     const value = body[field];
     if (value === undefined) continue;

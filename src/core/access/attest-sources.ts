@@ -5,8 +5,9 @@
  * credential is revoked, rotated or narrowed. An attested memory_write may name a marked source its credential lists
  * (source_id) and lands on that source's scope page (`memory/scope`, world facts read by whoever holds read on the
  * source). Four rules keep a scope's audience exactly the credentials that list it:
- *  - perCallWriteSource / storedPerCallWriteSource: the one exception to one write source per credential, only for the
- *    scope page, live at submission and re-checked at publication (actorCoverage with the source);
+ *  - perCallWriteSource / storedPerCallWriteSource: an exception to one write source per credential, only for the
+ *    scope page, live at submission and re-checked at publication (actorCoverage with the source); the owner's page
+ *    confirm (ownerPageReadSource, governedwork fork) is the other;
  *  - assertScopeSourceGrant: no credential's read grant may name a marked source it does not list itself;
  *  - assertAttestSources: a source joins attest_sources (and is marked) only when no other credential reads it and it is
  *    not default, federated or the credential's own write source; it leaves only after the credential's read grant drops it;
@@ -42,6 +43,28 @@ export function perCallWriteSource(ctx: Pick<OperationContext, 'remote' | 'attes
 export function storedPerCallWriteSource(a: Pick<WriteAuthority, 'actingFor' | 'attestedOp' | 'attestedSource' | 'sourceId'>, slug: string): string | null {
   return a.actingFor && !Array.isArray(a.actingFor) && a.attestedOp === 'memory_write' && a.attestedSource === a.sourceId && slug === SCOPE_PAGE_SLUG
     ? a.attestedSource : null;
+}
+
+/**
+ * governedwork fork (F13): the journaled owner page write (trust/page-handlers.ts TRUST_OWNER_PAGE_OPERATION). Named here
+ * rather than imported, so this module does not load the trust page handlers.
+ */
+const OWNER_PAGE_OPERATION = 'trust_owner_page';
+
+/**
+ * governedwork fork (F13): the second exception to one write source per credential. The owner's page confirm
+ * (confirm_memory submitting trust_owner_page) writes the page in its own source, which may be any source the credential
+ * reads (an agent's page in the agents source): confirm_memory has already required the page to be readable by the
+ * caller (ops/trust.ts, callerAccessAllowedSql), and the owner's confirm writes none of the connection's content.
+ * Live at submission, from the request's grant.
+ */
+export function ownerPageReadSource(ctx: Pick<OperationContext, 'remote' | 'auth'>, operation: string, sourceId: string): boolean {
+  return ctx.remote !== false && operation === OWNER_PAGE_OPERATION && !!ctx.auth?.allowedSources?.includes(sourceId);
+}
+
+/** The stored form of ownerPageReadSource, re-checked at publication against the credential's live read sources. */
+export function storedOwnerPageReadSource(operation: string, sourceId: string, liveReads: readonly string[]): boolean {
+  return operation === OWNER_PAGE_OPERATION && liveReads.includes(sourceId);
 }
 
 export function sourceNotAttested(sourceId: string): OperationError {

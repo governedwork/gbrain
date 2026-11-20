@@ -182,6 +182,34 @@ fact and page-edit arms (world pages only, the same text `get_versions` and
 `get_timeline` already return them); open loops are withheld
 (`withheld_arms: ["loops"]`).
 
+### Hooks that call the brain directly (`format`)
+
+Ours (governedwork fork). A Claude Code or Codex `mcp_tool` hook (or a
+`command` hook running the CLI) can call `volunteer_context` itself. A hook
+reads the tool's text content as its output and ignores the default JSON
+answer, so the op takes `format`:
+
+| `format` | Answer |
+|---|---|
+| `json` (default) | the op's JSON document, unchanged |
+| `text` | the hook lane's volunteered-pages block (stats mode: the precision summary) |
+| `hook` | `{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":<the block>}}`; `{}` when empty |
+
+One content block, notices folded in; Claude Code accepts only `hook`, Codex
+`hook` or `text`. Under the hook-output cap, whole pages are dropped (lowest
+confidence first), never cut, so a trust envelope stays whole. The CLI's
+`--format` shapes the JSON answer, so it works against any host version.
+
+```json
+{ "type": "mcp_tool", "server": "gbrain", "tool": "volunteer_context",
+  "input": { "window": "${prompt}", "session_id": "${session_id}", "format": "hook" } }
+```
+
+Pass `session_id` and the op dedupes per session: pages already volunteered to
+that session (on any channel) in the last 12 hours are not volunteered again,
+read back from `context_volunteer_events`, so a per-prompt hook surfaces a page
+once rather than on every mention.
+
 ## The OpenClaw reflex volunteer arm
 
 The OpenClaw context-engine lane's ambient reflex runs TWO arms per

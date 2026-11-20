@@ -9,7 +9,9 @@
  * canonical value and never look at other cells, so the validator can
  * recompute what a rule may output for a given before value.
  */
-import { isValidHolder, TAKE_KIND_VALUES } from '../takes-fence.ts';
+import { isValidHolder, rewriteSupersessionCitation, supersessionCitation, TAKE_KIND_VALUES } from '../takes-fence.ts';
+import { factsSupersessionCitation, rewriteFactsSupersessionCitation } from '../facts-fence.ts';
+import { percentCellValue, stripStrikethrough } from '../fence-shared.ts';
 import type { FenceKind } from './types.ts';
 
 export const FACTS_COLUMNS = [
@@ -147,7 +149,7 @@ export const ALLOWED: Record<FenceKind, Readonly<Record<string, readonly string[
   takes: {
     kind: [...TAKE_KIND_VALUES],
     who: ['world', 'brain', 'people/<slug>', 'companies/<slug>'],
-    weight: ['a number from 0 to 1'],
+    weight: ['a number from 0 to 1, or a percent such as `70%`'],
     '#': ['a positive whole number'],
   },
 };
@@ -245,8 +247,8 @@ export function holderAlias(holder: string): 'brain' | 'world' | null {
  */
 export function confidenceNumber(text: string): number | null {
   const compact = text.replace(/\s+/g, '');
-  const percent = /^([+-]?(?:\d+(?:\.\d+)?|\.\d+))%$/.exec(compact);
-  if (percent) return Number(percent[1]) / 100;
+  const percent = percentCellValue(compact);
+  if (percent !== null) return percent;
   return PLAIN_NUMBER_RE.test(compact) ? Number(compact) : null;
 }
 
@@ -269,12 +271,29 @@ export function appendOriginalKind(context: string, word: string): string {
   return context.trim() ? `${context.trim()}; ${note}` : note;
 }
 
-/** The `superseded by #N` reference a facts context or takes source cell carries. */
-export function supersededRef(text: string): number | null {
-  const m = /superseded by #(\d+)/i.exec(text);
-  if (!m) return null;
-  const n = parseInt(m[1]!, 10);
-  return n > 0 ? n : null;
+/**
+ * The `superseded by #N` reference a facts context or takes source cell
+ * carries, read the way each parser projects it: a takes cell's last
+ * citation (`supersessionCitation`), a facts cell's leading one
+ * (`factsSupersessionCitation`), each where its writer puts the live pointer.
+ */
+export function supersededRef(text: string, kind: FenceKind): number | null {
+  return kind === 'takes' ? supersessionCitation(text) : factsSupersessionCitation(text);
+}
+
+/** `text` with the reference `supersededRef` reads pointed at row `target`. */
+export function rewriteSupersededRef(text: string, target: number, kind: FenceKind): string {
+  return kind === 'takes' ? rewriteSupersessionCitation(text, target) : rewriteFactsSupersessionCitation(text, target);
+}
+
+/**
+ * The reference a row carries as a pointer: a facts row's only while it is
+ * struck, since the facts parser links struck rows only (a live row's
+ * `superseded by #N` is prose, and a renumber neither follows nor rewrites it).
+ */
+export function rowSupersededRef(kind: FenceKind, claim: string, ref: string): number | null {
+  if (kind === 'facts' && !stripStrikethrough(claim.trim()).struck) return null;
+  return supersededRef(ref, kind);
 }
 
 /** Whitespace-collapsed text for comparisons. */

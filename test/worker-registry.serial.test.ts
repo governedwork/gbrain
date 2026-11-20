@@ -15,6 +15,12 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { withEnv } from './helpers/with-env.ts';
 
+function psReadsEtime(): boolean {
+  try {
+    return require('child_process').spawnSync('ps', ['-o', 'etime=', '-p', String(process.pid)], { encoding: 'utf8' }).stdout.trim().length > 0;
+  } catch { return false; }
+}
+
 let home: string;
 const origHome = process.env.GBRAIN_HOME;
 
@@ -133,7 +139,9 @@ describe('pruning + guards', () => {
     expect(existsSync(file)).toBe(false); // pruned
   });
 
-  test('PID-reuse guard: live pid that started long after registration is skipped (Codex #8)', async () => {
+  // The guard reads the pid's start time from ps(1). Where ps cannot run (a macOS sandbox-exec profile refuses the
+  // setuid /bin/ps: the lander's check runs), there is no start time to compare, so there is nothing to test.
+  test.skipIf(!psReadsEtime())('PID-reuse guard: live pid that started long after registration is skipped (Codex #8)', async () => {
     const { readWorkers, workerRegistryDir, currentBrainId } = await reg();
     const dir = workerRegistryDir();
     require('fs').mkdirSync(dir, { recursive: true });

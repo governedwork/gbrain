@@ -40,6 +40,7 @@ import type { WriteAttribution } from '../src/core/persistence/attribution.ts';
 import { submitPageMutation } from '../src/core/persistence/page-mutations.ts';
 import { declarePersistenceProtocol } from '../src/core/persistence/protocol.ts';
 import { scanOverwrittenEdits } from '../src/core/persistence/overwritten-edits.ts';
+import { operationsByName } from '../src/core/operations.ts';
 import { clearGitHold, readGitHold, SYNC_IMPORT_PROVENANCE_OP } from '../src/core/persistence/sync-holds.ts';
 import { resolveRepairScope, type RepairItemOutcome } from '../src/core/repair/core.ts';
 import { repairRunner } from '../src/core/repair/registry.ts';
@@ -173,6 +174,19 @@ for (const databaseUrl of process.env.DATABASE_URL ? [undefined, process.env.DAT
     expect((await holdOf(engine, 'notes/a.md'))?.code).toBe('file_drift');
     expect((await scanOverwrittenEdits(engine, 'default')).edits).toEqual([]);
     expect((await doctor(engine)).status).toBe('ok');
+  }, { setup, databaseUrl }), 180_000);
+
+  // Ours (governedwork fork, ledger L144): the archived version is the only copy of the edit, so an owner prune keeps it.
+  test('an owner prune of the page history keeps the version an open overwritten edit survives as', () => managedBrain(async ({ engine, ctx, root }) => {
+    expect((await stampByCheckpoint(() => performManagedSync(engine, OPTS))).status).toBe('first_sync');
+    await seedOverwrite(engine, ctx, root, 'notes/a');
+    const [edit] = (await scanOverwrittenEdits(engine, 'default')).edits;
+    expect(edit).toBeDefined();
+    const prune = operationsByName['prune_page_versions']!;
+    const res = await prune.handler(ctx, { slug: 'notes/a', keep: 0, yes: true }) as { pruned: number; held: unknown[] };
+    expect(res.held).toContainEqual({ id: edit!.version_id, reason: 'overwritten_edit', ref: edit!.import_request_id });
+    expect((await engine.executeRaw('SELECT 1 FROM page_versions WHERE id = $1', [edit!.version_id]))).toHaveLength(1);
+    expect((await scanOverwrittenEdits(engine, 'default')).edits.map(e => [e.slug, e.version_id])).toEqual([['notes/a', edit!.version_id]]);
   }, { setup, databaseUrl }), 180_000);
 
   test('#6887 on the pass route: a sync of the same scenario keeps the database edit and holds the file file_drift', () => managedBrain(async ({ engine, ctx, root }) => {

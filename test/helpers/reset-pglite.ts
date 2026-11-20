@@ -57,6 +57,7 @@
  */
 import type { PGLiteEngine } from '../../src/core/pglite-engine.ts';
 import { disposePersistenceConsumer } from '../../src/core/persistence/service.ts';
+import { FORK_SCHEMA_EPOCH_KEY } from '../../src/core/fork-schema.ts';
 
 // v0.41.21.0: `page_generation_clock` is single-row infrastructure (like
 // schema_version) and must survive resetPgliteState. The row is seeded at
@@ -64,6 +65,12 @@ import { disposePersistenceConsumer } from '../../src/core/persistence/service.t
 // page_generation_counter.test.ts AND any test that reads the clock value
 // after a reset. Production never truncates the clock table.
 const PRESERVE_TABLES = new Set(['schema_version', 'page_generation_clock', 'persistence_brain']);
+
+// Ours (governedwork fork): the fork schema stamp (config `fork_schema_epoch`, src/core/fork-schema.ts) is schema
+// infrastructure like `schema_version`: hasPendingMigrations reads it beside `version`. The reset empties `config`, and
+// upstream's tests restore `version` by hand to mean "fully migrated"; without the stamp that brain would read as
+// pending (upkeep skips with migrations_pending). So the reset keeps the stamp row; a test about the stamp sets it.
+const PRESERVE_CONFIG_KEYS = [FORK_SCHEMA_EPOCH_KEY];
 
 // Conditions (over plpgsql variables `tables regclass[]` and `storage_bytes`)
 // under which a replica-role DELETE of `tables` would not match TRUNCATE:
@@ -91,7 +98,12 @@ export async function resetPgliteState(engine: PGLiteEngine): Promise<void> {
       target regclass;
       sequence record;
       original_role text := current_setting('session_replication_role');
+      kept_config jsonb;
     BEGIN
+      IF to_regclass('public.config') IS NOT NULL THEN
+        SELECT jsonb_agg(jsonb_build_array(key, value)) INTO kept_config FROM config
+          WHERE key IN (${PRESERVE_CONFIG_KEYS.map(k => `'${k}'`).join(', ')});
+      END IF;
       SELECT array_agg(c.oid::regclass), string_agg(format('%I.%I', n.nspname, c.relname), ', '),
           sum(pg_total_relation_size(c.oid))
         INTO tables, targets, storage_bytes
@@ -122,6 +134,11 @@ export async function resetPgliteState(engine: PGLiteEngine): Promise<void> {
           EXECUTE format('ALTER SEQUENCE %I.%I RESTART', sequence.nspname, sequence.relname);
         END LOOP;
         PERFORM set_config('session_replication_role', original_role, true);
+      END IF;
+      IF kept_config IS NOT NULL THEN
+        INSERT INTO config (key, value)
+          SELECT kv->>0, kv->>1 FROM jsonb_array_elements(kept_config) AS kv
+          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
       END IF;
       UPDATE persistence_brain SET brain_id = gen_random_uuid(), enabled = false, activated_at = NULL WHERE singleton = 1;
       INSERT INTO sources (id, name, config)

@@ -504,6 +504,21 @@ function dropLowestConfidence(items: Array<{ confidence: number }>): void {
   items.splice(idx, 1);
 }
 
+/**
+ * Ours (governedwork fork): the volunteered-pages block alone, in this lane's shape (`volunteer_context` with
+ * `format: text|hook`, ops/output-format.ts). With `fits`, pages are dropped whole, lowest confidence first (the
+ * budget rule above), until the block fits: a synopsis's trust envelope is never cut.
+ */
+export function renderVolunteeredBlock(volunteered: VolunteeredPage[], fits?: (text: string) => boolean): string {
+  const kept = [...volunteered];
+  let text = render([], kept, []);
+  while (fits && !fits(text) && kept.length) {
+    dropLowestConfidence(kept);
+    text = render([], kept, []);
+  }
+  return text;
+}
+
 /** Render the envelope + labeled sections. '' when every section is empty. */
 function render(
   pointers: ReflexPointer[],

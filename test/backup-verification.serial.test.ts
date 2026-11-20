@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
+import { afterEach, beforeEach, expect, spyOn, test, setDefaultTimeout } from 'bun:test';
 import * as childProcess from 'node:child_process';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
@@ -12,6 +12,10 @@ import { pushStatusPathForRoot } from '../src/core/workspace-push.ts';
 import { assessBackupRepository, BACKUP_REMOTE_PROBE_CAP, BACKUP_REMOTE_BUDGET_MS, BACKUP_REMOTE_TIMEOUT_MS } from '../src/core/backup/repository.ts';
 import { makeGitFixture } from './helpers/git-fixture.ts';
 import { withEnv } from './helpers/with-env.ts';
+
+// Git-heavy tests: the slowest default-budget one takes ~4 s on a quiet Mac, so Bun's 5 s default overran on a
+// 2-CPU lander unit, and a timed-out test skips its finally (an execFile spy stayed installed for the next test).
+setDefaultTimeout(30_000);
 
 let tmp: string;
 let oldHome: string | undefined;
@@ -254,7 +258,7 @@ test('successive bounded checks prioritize pending roots and retain identity-bou
     const reordered = await getBackupStatus(engine([...roots].reverse()), { ...verified, forceRefresh: true, now: new Date(now.getTime() + 2000) });
     expect(reordered.totals.recoverable_repos).toBe(BACKUP_REMOTE_PROBE_CAP);
   } finally { probe.mockRestore(); }
-}, 25_000);
+}, 60_000); // ~14 s on a quiet Mac; a 2-CPU sandboxed lander unit overran 25 s
 
 test('retained evidence is invalidated by local identity, source, commit, remote, push and clock changes', async () => {
   for (const change of ['head', 'branch', 'origin', 'replacement', 'dirty', 'push', 'source', 'future', 'stale']) {
@@ -279,7 +283,7 @@ test('retained evidence is invalidated by local identity, source, commit, remote
     const result = await assessBackupRepository(root, 'source_repo', change === 'source' ? 'changed-id' : 'source-id', checked, undefined, first);
     expect(result.verification?.state).not.toBe('verified');
   }
-}, 15_000);
+}, 45_000); // ~5 s on a quiet Mac; a 2-CPU sandboxed lander unit overran 15 s
 
 test('the remote probe reads the user git config through HOME, so an insteadOf rewrite reaches the remote (#5794)', async () => {
   const { root, remote } = await repository();

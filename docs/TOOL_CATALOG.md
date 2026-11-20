@@ -4,7 +4,7 @@
 <!-- Regenerate: bun run scripts/generate-tool-catalog.ts -->
 <!-- Freshness-guarded by scripts/check-tool-catalog-fresh.sh (bun run verify). -->
 
-Every non-localOnly operation on the MCP surface: 179 tools across 27 areas. **Starter** marks membership in the ~41-op `starter` surface (`src/mcp/surface.ts`); **Gate** names the config key that must be true before remote callers see/call the op (`gbrain config set <key> true`). What a given token actually sees is further filtered per request by scope, bound-client fence, publish gates, and the per-client surface — see `docs/operations/mcp-surface-runbook.md`. Area names are non-contractual groupings.
+Every non-localOnly operation on the MCP surface: 183 tools across 27 areas. **Starter** marks membership in the ~41-op `starter` surface (`src/mcp/surface.ts`); **Gate** names the config key that must be true before remote callers see/call the op (`gbrain config set <key> true`). What a given token actually sees is further filtered per request by scope, bound-client fence, publish gates, and the per-client surface — see `docs/operations/mcp-surface-runbook.md`. Area names are non-contractual groupings.
 
 ## admin
 
@@ -208,9 +208,11 @@ Every non-localOnly operation on the MCP surface: 179 tools across 27 areas. **S
 | `list_write_conflicts` | Pages whose writes keep ending in a source_changed conflict, grouped by slug. | read |  |  |
 | `list_write_requests` | Your write receipts in one source, newest first (for a lost request_id). | write | yes |  |
 | `promote_guest_note` | Owner only: keep a guest note (a page in a guest source, origin "guest") as an owner page. | write |  |  |
+| `prune_page_versions` | Owner-only, trusted local CLI on the brain host (`gbrain history prune <slug> --keep <n>`, or `--version <id>` instead of `--keep`). | admin |  |  |
 | `put_page` | Complete content REPLACES the whole page: read get_page include_content:true; its revision is expected_revision. | write | yes |  |
 | `put_pages` | Write up to 50 complete Markdown pages (8 MB total) in one call; use instead of put_page for more than 3 pages. | write |  |  |
 | `put_raw_data` | Store a raw provider payload (API response JSON) alongside a page, keyed by source. | write |  |  |
+| `rename_page` | Rename one live page to a new slug in the same source, in place: the page row keeps its id, so its content, chunks and embeddings, tags, timeline, versions, takes and inbound/outbound graph links stay attached. | write |  |  |
 | `resolve_slugs` | Fuzzy-match a partial slug or title to page slugs. | read | yes |  |
 | `restore_page` | Restore a soft-deleted page (clear deleted_at) and re-create its markdown file on disk (the counterpart to delete_page removing it; the result write_through field reports the outcome). | write |  |  |
 | `revert_version` | Restore a page to an earlier version from its history (a new revision; history is kept). | write |  |  |
@@ -233,7 +235,9 @@ Every non-localOnly operation on the MCP surface: 179 tools across 27 areas. **S
 | Tool | Description | Scope | Starter | Gate |
 |---|---|---|---|---|
 | `get_active_schema_pack` | Cheap identity packet for the active schema pack. | read |  |  |
+| `get_schema_pack` | Read a brain-resident schema pack: head revision, the manifest at head or at a given revision, and its full revision history. | read |  |  |
 | `list_schema_packs` | List installed schema packs (bundled + user-installed). | read |  |  |
+| `put_schema_pack` | Publish a new revision of a brain-resident schema pack (stored in the database, not on disk). | admin + skill_publisher |  |  |
 | `reload_schema_pack` | Flush the in-process schema pack cache so the next loadActivePack re-reads from disk. | admin |  |  |
 | `schema_apply_mutations` | Batched schema pack mutation. | admin |  |  |
 | `schema_explain_type` | Resolved settings for a single page_type in the active pack. | read |  |  |
@@ -263,7 +267,7 @@ Every non-localOnly operation on the MCP surface: 179 tools across 27 areas. **S
 |---|---|---|---|---|
 | `delete_skill` | CAS-delete a canonical shared skill and revoke future managed activation. | write + skill_editor | yes |  |
 | `get_skill` | Fetch a skill's prose and follow it: when it says search or store, call the same-named MCP tool here. | read | yes | `mcp.publish_skills` |
-| `get_skill_asset` | Read an approved file from an exact skill revision (data, never executed). | read | yes | `mcp.publish_skills` |
+| `get_skill_asset` | Read an approved skill file (data, never run); text files also in `text`. | read | yes | `mcp.publish_skills` |
 | `get_skill_policy` | Read the owner publication policy and CAS epoch, including when sharing is disabled. | admin + skill_publisher |  |  |
 | `join_brain` | Enroll this authenticated principal to follow approved shared skills. | read + skills_member_self | yes |  |
 | `leave_brain` | Stop only this principal’s enrollment. | read + skills_member_self | yes |  |
