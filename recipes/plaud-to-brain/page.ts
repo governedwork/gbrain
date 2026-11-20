@@ -55,6 +55,11 @@ export interface PlaudMeetingRecord {
   raw_transcript_text: string;
   /** `get_note`'s `auto_sum_note` Markdown: a claim, never a fact. `""` when Plaud has none. */
   source_summary: string;
+  /**
+   * The email of the account that owns the connection the recording came through (the person whose Plaud made it).
+   * Written as the page's `recorded_by`, the evidence the brain's own enrichment resolves to the recorder's person page.
+   */
+  recorded_by: string;
 }
 
 /** The recording's start as a Date (Plaud writes UTC without a `Z`). */
@@ -116,16 +121,21 @@ export function renderMeetingPage(record: PlaudMeetingRecord): { slug: string; c
   // A person slug is a path with no `@`: an email (or a bare name) here would be an attendance claim GBrain cannot resolve.
   const notSlug = attendees.find((a) => a.includes('@') || !a.includes('/'));
   if (notSlug !== undefined) throw new Error(`attendees holds people slugs only, not ${q(notSlug)}: an unresolved person is an invitee`);
+  // One address, local@domain: the connection owner's email, never a slug or a blank the brain could not resolve.
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(record.recorded_by)) throw new Error(`recorded_by is the connection owner's email, not ${q(record.recorded_by)}`);
   const linked = (people: readonly string[]): string => people.map((p) => (p.includes('@') ? p : `[[${p}]]`)).join(', ');
   const fm = [
     '---',
     `type: ${q('meeting')}`,
     `title: ${q(record.title)}`,
     `date: ${q(date)}`,
+    // The date the meeting's content is in effect from: the meeting's own day.
+    `effective_date: ${q(date)}`,
     `time: ${q(time)}`,
     `duration: ${q(duration)}`,
     `source: ${q(record.source)}`,
     `source_id: ${q(record.source_id)}`,
+    `recorded_by: ${q(record.recorded_by)}`,
     `attendees: [${attendees.map(q).join(', ')}]`,
     // A runner may keep the roster but not name its event (one filed where that calendar page does not live).
     ...(calendarEvent === '' && invitees.length === 0 ? [] : [`invitees: [${invitees.map(q).join(', ')}]`]),
