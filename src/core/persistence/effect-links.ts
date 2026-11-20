@@ -21,6 +21,7 @@ import { inlineRegions } from '../page-body/tail-digest.ts';
 import { validateSlug } from '../utils.ts';
 import { isRemoteWantedPagesEnabled, replaceWantedLinks } from '../wanted-links.ts';
 import { isGuestWrite, skipsGuestNote } from '../guests/derived.ts';
+import { isNoAutoLinkPage } from '../trust/auto-links.ts';
 
 /** `mcp.remote_auto_links`: unset is on; false/0/no/off (any case) turns the remote `links` effect off. */
 export async function isRemoteAutoLinksEnabled(engine: Pick<BrainEngine, 'getConfig'>): Promise<boolean> {
@@ -100,7 +101,8 @@ async function targetGrant(tx: SqlEngine, a: WriteAuthority): Promise<(slug: str
  * mention edges (link_source `mcp-remote-mention`, origin = the page) against
  * the targets that exist at execution time, in the page's source, visible to
  * the writer and inside its slug grant. Only this producer's edges are added
- * or removed. A changed or deleted page, a revoked grant or a disabled config
+ * or removed; an external_untrusted page has no target (dropUntrustedPageLinks).
+ * A changed or deleted page, a revoked grant or a disabled config
  * finishes the effect as skipped with its reason. The links table carries no
  * writer guard or row attribution, so the source guard and the page keys of
  * the page and its targets are what serialize this with publications.
@@ -115,6 +117,7 @@ export async function runLinksEffect(engine: BrainEngine, effect: PersistenceEff
   const snapshot = await engine.readPageSnapshot(effect.data.slug, { sourceId });
   if (!snapshot || snapshot.page.id !== effect.data.page_id || snapshot.revision !== effect.revision) return skip(engine, 'superseded');
   if (!await isAutoLinkEnabled(engine) || !await isRemoteAutoLinksEnabled(engine)) return skip(engine, 'disabled');
+  if (await isNoAutoLinkPage(engine, snapshot.page.id)) return dropUntrustedPageLinks(engine, effect, row, snapshot, hostId);
   const { targets, skipped } = await mentionTargets(engine, snapshot, sourceId);
   const beliefs = unmanagedBeliefPoint(sourceId, [snapshot.page.slug], 'remote_auto_links');
   await engine.transaction(async tx => {
@@ -156,6 +159,7 @@ async function runAppendLinksEffect(engine: BrainEngine, effect: PersistenceEffe
   const snapshot = await engine.readPageSnapshot(effect.data.slug!, { sourceId });
   if (!snapshot || snapshot.page.id !== effect.data.page_id) return skip(engine, 'superseded');
   if (!await isAutoLinkEnabled(engine) || !await isRemoteAutoLinksEnabled(engine)) return skip(engine, 'disabled');
+  if (await isNoAutoLinkPage(engine, snapshot.page.id)) return dropUntrustedPageLinks(engine, effect, row, snapshot, hostId);
   const audience: BodyAudience = row.authority.remote ? 'remote' : 'trusted';
   const text = await appendedText(engine, snapshot, range, snapshot.revision !== effect.revision, audience);
   if (text === null) return skip(engine, 'superseded');
@@ -173,6 +177,27 @@ async function runAppendLinksEffect(engine: BrainEngine, effect: PersistenceEffe
     const additions = mentionEdges(live.page.slug, sourceId, wanted, new Set(owned.map(link => link.slug)));
     const added = await beliefs.run(tx, async () => additions.length ? await tx.addLinksBatch(additions, { auditSite: 'addLinksBatch' }) : 0);
     await completeEffect(tx, effect, linksOutcome(added, 0, skipped));
+  });
+  await beliefs.commit(engine);
+}
+
+/**
+ * governedwork/captain#485: an `external_untrusted` page (verbatim fetched text) seeds no remote mention edge, whatever
+ * its body or appended bytes hold (trust/auto-links.ts). The effect reconciles to zero targets: every edge this producer
+ * made from the page is removed and, with remote wanted pages on, its body wanted rows too; other producers' edges stay.
+ * Finishes committed with reason `untrusted_page`.
+ */
+async function dropUntrustedPageLinks(engine: BrainEngine, effect: PersistenceEffect, row: WriteRequest, snapshot: PageSnapshot, hostId: string): Promise<void> {
+  const sourceId = effect.source_id;
+  const beliefs = unmanagedBeliefPoint(sourceId, [snapshot.page.slug], 'remote_auto_links');
+  await engine.transaction(async tx => {
+    const live = await lockedPage(tx, effect, row, snapshot, new Map(), hostId);
+    if (!live) return;
+    const obsolete = (await tx.executeRaw<{ id: number }>('SELECT id FROM links WHERE link_source=$1 AND origin_page_id=$2',
+      [REMOTE_MENTION_LINK_SOURCE, live.page.id])).map(link => link.id);
+    await beliefs.run(tx, async () => { if (obsolete.length) await tx.executeRaw('DELETE FROM links WHERE id=ANY($1::bigint[])', [obsolete]); });
+    if (await isRemoteWantedPagesEnabled(tx)) await replaceWantedLinks(tx, { pageId: Number(live.page.id), sourceId }, { producers: ['body'], rows: [] });
+    await completeEffect(tx, effect, { ...linksOutcome(0, obsolete.length, []), reason: 'untrusted_page' });
   });
   await beliefs.commit(engine);
 }
