@@ -3904,7 +3904,7 @@
                 "host"
               ]
             },
-            "why": "Turns on the request-log prune: the next cycle purge phase (or, on a PGLite brain, a live serve within the hour) deletes request rows older than 90 days. Per-client lifetime totals and the audit rows (surface, memory-setting and access changes) are kept."
+            "why": "Turns on the request-log prune: the next cycle bookkeeping_gc phase (or, on a PGLite brain, a live serve within the hour) deletes request rows older than 90 days. Per-client lifetime totals and the audit rows (surface, memory-setting and access changes) are kept."
           },
           "message": "The MCP request log holds 0 row(s) (0.0 MB); request-log retention is off, so it keeps every request.",
           "name": "mcp_request_log_retention",

@@ -54,7 +54,7 @@ export async function mcpRequestLogRetentionResult(
     const enable: Action = {
       argv: ['gbrain', 'config', 'set', MCP_LOG_RETENTION_KEY, String(SUGGESTED_DAYS)], consent: ['destructive'], actor: 'agent', ask_user: true,
       requires_exclusive: false, docs: DOCS, verify: doctorVerify('mcp_request_log_retention'),
-      why: `Turns on the request-log prune: the next cycle purge phase (or, on a PGLite brain, a live serve within the hour) deletes request rows older than ${SUGGESTED_DAYS} days. Per-client lifetime totals and the audit rows (surface, memory-setting and access changes) are kept.`,
+      why: `Turns on the request-log prune: the next cycle bookkeeping_gc phase (or, on a PGLite brain, a live serve within the hour) deletes request rows older than ${SUGGESTED_DAYS} days. Per-client lifetime totals and the audit rows (surface, memory-setting and access changes) are kept.`,
       user_message: `Your MCP request log holds ${rowsText} and nothing prunes it. Turn on ${SUGGESTED_DAYS}-day retention? Request details older than ${SUGGESTED_DAYS} days (operation, status, parameters, errors) will be deleted and cannot be restored; per-client totals and audit rows are kept.`,
     };
     if (rows >= warnRows || bytes >= warnBytes) {
@@ -75,11 +75,11 @@ export async function mcpRequestLogRetentionResult(
   if (stale) {
     return { status: 'warn', details,
       message: `Request-log retention is ${days} days, but no prune has run in the last 48 hours (last run: ${last?.at ?? 'never'}), so the log keeps growing. ` +
-        'The prune runs in the cycle purge phase (autopilot or gbrain dream) and, on a PGLite brain, hourly inside a live gbrain serve.',
-      fix: { argv: ['gbrain', 'dream', '--phase', 'purge'], consent: ['destructive'], actor: 'agent', ask_user: true, requires_exclusive: false, docs: DOCS,
+        'The prune runs in the cycle bookkeeping_gc phase (autopilot, gbrain dream or unattended upkeep) and, on a PGLite brain, hourly inside a live gbrain serve.',
+      fix: { argv: ['gbrain', 'dream', '--phase', 'bookkeeping_gc'], consent: ['destructive'], actor: 'agent', ask_user: true, requires_exclusive: false, docs: DOCS,
         verify: doctorVerify('mcp_request_log_retention'),
-        why: 'Runs the cycle purge phase now, which applies the retention the user already turned on.',
-        user_message: `The MCP request log has not been pruned for over 48 hours. Run the maintenance purge now? It deletes request detail older than ${days} days and also removes pages deleted more than the restore window ago, as the nightly cycle does.` } };
+        why: 'Runs the cycle bookkeeping_gc phase now, which applies the retention the user already turned on; it never purges a page.',
+        user_message: `The MCP request log has not been pruned for over 48 hours. Run the bookkeeping cleanup now? It deletes request detail older than ${days} days and other bookkeeping rows past their retention, as the nightly cycle does; it never removes a page.` } };
   }
   const capNote = last?.capped ? ` It hit the per-run cap of ${(MCP_LOG_PRUNE_BATCH * MCP_LOG_PRUNE_MAX_BATCHES).toLocaleString('en-US')} rows, so older rows are still waiting; each later run continues.` : '';
   return { status: 'ok', details,

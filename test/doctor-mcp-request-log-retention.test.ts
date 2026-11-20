@@ -100,7 +100,9 @@ describe('mcp_request_log_retention', () => {
     const check = await mcpRequestLogRetentionResult(engine, SMALL);
     expect(check.status).toBe('warn');
     expect(check.message).toContain('48 hours');
-    expect(check.fix).toBeDefined();
+    // The fix runs the bookkeeping GC alone, never the page purge.
+    expect(check.fix?.argv).toEqual(['gbrain', 'dream', '--phase', 'bookkeeping_gc']);
+    expect(check.fix?.user_message).not.toContain('pages deleted');
   });
 
   test('retention on and never pruned: warn only once rows past the window are waiting', async () => {

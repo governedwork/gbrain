@@ -1801,9 +1801,6 @@ async function runPhasePurge(engine: BrainEngine, dryRun: boolean): Promise<Phas
     // #5405: coordinated on managed brains; #7130: `automatic` keeps managed sync tombstones with no live twin.
     const purgedPages = await purgeDeletedPagesCoordinated(engine, retentionHours, { automatic: true });
     const purgedClones = await purgeOrphanClones(retentionHours);
-    // #6770: request-log rows past cycle.purge.mcp_request_log_retention_days, when set (logic in mcp-request-log-retention.ts).
-    let purgedMcpLog = 0;
-    try { purgedMcpLog = (await (await import('./mcp-request-log-retention.ts')).runMcpLogRetention(engine))?.deleted ?? 0; } catch (e) { console.warn(`[cycle] request-log retention skipped: ${e instanceof Error ? e.message : String(e)}`); }
     return {
       phase: 'purge',
       status: purgePhaseStatus(purgedPages), error: purgedPages.error, // #6741: a writer in recovery or a parked page warns
@@ -1821,7 +1818,6 @@ async function runPhasePurge(engine: BrainEngine, dryRun: boolean): Promise<Phas
         purged_orphan_clone_names: purgedClones.names,
         purged_sources: purgedSources,
         purged_page_slugs: purgedPages.slugs,
-        ...(purgedMcpLog > 0 ? { purged_mcp_request_log_count: purgedMcpLog } : {}),
       },
     };
   } catch (e) {

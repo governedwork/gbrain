@@ -5,8 +5,11 @@ import type { PhaseResult } from '../cycle.ts';
  * GBRA-438 — bookkeeping GC, split out of purge with the same functions and
  * retentions: op_checkpoints and brainstorm checkpoints (7 days), batch-retry
  * audit files (30 days), volunteer events (90 days), decision receipts,
- * applied captures and retrieval feedback (their own retention settings). It
- * never deletes a page, so unattended upkeep may run it (decision C1).
+ * applied captures and retrieval feedback (their own retention settings), and
+ * MCP request-log rows past `cycle.purge.mcp_request_log_retention_days` when
+ * that opt-in is set (src/core/mcp-request-log-retention.ts). It never deletes
+ * a page, so unattended upkeep may run it (decision C1), and a brain that must
+ * not auto-purge pages can run `gbrain dream --phase bookkeeping_gc` alone.
  */
 export async function runPhaseBookkeepingGc(engine: BrainEngine, dryRun: boolean): Promise<PhaseResult> {
   if (dryRun) {
@@ -60,13 +63,21 @@ export async function runPhaseBookkeepingGc(engine: BrainEngine, dryRun: boolean
   const purgedAppliedCaptures = await (await import('../ingestion/applied-captures.ts')).purgeStaleAppliedCaptures(engine);
   let purgedFeedback = { events: 0, weights: 0 };
   try { purgedFeedback = await (await import('../feedback/store.ts')).pruneRetrievalFeedback(engine, (await (await import('../feedback/settings.ts')).loadFeedbackSettings(engine)).eventRetentionDays); } catch { /* pre-v207 brain */ }
+  // #6770: request-log rows past cycle.purge.mcp_request_log_retention_days, when set. Retention-bound rows, never a
+  // page, so it belongs here rather than in purge. A failed prune warns the phase and names the error (the other
+  // collections above still ran); it is never silently skipped.
+  let purgedMcpLog = 0;
+  let mcpLogError: string | null = null;
+  try { purgedMcpLog = (await (await import('../mcp-request-log-retention.ts')).runMcpLogRetention(engine))?.deleted ?? 0; } catch (e) { mcpLogError = e instanceof Error ? e.message : String(e); }
   return {
     phase: 'bookkeeping_gc',
-    status: 'ok',
+    status: mcpLogError === null ? 'ok' : 'warn',
     duration_ms: 0,
     summary:
       `${purgedCheckpoints} stale op_checkpoint(s), ${purgedBrainstormCheckpoints} stale brainstorm checkpoint(s), ` +
-      `${purgedBatchRetryAuditFiles} stale batch-retry audit file(s) and ${purgedVolunteerEvents} stale volunteer event(s)`,
+      `${purgedBatchRetryAuditFiles} stale batch-retry audit file(s) and ${purgedVolunteerEvents} stale volunteer event(s)` +
+      (purgedMcpLog > 0 ? `; ${purgedMcpLog} request-log row(s) past retention` : '') +
+      (mcpLogError === null ? '' : `; request-log retention failed: ${mcpLogError}`),
     details: {
       purged_checkpoints_count: purgedCheckpoints,
       purged_brainstorm_checkpoints_count: purgedBrainstormCheckpoints,
@@ -75,6 +86,8 @@ export async function runPhaseBookkeepingGc(engine: BrainEngine, dryRun: boolean
       ...(purgedDecisionReceipts > 0 ? { purged_decision_receipts_count: purgedDecisionReceipts } : {}),
       ...(purgedAppliedCaptures > 0 ? { purged_applied_captures_count: purgedAppliedCaptures } : {}),
       ...(purgedFeedback.events + purgedFeedback.weights > 0 ? { purged_retrieval_feedback_events_count: purgedFeedback.events, purged_retrieval_weights_count: purgedFeedback.weights } : {}),
+      ...(purgedMcpLog > 0 ? { purged_mcp_request_log_count: purgedMcpLog } : {}),
+      ...(mcpLogError === null ? {} : { mcp_request_log_retention_error: mcpLogError }),
     },
   };
 }

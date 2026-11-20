@@ -62,7 +62,7 @@ export const MANAGED_PHASE_TABLE: Readonly<Record<CyclePhase, ManagedPhaseEntry>
   orphans: { tier: 'free', class: 'no_coordinated_write', reason: 'Read-only orphan report.' },
   'schema-suggest': { tier: 'free', class: 'no_coordinated_write', reason: 'Writes schema suggestions outside the canonical tables.' },
   purge: { tier: 'deletes', class: 'writes', reason: 'Expired tombstones are purged one by one through coordinated delete_page purges.' },
-  bookkeeping_gc: { tier: 'deletes', class: 'no_coordinated_write', reason: 'Deletes bookkeeping rows and files past their retention (op checkpoints, brainstorm checkpoints, batch-retry audit files, volunteer events, decision receipts, applied captures, retrieval feedback); it never touches a page.' },
+  bookkeeping_gc: { tier: 'deletes', class: 'no_coordinated_write', reason: 'Deletes bookkeeping rows and files past their retention (op checkpoints, brainstorm checkpoints, batch-retry audit files, volunteer events, decision receipts, applied captures, retrieval feedback, request-log rows past cycle.purge.mcp_request_log_retention_days); it never touches a page.' },
 };
 
 export async function isManagedBrain(engine: BrainEngine): Promise<boolean> {
