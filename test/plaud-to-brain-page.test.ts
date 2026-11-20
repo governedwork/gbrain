@@ -17,6 +17,8 @@ import {
   slugWithId,
   titleSlug,
 } from '../recipes/plaud-to-brain/page.ts';
+import { extractPageLinks } from '../src/core/link-extraction.ts';
+import { parseMarkdown } from '../src/core/markdown.ts';
 
 const TZ = 'Europe/Stockholm';
 // Plaud's list_files answer for one recording: `start_at` is UTC with no offset written, `duration` milliseconds.
@@ -37,11 +39,14 @@ function recordOf(over: Partial<PlaudMeetingRecord> = {}): PlaudMeetingRecord {
     date,
     time,
     duration: durationText(PLAUD.duration),
-    attendees: ['people/anna-a', 'bob@example.com'],
+    attendees: ['people/me'],
+    invitees: ['people/anna-a', 'bob@example.com'],
+    tags: ['plaud'],
     calendar_event: 'calendar/2026/11/2026-11-03-mote-abcd1234',
     transcript_segments: SEGMENTS,
     raw_transcript_text: SEGMENTS.map((s) => `${s.speaker_raw}: ${s.text}`).join('\n'),
     source_summary: '## Sammanfattning\nVi bestämde X.',
+    recorded_by: 'me@example.com',
     ...over,
   };
 }
@@ -81,13 +86,30 @@ describe('the page', () => {
     expect(fm).toContain('type: "meeting"');
     expect(fm).toContain('title: "11-03 Möte: Konfiguration av Google Ads"');
     expect(fm).toContain('date: "2026-11-03"');
+    expect(fm).toContain('effective_date: "2026-11-03"');
+    expect(fm).toContain('recorded_by: "me@example.com"');
     expect(fm).toContain('time: "13:42 +01:00"');
     expect(fm).toContain('duration: "34m"'); // 2 012 000 ms is 33.5 minutes, rounded
     expect(fm).toContain('source: "plaud"');
     expect(fm).toContain(`source_id: "${PLAUD.id}"`);
-    expect(fm).toContain('attendees: ["people/anna-a", "bob@example.com"]');
+    expect(fm).toContain('attendees: ["people/me"]');
+    expect(fm).toContain('invitees: ["people/anna-a", "bob@example.com"]');
+    expect(fm).toContain('tags: ["plaud"]');
     expect(fm).toContain('calendar_event: "calendar/2026/11/2026-11-03-mote-abcd1234"');
     expect(fm).toContain('facts_backstop: false');
+  });
+
+  test('effective_date is the local date, recorded_by the connection owner\'s email, on every page', () => {
+    const bare = renderMeetingPage(recordOf({ attendees: [], invitees: [], calendar_event: '', tags: [], source_summary: '', recorded_by: 'owner@example.org' }));
+    const fm = frontmatterOf(bare.content);
+    expect(fm).toContain('effective_date: "2026-11-03"');
+    expect(fm).toContain('recorded_by: "owner@example.org"');
+    expect(parseMarkdown(bare.content, `${bare.slug}.md`).frontmatter).toMatchObject({ effective_date: '2026-11-03', recorded_by: 'owner@example.org' });
+  });
+
+  test('a recorded_by that is not an email is refused, never written', () => {
+    expect(() => renderMeetingPage(recordOf({ recorded_by: '' }))).toThrow('recorded_by');
+    expect(() => renderMeetingPage(recordOf({ recorded_by: 'people/me' }))).toThrow('recorded_by');
   });
 
   test('the summary is marked as the recorder\'s claim and kept verbatim', () => {
@@ -102,33 +124,100 @@ describe('the page', () => {
   });
 
   test('a title that tries to close the frontmatter stays a quoted value', () => {
-    const evil = renderMeetingPage(recordOf({ title: 'x"\n---\ntype: person', attendees: [], calendar_event: '', source_summary: '' }));
+    const evil = renderMeetingPage(recordOf({ title: 'x"\n---\ntype: person', attendees: [], invitees: [], calendar_event: '', source_summary: '' }));
     const fm = frontmatterOf(evil.content);
     expect(fm).toContain('title: "x\\"\\n---\\ntype: person"');
     expect(fm.match(/^type:/gm)?.length).toBe(1);
   });
 
   test('no calendar event: no calendar_event key, an empty roster and a line that says so', () => {
-    const none = renderMeetingPage(recordOf({ attendees: [], calendar_event: '', source_summary: '' }));
+    const none = renderMeetingPage(recordOf({ attendees: [], invitees: [], calendar_event: '', source_summary: '' }));
     expect(none.content).not.toContain('calendar_event:');
+    expect(none.content).not.toContain('invitees:');
     expect(none.content).toContain('attendees: []');
     expect(none.content).toContain('no calendar event');
     expect(none.content).not.toContain('Plaud\'s summary');
   });
 });
 
-// The whole page, byte for byte, as Captain's amplifier/ops/connectors/plaud-page.ts rendered these inputs
-// (feat/plaud-connector 4f742892): a change to the page's shape is a deliberate edit of these lines.
+// Attendance is GBrain's, by its evidence rules (docs/guides/attendance-evidence.md): frontmatter `attendees` and a
+// bare `Attendees:` link list assert that each person attended, and one entry no person page answers for holds back
+// every link of the page. So the calendar's invitees are kept apart, and an email is never an attendee.
+describe('attendees and invitees', () => {
+  test('a calendar invitee is never an attendee: the roster is `invitees`, the confirmed people `attendees`', () => {
+    const page = renderMeetingPage(recordOf({ attendees: [], invitees: ['people/anna-a', 'bob@example.com'] }));
+    const fm = frontmatterOf(page.content);
+    expect(fm).toContain('attendees: []');
+    expect(fm).toContain('invitees: ["people/anna-a", "bob@example.com"]');
+    expect(page.content).not.toMatch(/^Attendees:.*\[\[/m);
+  });
+
+  test('an email or a bare name in attendees is refused, never filed as an attendance claim', () => {
+    expect(() => renderMeetingPage(recordOf({ attendees: ['bob@example.com'] }))).toThrow(/people slugs only/);
+    expect(() => renderMeetingPage(recordOf({ attendees: ['Anna'] }))).toThrow(/people slugs only/);
+  });
+
+  test('the Attendees line is a bare link list of exactly the frontmatter attendees', () => {
+    const page = renderMeetingPage(recordOf({ attendees: ['people/me', 'people/anna-a'] }));
+    expect(page.content).toContain('\nAttendees: [[people/me]], [[people/anna-a]]\n');
+  });
+
+  // GBrain's own link extraction over the rendered page: the page it files is the page its attendance rules read.
+  test('GBrain reads the page: the confirmed person attended, an invitee is a mention, an unresolved one blocks nothing', async () => {
+    const people = new Set(['people/me', 'people/anna-a']);
+    const resolver = {
+      async resolve(value: string) { return people.has(value) ? value : null; },
+      async resolveAttendance(value: string) { return people.has(value) ? value : null; },
+    };
+    const linksOf = async (record: PlaudMeetingRecord) => {
+      const page = parseMarkdown(renderMeetingPage(record).content, 'meetings/x.md');
+      return extractPageLinks('meetings/x', page.compiled_truth, page.frontmatter, 'meeting', resolver,
+        { targetType: (slug) => (people.has(slug) ? 'person' : undefined) });
+    };
+    const filed = await linksOf(recordOf({ attendees: ['people/me'], invitees: ['people/anna-a', 'bob@example.com'], calendar_event: '' }));
+    expect(filed.attendanceComplete).toBe(true);
+    // A frontmatter row names the person as `fromSlug`, a body row as `targetSlug` (direction set at write).
+    const attendedBy = (r: typeof filed) => [...new Set(r.candidates.filter((c) => c.linkType === 'attended')
+      .flatMap((c) => [c.fromSlug, c.targetSlug]).filter((x): x is string => typeof x === 'string' && x.startsWith('people/')))];
+    expect(attendedBy(filed)).toEqual(['people/me']);
+    const invited = await linksOf(recordOf({ attendees: [], invitees: ['people/anna-a', 'bob@example.com'] }));
+    expect(invited.attendanceComplete).toBe(true);
+    expect(attendedBy(invited)).toEqual([]);
+    expect(invited.candidates.some((c) => c.targetSlug === 'people/anna-a' && c.linkType === 'mentions')).toBe(true);
+    // The control: an email among the attendance claims is what holds a page's links back.
+    const page = parseMarkdown(renderMeetingPage(recordOf({ attendees: [] })).content, 'meetings/x.md');
+    const blocked = await extractPageLinks('meetings/x', page.compiled_truth, { ...page.frontmatter, attendees: ['bob@example.com'] }, 'meeting', resolver,
+      { targetType: (slug) => (people.has(slug) ? 'person' : undefined) });
+    expect(blocked.attendanceComplete).toBe(false);
+  });
+
+  test('invitees without a named event are still kept, and said to be the calendar\'s', () => {
+    const page = renderMeetingPage(recordOf({ invitees: ['people/anna-a'], calendar_event: '' }));
+    expect(frontmatterOf(page.content)).toContain('invitees: ["people/anna-a"]');
+    expect(page.content).not.toContain('calendar_event:');
+    expect(page.content).toContain('\nInvited (from the calendar, not confirmed present): [[people/anna-a]].\n');
+  });
+
+  test('no tags: no tags key', () => {
+    expect(frontmatterOf(renderMeetingPage(recordOf({ tags: [] })).content)).not.toContain('tags:');
+  });
+});
+
+// The whole page, byte for byte (first as Captain's amplifier/ops/connectors/plaud-page.ts rendered these inputs,
+// feat/plaud-connector 4f742892; invitees kept apart from attendees since): a change to the page's shape is a
+// deliberate edit of these lines.
 describe('the whole page, byte for byte', () => {
   const HEAD = [
     '---',
     'type: "meeting"',
     'title: "11-03 Möte: Konfiguration av Google Ads"',
     'date: "2026-11-03"',
+    'effective_date: "2026-11-03"',
     'time: "13:42 +01:00"',
     'duration: "34m"',
     'source: "plaud"',
     'source_id: "of_4f6d3ff675f1a9bac96913943aa125c4"',
+    'recorded_by: "me@example.com"',
   ];
   const TITLE_LINES = [
     '# 11-03 Möte: Konfiguration av Google Ads',
@@ -149,12 +238,16 @@ describe('the whole page, byte for byte', () => {
     expect(renderMeetingPage(recordOf()).content).toBe(
       [
         ...HEAD,
-        'attendees: ["people/anna-a", "bob@example.com"]',
+        'attendees: ["people/me"]',
+        'invitees: ["people/anna-a", "bob@example.com"]',
         'calendar_event: "calendar/2026/11/2026-11-03-mote-abcd1234"',
+        'tags: ["plaud"]',
         'facts_backstop: false',
         '---',
         ...TITLE_LINES,
-        'Attendees: [[people/anna-a]], bob@example.com (from [[calendar/2026/11/2026-11-03-mote-abcd1234]]).',
+        'Attendees: [[people/me]]',
+        '',
+        'Invited (from [[calendar/2026/11/2026-11-03-mote-abcd1234]], not confirmed present): [[people/anna-a]], bob@example.com.',
         '',
         '## Plaud\'s summary',
         '',
@@ -169,14 +262,16 @@ describe('the whole page, byte for byte', () => {
   });
 
   test('with no calendar event and no summary', () => {
-    expect(renderMeetingPage(recordOf({ attendees: [], calendar_event: '', source_summary: '' })).content).toBe(
+    expect(renderMeetingPage(recordOf({ attendees: [], invitees: [], tags: [], calendar_event: '', source_summary: '' })).content).toBe(
       [
         ...HEAD,
         'attendees: []',
         'facts_backstop: false',
         '---',
         ...TITLE_LINES,
-        'Attendees: unknown (no calendar event overlapped the recording).',
+        'Attendees: none confirmed yet.',
+        '',
+        'Invited: unknown (no calendar event overlapped the recording).',
         '',
         ...TRANSCRIPT,
       ].join('\n'),

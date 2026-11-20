@@ -148,7 +148,7 @@ attendee list, a CLAIM to correct by evidence (invited ≠ present).
    duration)` in UTC (Step 2: `start_at` is UTC with no offset written). The
    event is the one whose `[start, end)` overlaps that window; with several, the
    one that overlaps it longest; an `all_day` event never counts. None: the
-   roster is empty, `attendees: []`, and the report says `no calendar event`.
+   roster is empty, `invitees: []`, and the report says `no calendar event`.
    Never pick an adjacent event because it is close.
 2. **Read the roster.** The event's `attendees` emails, plus `organizer` when it
    is not among them. Resolve each to a people page as meeting-ingestion
@@ -160,7 +160,15 @@ attendee list, a CLAIM to correct by evidence (invited ≠ present).
    answers for stays an email in the roster; the person's own address (the
    event's `account`) resolves to the person's page like any other.
 3. **The roster is a claim.** Put the resolved slugs (and the unresolved emails)
-   in the transcript record's `attendees:` below. Phase 4 then starts from
+   in the transcript record's `invitees:` below, never in `attendees:`: GBrain
+   reads a meeting's `attendees:` and its bare `Attendees:` link list as
+   `person --attended--> meeting`, and one entry no person page answers for
+   holds back every link of the page (`docs/guides/attendance-evidence.md`).
+   `attendees:` carries only people the runner has evidence were there, by
+   slug: the recorder (their own Plaud made the recording), when their address
+   resolves to exactly one person page in the brain the page is filed in. A
+   calendar resource (a room, `@resource.calendar.google.com`) is no invitee.
+   Phase 4 then starts from
    this list — roster-confirmed speakers are `high` confidence — and corrects
    it: a speaker in the transcript who is not on the roster is added by
    evidence, an invitee who never speaks and is never addressed is dropped
@@ -185,11 +193,14 @@ title: "<the recording's name>"
 date: YYYY-MM-DD        # from start_at (UTC), in the person's timezone
 time: "HH:MM ±HH:MM"
 duration: "1h05m"       # from milliseconds
-attendees: []           # Step 4's roster: people slugs (unresolved ones as emails), the source's CLAIM; Phase 4 corrects it
+attendees: []           # people known present, by slug only (the recorder; Phase 4 adds the rest by evidence)
+invitees: []            # Step 4's roster: people slugs (unresolved ones as emails), the source's CLAIM, never attendance
+tags: []                # the page's tags
 calendar_event: ""      # Step 4's calendar page slug, or empty when no event overlapped
 transcript_segments: [] # every page of get_transcript, speaker_raw = Plaud's speaker
 raw_transcript_text: "..."   # the whole transcript, never truncated
 source_summary: "..."        # get_note's Markdown: a claim
+recorded_by: "<email>"       # the email of the account that owns the connection the recording came through
 ```
 
 **The page's one definition is `recipes/plaud-to-brain/page.ts`.** `renderMeetingPage(record)` renders this record
@@ -228,12 +239,16 @@ capture(
 type: meeting
 title: "<title>"
 date: "YYYY-MM-DD"
+effective_date: "YYYY-MM-DD"   # = date
 time: "HH:MM ±HH:MM"
 duration: "1h05m"
 source: plaud
 source_id: <id>
-attendees: []           # the same people as the Attendees: line, by slug (Step 4's roster, as Phase 4 corrected it)
+recorded_by: "<email>"  # the connection owner's email: the recorder, as evidence the brain resolves
+attendees: []           # the same people as the Attendees: line, by slug (known present; Phase 4 adds the rest)
+invitees: []            # Step 4's roster, the claim; omitted with calendar_event when no event overlapped
 calendar_event: calendar/YYYY/MM/YYYY-MM-DD-title-id8   # Step 4's event; omit the key when there was none
+tags: []                # omitted when empty
 facts_backstop: false   # until the verification checklist passes (meeting-ingestion Phase 5)
 ---
 ```
@@ -270,7 +285,8 @@ filed meeting.
 3. **The source_id is Plaud's:** `get_page` on a filed meeting shows
    `source: plaud` and `source_id: of_…` in its frontmatter.
 3b. **The roster is the calendar's:** a recording made during a calendar event
-   files with that event's attendees as people slugs in `attendees:` and the
+   files with that event's attendees in `invitees:` (people slugs where an
+   email resolves), `attendees:` holding only people known present, and the
    event in `calendar_event:`; a recording with no overlapping event files
    with the roster speaker resolution alone found, and the report says
    `no calendar event`. An event that only neighbours the recording is never
