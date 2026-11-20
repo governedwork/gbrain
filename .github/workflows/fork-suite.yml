@@ -1,11 +1,12 @@
 # Ours (governedwork fork), not upstream GBrain: the fork's full suite on Linux.
 #
 # Upstream's Test workflow runs on Ubicloud runners and only for master; the fork has neither. Its lander (on the
-# wardrobe, a macOS sandbox) gates each PR with the typecheck and the tests it names, but the whole suite assumes Linux
-# (flock(1), case-sensitive paths, process groups, ps), so on macOS it is red on bare upstream too. This workflow runs
-# the same suite on GitHub's free Linux runners (the fork is public), with upstream's own shard scripts, and
-# `fork-suite` is the context the brains-v* ruleset requires beside `lander/verdict` (operator ruling 2026-10-19,
-# arc gbrain-bump).
+# wardrobe, a macOS sandbox) gates each PR with the typecheck alone (the lander's standard profile, 300 s budget); the
+# whole suite assumes Linux (flock(1), case-sensitive paths, process groups, ps), so on macOS it is red on bare upstream
+# too. This workflow runs the same suite on GitHub's free Linux runners (the fork is public), with upstream's own shard
+# scripts, on every push to brains-v* (coalesced) and by hand: it is the fork's main verification, after the merge, not
+# a check a PR waits for (governedwork/lander docs/CUTOVER-commands.md §9). The brains-v* ruleset (25239661) requires
+# only `lander/verdict`.
 #
 # Shard counts are read from upstream's own constants (UNIT_SHARDS in scripts/sharding.ts, ARM_SHARDS in
 # scripts/postgres-unit-arms.ts) by the `plan` job, so a rebase that re-weights upstream's lanes cannot leave this
@@ -23,14 +24,12 @@
 name: fork-suite
 
 on:
-  pull_request:
-    branches: ['brains-v*']
   push:
     branches: ['brains-v*']
   workflow_dispatch:
 
 concurrency:
-  group: fork-suite-${{ github.event.pull_request.number || github.ref }}
+  group: fork-suite-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -110,7 +109,7 @@ jobs:
           SHARD: ${{ matrix.shard }}/4
 
   # Upstream's E2E corpus against PostgreSQL + pgvector, sequential per file (scripts/run-e2e.sh). Upstream runs it in
-  # e2e.yml's diff-selected and nightly full-corpus lanes on Ubicloud; the fork runs the whole corpus on every PR.
+  # e2e.yml's diff-selected and nightly full-corpus lanes on Ubicloud; the fork runs the whole corpus on every push.
   postgres-e2e:
     runs-on: ubuntu-24.04
     timeout-minutes: 75

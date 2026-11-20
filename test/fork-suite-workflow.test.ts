@@ -1,11 +1,11 @@
 /**
- * Ours (governedwork fork), not upstream GBrain: pins what the fork's required `fork-suite` check runs.
+ * Ours (governedwork fork), not upstream GBrain: pins what the fork's `fork-suite` workflow runs.
  *
- * `fork-suite` (.github/workflows/fork-suite.yml) is the context the brains-v* ruleset requires beside
- * `lander/verdict`, and the only place the fork's whole suite runs (the lander runs a PR's named tests). Two
- * guarantees ride it:
+ * `fork-suite` (.github/workflows/fork-suite.yml) is the fork's main verification: it runs the whole suite on every
+ * push to brains-v*, after the merge (the lander gates each PR with the typecheck alone). Three guarantees ride it:
+ *   - trigger: push to brains-v* and by hand, never per pull request.
  *   - postgres (ledger 111): the PostgreSQL-only tests — upstream's E2E corpus through scripts/run-e2e.sh and the
- *     unit suites' PostgreSQL arms through scripts/postgres-unit-arms.ts — are part of the required check.
+ *     unit suites' PostgreSQL arms through scripts/postgres-unit-arms.ts — are part of it.
  *   - flake (ledger 105): a shard whose only failures are listed known upstream flakes (belief-ledger probe 13)
  *     re-runs those tests once before it reads red; any other failure stays red.
  */
@@ -48,6 +48,14 @@ function aggregate(): { needs: string[]; run: string } {
   const needs = Array.isArray(job.needs) ? job.needs : job.needs ? [job.needs] : [];
   return { needs, run: (job.steps ?? []).map((s) => s.run ?? '').join('\n') };
 }
+
+describe('fork-suite is main verification (lander standard profile)', () => {
+  test('it runs on push to brains-v* and by hand, never per pull request', () => {
+    const { on } = Bun.YAML.parse(readFileSync(WORKFLOW_PATH, 'utf8')) as { on: Record<string, unknown> };
+    expect(Object.keys(on).sort()).toEqual(['push', 'workflow_dispatch']);
+    expect(on.push).toEqual({ branches: ['brains-v*'] });
+  });
+});
 
 describe('fork-suite PostgreSQL lanes (ledger 111)', () => {
   test('postgres: a sharded pgvector pg16 job runs upstream scripts/run-e2e.sh against DATABASE_URL', () => {
