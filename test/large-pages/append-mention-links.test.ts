@@ -223,6 +223,22 @@ for (const kind of testBackends()) {
       }
     }, 300_000);
 
+    test('governedwork/captain#485: an append to an external_untrusted page links nothing and drops the edges this producer made', async () => {
+      const slug = 'notes/mention-log-untrusted';
+      await brain.seed(slug, conversationPage(20_000, { seed: 12 }));
+      // The control: the same kind of append to the page while it is trusted links its mention.
+      await deferred(() => append(slug, mentions('notes/alice-example')));
+      await runLinks(slug);
+      expect(await remoteEdges(slug)).toEqual([mention('notes/alice-example')]);
+      await brain.engine.executeRaw("UPDATE pages SET trust_tier='external_untrusted' WHERE source_id='default' AND slug=$1", [slug]);
+      await brain.engine.addLink(slug, 'notes/carol-example', 'by hand', 'mentions', 'manual'); // gbrain-allow-direct-insert: fixture edge a caller wrote by name
+      await deferred(() => append(slug, mentions('notes/bob-example')));
+      await runLinks(slug);
+      expect((await linksEffects(slug)).at(-1)!.outcome).toEqual({ links: 'committed', added: 0, removed: 1, skipped_targets: [], reason: 'untrusted_page' });
+      expect(await remoteEdges(slug)).toEqual([]);
+      expect((await edges(slug)).filter(e => e.link_source === 'manual')).toEqual([{ to_slug: 'notes/carol-example', link_type: 'mentions', link_source: 'manual' }]);
+    }, 300_000);
+
     test('an inline append whose publication normalizes a fence before it mines its own text', async () => {
       await deferred(() => append(NORMALIZED, mentions('notes/alice-example')));
       const stored = (await brain.body(NORMALIZED)).truth;

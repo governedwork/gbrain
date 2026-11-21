@@ -130,6 +130,33 @@ for (const kind of ['pglite', ...(process.env.DATABASE_URL ? ['postgres'] : [])]
       expect(await evidence()).toEqual(before);
     });
 
+    test('governedwork/captain#485: an external_untrusted origin publishes no body edge or body wanted row; frontmatter, manual and inbound edges stay', async () => {
+      await seed('people/alice-example', 'person');
+      await seed('people/bob-example', 'person');
+      const body = 'Decided with [[people/bob-example]] and [[people/ghost-example]].';
+      await seed('decisions/trusted', 'decision', body, { owner: 'people/alice-example' });
+      await seed('decisions/fetched', 'decision', body, { owner: 'people/alice-example' });
+      expect((await reconcileSourceLinks(engine, sourceId, { pack })).ok).toBe(true);
+      const from = async (slug: string) => (await graph()).filter(edge => edge.from_slug === slug).map(edge => `${edge.to_slug} ${edge.link_type} ${edge.link_source}`);
+      const wanted = (slug: string) => engine.executeRaw(`SELECT w.target_ref, w.producer FROM wanted_links w JOIN pages p ON p.id=w.origin_page_id
+        WHERE p.source_id=$1 AND p.slug=$2`, [sourceId, slug]);
+      const expected = ['people/alice-example owned_by frontmatter', 'people/bob-example mentions markdown'];
+      // The control: both pages carry the body edge and the body wanted row while trusted.
+      expect(await from('decisions/trusted')).toEqual(expected);
+      expect(await from('decisions/fetched')).toEqual(expected);
+      expect(await wanted('decisions/fetched')).toEqual([{ target_ref: 'people/ghost-example', producer: 'body' }]);
+      await engine.addLink('decisions/fetched', 'people/bob-example', 'by hand', 'works_at', 'manual', undefined, undefined, // gbrain-allow-direct-insert: fixture edge a caller wrote by name
+        { fromSourceId: sourceId, toSourceId: sourceId, originSourceId: sourceId });
+      await engine.addLink('people/bob-example', 'decisions/fetched', 'cites', 'mentions', 'manual', undefined, undefined, // gbrain-allow-direct-insert: fixture edge into the page
+        { fromSourceId: sourceId, toSourceId: sourceId, originSourceId: sourceId });
+      await engine.executeRaw("UPDATE pages SET trust_tier='external_untrusted' WHERE source_id=$1 AND slug='decisions/fetched'", [sourceId]);
+      expect((await reconcileSourceLinks(engine, sourceId, { pack })).ok).toBe(true);
+      expect(await from('decisions/fetched')).toEqual(['people/alice-example owned_by frontmatter', 'people/bob-example works_at manual']);
+      expect(await wanted('decisions/fetched')).toEqual([]);
+      expect(await from('people/bob-example')).toEqual(['decisions/fetched mentions manual']);
+      expect(await from('decisions/trusted')).toEqual(expected);
+    });
+
     test('full-source scans resolve new targets and retype unchanged origins without N+1 target reads', async () => {
       await seed('rivals/rival-example', 'competitor', 'competes with [[organizations/company-example]].');
       let result = await reconcileSourceLinks(engine, sourceId, { pack });

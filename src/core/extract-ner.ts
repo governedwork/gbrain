@@ -22,6 +22,7 @@ import { isCrossSourceLinksEnabled } from './link-extraction.ts';
 import { inferLinkTypeFromPack } from './schema-pack/link-inference.ts';
 import { loadActivePackForLocalEngine, packSupportsNerInference } from './schema-pack/best-effort.ts';
 import { isQuarantined } from './quarantine.ts';
+import { isNoAutoLinkPage } from './trust/auto-links.ts';
 import { renderFragment, sqlFragment } from './engine-sql/fragment.ts';
 import { entityTypePredicateSql, resolveEntityTypes } from './schema-pack/entity-types.ts';
 
@@ -169,6 +170,12 @@ export async function extractNerLinks(
     }
     processed++;
     opts.onProgress?.(processed, allRefs.length, created);
+
+    // governedwork/captain#485: an external_untrusted page yields no typed mention, and loses the ones NER made before.
+    if (await isNoAutoLinkPage(engine, page.id)) {
+      if (!dryRun) await engine.executeRaw(`DELETE FROM links WHERE from_page_id = $1 AND link_source = 'mentions' AND link_kind = 'typed_ner'`, [page.id]);
+      continue;
+    }
 
     const body = page.compiled_truth + '\n\n' + (page.timeline ?? '');
     if (!body.trim()) continue;

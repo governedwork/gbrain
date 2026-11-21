@@ -3,6 +3,7 @@ import { privatePagesFilterForCaller } from '../search/private-visibility.ts';
 import type { ReadQuery } from '../search/read-enrichment.ts';
 import { isSegmentedPage } from '../page-body/page-shape.ts';
 import { rowToPage } from '../utils.ts';
+import { untrustedSnapshotField } from '../trust/auto-links.ts';
 import type { GlobalPurgeMarker, PageSnapshot, PageSnapshotOptions, PageWithdrawal } from './types.ts';
 import { PageSnapshotAmbiguousError, REVISION_BACKFILL_PENDING } from './types.ts';
 
@@ -133,5 +134,5 @@ async function readSnapshotStatement(query: ReadQuery, slug: string, opts?: Page
   }
   return { page, tags: row.snapshot_tags as string[], revision: row.knowledge_revision == null ? REVISION_BACKFILL_PENDING : String(row.knowledge_revision),
     sourceIncarnation: String(row.source_incarnation), withdrawals, ...(globalPurges.count > 0 ? { globalPurges } : {}),
-    ...(isSegmentedPage(page) ? { bodyGeneration: Number(row.body_generation) } : {}) };
+    ...(isSegmentedPage(page) ? { bodyGeneration: Number(row.body_generation) } : {}), ...untrustedSnapshotField(row) };
 }
