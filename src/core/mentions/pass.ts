@@ -72,7 +72,7 @@ import { managedPersistenceEnabled } from '../persistence/ownership.ts';
 import { noAutoLinkPageSql } from '../trust/auto-links.ts';
 
 /** Bump to rescan every page's mentions once (gazetteer or scanner behavior change). */
-export const MENTION_EXTRACTOR_VERSION = 7;
+export const MENTION_EXTRACTOR_VERSION = 8;
 /** Bump to re-derive every entity page's declared aliases and title subject once. */
 export const ALIAS_DERIVATION_VERSION = 4;
 

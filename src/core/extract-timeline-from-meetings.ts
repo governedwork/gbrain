@@ -1,6 +1,7 @@
 // src/core/extract-timeline-from-meetings.ts
 // v0.41.18.0 (A11, T8). Walk meeting pages, identify discussed entities via
-// (a) existing `attended` links (attendees) + (b) body-mention scan, and
+// (a) existing `attended` links (attendees) and the meeting's resolved markdown/wiki links to linkable entity pages
+// + (b) body-mention scan, and
 // write a timeline entry on each entity page with a meeting-specific source
 // key that survives v99's widened dedup.
 //
@@ -160,6 +161,21 @@ export async function extractTimelineFromMeetings(
   // with attendee edges. Each (meeting, entity) produces ONE timeline row.
   const gazetteer = opts.gazetteer ?? await buildGazetteer(engine);
   const allowCrossSource = await isCrossSourceLinksEnabled(engine);
+  // Ours (ledger L159): the meeting's own resolved links (markdown and wikilinks, written by the link extractor) to
+  // linkable entity pages join its attendees: the mention scan masks link syntax, so an entity written only as
+  // `[[companies/acme-example]]` is found here, by what the link resolves to, not by its slug's words.
+  const entityPages = new Set([...gazetteer.values()].flat().map(e => `${e.source_id}::${e.slug}`));
+  if (entityPages.size) {
+    const linked = await engine.executeRaw<AttendedEdgeRow>(
+      `SELECT meeting.slug AS meeting_slug, meeting.source_id AS meeting_source_id, target.slug AS attendee_slug, target.source_id AS attendee_source_id
+         FROM links l JOIN pages meeting ON meeting.id = l.from_page_id JOIN pages target ON target.id = l.to_page_id
+        WHERE l.link_source IN ('markdown', 'wikilink-resolved') AND ${MEETING_EDGE_PREDICATE}
+          AND meeting.deleted_at IS NULL AND target.deleted_at IS NULL`);
+    for (const e of linked) {
+      const key = `${e.meeting_source_id}::${e.meeting_slug}`;
+      if (meetingKeys.has(key) && entityPages.has(`${e.attendee_source_id}::${e.attendee_slug}`)) attendeesByMeeting.set(key, [...attendeesByMeeting.get(key) ?? [], e]);
+    }
+  }
 
   const batch: TimelineBatchInput[] = [];
   // #5575 I2: the rows restate their meeting (no model), so a batch holds one meeting tier and is stamped with it.
