@@ -2574,8 +2574,7 @@ async function extractMentionsFromDb(
     // A segmented body is scanned block by block (mentions/pass.ts pageMentions).
     const body = isSegmentedPage(page) ? null : (page.title ?? '') + '\n\n' + page.compiled_truth + '\n\n' + (page.timeline ?? '');
     const mentionOpts = { fromSlug: slug, fromSourceId: source_id, allowCrossSource };
-    // governedwork/captain#485: an external_untrusted page yields no mention (--rebuild then removes its mention rows).
-    const mentions = await isNoAutoLinkPage(engine, page.id) ? []
+    const mentions = await isNoAutoLinkPage(engine, page.id) ? [] // #485: an untrusted page yields none; --rebuild drops its rows
       : body === null ? await pageMentions(engine, { ...withoutBody(page), id: Number(page.id), source_id }, gazetteer, mentionOpts)
       : body.trim() ? findMentionedEntities(body, gazetteer, mentionOpts) : [];
 
