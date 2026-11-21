@@ -8,6 +8,7 @@
  * The test lives in test/ rather than beside page.ts because test/ is what the unit lanes collect and what
  * `bun run typecheck` reaches (tsconfig includes src, test and scripts; page.ts is checked through this import).
  */
+import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'bun:test';
 import {
   durationText,
@@ -19,6 +20,7 @@ import {
   titleSlug,
 } from '../recipes/plaud-to-brain/page.ts';
 import { parseMarkdown } from '../src/core/markdown.ts';
+import { parseRecipe } from '../src/commands/integrations.ts';
 
 const TZ = 'Europe/Stockholm';
 // Plaud's list_files answer for one recording: `start_at` is UTC with no offset written, `duration` milliseconds.
@@ -154,6 +156,28 @@ describe('the collector contract: the page carries spec §4.1 and nothing more',
     const stale = { ...recordOf(), attendees: ['people/me'], invitees: ['people/anna-a', 'bob@example.com'], tags: ['plaud'], calendar_event: 'calendar/2026/11/2026-11-03-mote-abcd1234' };
     const filed = renderMeetingPage(stale as PlaudMeetingRecord);
     expect(filed.content).toBe(page.content);
+  });
+});
+
+// The recipe's runner files a collector page as rendered (meeting-enrichment M9: Amplifier's `meeting.enrich` is the one
+// writer of attendees). meeting-ingestion's phases rewrite a meeting page's attendees and body, so a recipe that sends
+// the page through them makes a second writer; these hold the recipe to filing the rendered page and nothing more.
+describe('the recipe files the rendered page, never through meeting-ingestion', () => {
+  const text = readFileSync(new URL('../recipes/plaud-to-brain.md', import.meta.url), 'utf8');
+  const recipe = parseRecipe(text, 'plaud-to-brain.md');
+
+  test('the recipe sends no page through meeting-ingestion, nor any of its phases', () => {
+    expect(recipe).not.toBeNull();
+    expect(text).not.toMatch(/meeting-ingestion/);
+    expect(text).not.toMatch(/\bPhase \d/);
+  });
+
+  test('what capture files is renderMeetingPage(record).content, with nothing added', () => {
+    expect(text).toMatch(/^ {2}content: renderMeetingPage\(record\)\.content,$/m);
+  });
+
+  test('it writes meeting pages only: no transcript sidecar under sources/', () => {
+    expect(recipe?.frontmatter.output_paths).toEqual(['meetings/']);
   });
 });
 
