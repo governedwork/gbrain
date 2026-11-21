@@ -38,6 +38,7 @@
  * whole corpus through getPage.
  */
 
+import { parseNameList } from '../core/mentions/policy.ts';
 import { readFileSync, existsSync } from 'fs';
 import { classifyItemFailure } from '../core/item-failure.ts';
 import { setCliExitVerdict } from '../core/cli-force-exit.ts';
@@ -2573,7 +2574,7 @@ async function extractMentionsFromDb(
     // start-of-timeline token into a false phrase match.
     // A segmented body is scanned block by block (mentions/pass.ts pageMentions).
     const body = isSegmentedPage(page) ? null : (page.title ?? '') + '\n\n' + page.compiled_truth + '\n\n' + (page.timeline ?? '');
-    const mentionOpts = { fromSlug: slug, fromSourceId: source_id, allowCrossSource };
+    const mentionOpts = { fromSlug: slug, fromSourceId: source_id, allowCrossSource, ignoreNames: parseNameList(page.frontmatter?.mention_ignore) }; // ours, L159: mention_ignore holds as in the pass
     const mentions = await isNoAutoLinkPage(engine, page.id) ? [] // #485: an untrusted page yields none; --rebuild drops its rows
       : body === null ? await pageMentions(engine, { ...withoutBody(page), id: Number(page.id), source_id }, gazetteer, mentionOpts)
       : body.trim() ? findMentionedEntities(body, gazetteer, mentionOpts) : [];

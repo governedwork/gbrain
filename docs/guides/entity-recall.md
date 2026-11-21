@@ -208,7 +208,7 @@ default.
 | `mentions.entity_types` | none | `+type` adds a linkable type, `-type` removes one (person, company, organization and entity always stay). |
 | `mentions.ignore` | none | Names never linked, comma-separated or a JSON array. |
 | `mentions.exclude_slugs` | none | Pages never linked by any of their names (title or alias), comma-separated or a JSON array of slugs. Use it for an entity whose name is also a common word, such as a person titled 인하 against "로 인하여" ("due to"). The next sweep removes mention links already written to the page. |
-| frontmatter `mention_ignore: [names]` | none | Names not linked from that one page. |
+| frontmatter `mention_ignore: [names]` | none | Names not linked from that one page, by the mention pass, `extract links --by-mention` (and `--rebuild`) and `extract links --ner` alike. On a managed brain `remove_link` keeps a derived mention (`derived_from_text`); this is the page edit that removes it. |
 | `mentions.alias_deny` | none | Names never derived as an alias (comma list or JSON array); frontmatter `alias_deny:` does the same for one page. |
 | `mentions.multiword_aliases` | `true` | `false` derives one-word declared aliases only. |
 | `mentions.sibling_merge` | `true` | `false` stops showing identity siblings and linking a shared name to each sibling; frontmatter `identity: separate` does it for one page. |

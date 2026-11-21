@@ -25,6 +25,7 @@ import { isQuarantined } from './quarantine.ts';
 import { isNoAutoLinkPage } from './trust/auto-links.ts';
 import { renderFragment, sqlFragment } from './engine-sql/fragment.ts';
 import { entityTypePredicateSql, resolveEntityTypes } from './schema-pack/entity-types.ts';
+import { parseNameList } from './mentions/policy.ts';
 
 export interface ExtractNerOpts {
   /** When true: enumerate but don't write. */
@@ -184,6 +185,8 @@ export async function extractNerLinks(
       fromSlug: slug,
       fromSourceId: source_id,
       allowCrossSource,
+      // Ours (ledger L159): a name the page lists in its frontmatter `mention_ignore` is never typed back.
+      ignoreNames: parseNameList(page.frontmatter?.mention_ignore),
     });
     if (mentions.length === 0) continue;
 
