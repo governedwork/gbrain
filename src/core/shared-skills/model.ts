@@ -81,6 +81,18 @@ export interface SharedSkillDetail extends SharedSkillSummary {
   body: string;
   files: SharedSkillFile[];
 }
+/**
+ * What get_skill_asset answers for one file: a text file as `text` alone, any other file as base64 `content` alone.
+ * Never both: a reply carrying the file twice, once as base64, is dropped whole by some MCP clients.
+ */
+export type SkillAssetBody = { text: string } | { encoding: 'base64'; content: string };
+/** The file's bytes, whichever form the reply carries. `encoding: 'utf8'` content is the form older hosts sent. */
+export function skillAssetBytes(asset: { text?: unknown; content?: unknown; encoding?: unknown }): Buffer | null {
+  if (typeof asset.text === 'string') return Buffer.from(asset.text, 'utf8');
+  if (typeof asset.content !== 'string') return null;
+  if (asset.encoding === 'base64') return Buffer.from(asset.content, 'base64');
+  return asset.encoding === 'utf8' || asset.encoding === undefined ? Buffer.from(asset.content, 'utf8') : null;
+}
 export interface SharedSkillSelector {
   name?: string;
   qualified_id?: string;

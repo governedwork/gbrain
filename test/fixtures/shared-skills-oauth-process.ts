@@ -120,8 +120,8 @@ export async function sharedSkillsOAuthProcessCase(databaseUrl: string, editorPr
         expect(sync.skills.find(s => s.source_id === 'default')!.revision).toBe(result.revision);
         const detail = await call<SharedSkillDetail>(client, 'get_skill', { schema_version: 2, qualified_id: original.qualified_id });
         expect(detail.body).toContain('OAuth durable new body'); expect(detail.revision).toBe(result.revision);
-        const asset = await call<{ content: string }>(client, 'get_skill_asset', { qualified_id: detail.qualified_id, revision: detail.revision, path: ASSET_PATH });
-        expect(Buffer.from(asset.content, 'base64').toString()).toBe('OAuth durable new asset');
+        const asset = await call<{ text: string }>(client, 'get_skill_asset', { qualified_id: detail.qualified_id, revision: detail.revision, path: ASSET_PATH });
+        expect(asset.text).toBe('OAuth durable new asset');
         expect(await textResource(client, sharedSkillResourceUri(detail.qualified_id, detail.revision))).toBe(detail.body);
         current = detail;
       }

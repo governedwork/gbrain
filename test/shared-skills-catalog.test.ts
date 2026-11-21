@@ -18,7 +18,7 @@ import { TEST_WRITE_ATTRIBUTION } from './helpers/write-attribution.ts';
 import { assetText, getSharedSkill, getSharedSkillAsset, listSharedSkills } from '../src/core/shared-skills/catalog.ts';
 import { getSharedSkillPolicy, setSharedSkillPolicy as approvePolicy } from '../src/core/shared-skills/policy.ts';
 import { normalizeSkillFiles } from '../src/core/shared-skills/manifest.ts';
-import type { SharedSkillPolicy, SharedSkillFileInput } from '../src/core/shared-skills/model.ts';
+import { skillAssetBytes, type SharedSkillPolicy, type SharedSkillFileInput } from '../src/core/shared-skills/model.ts';
 import { withEnv } from './helpers/with-env.ts';
 import { isolatedSharedSkillsEngine } from './helpers/shared-skills-engine.ts';
 import { skillsCatalogOperations } from '../src/core/ops/skills-catalog.ts';
@@ -94,7 +94,8 @@ test('sealed revision, exact assets, CAS replay and tombstone use the real canon
   expect(initial.files.length).toBe(2);
   expect(readFileSync(join(f.root, asset), 'utf8')).toBe('Fixture reference');
   const downloaded = await getSharedSkillAsset(f.reader, { ...initial, path: asset });
-  expect(Buffer.from(downloaded.content, 'base64').toString()).toBe('Fixture reference');
+  expect(skillAssetBytes(downloaded)!.toString()).toBe('Fixture reference');
+  expect(downloaded).toMatchObject({ encoding: 'base64' });
   // Published without a media_type, the file is application/octet-stream: no text form is offered.
   expect(downloaded.media_type).toBe('application/octet-stream');
   expect('text' in downloaded).toBe(false);
@@ -169,7 +170,7 @@ test('one-slug editor cannot modify a shared dependency pinned by another skill'
   await put(f.local, 'alpha', files('alpha', 'owner-approved update'));
   const after = await getSharedSkill(f.reader, { name: 'beta' });
   expect(after.revision).not.toBe(before.revision);
-  expect(Buffer.from((await getSharedSkillAsset(f.reader, { ...after, path })).content, 'base64').toString()).toBe('owner-approved update');
+  expect(skillAssetBytes(await getSharedSkillAsset(f.reader, { ...after, path }))!.toString()).toBe('owner-approved update');
 }), 120_000);
 
 test('shared convention edits rebuild complete dependent closures and reject cross-skill local pointers', () => fixture(async f => {
@@ -183,7 +184,7 @@ test('shared convention edits rebuild complete dependent closures and reject cro
     { path: helper, content: 'Shared helper content', file_class: 'reference' }]);
   const expanded = await getSharedSkill(f.reader, { name: 'beta' });
   expect(expanded.files.map(file => file.path)).toContain(helper);
-  expect(Buffer.from((await getSharedSkillAsset(f.reader, { ...expanded, path: helper })).content, 'base64').toString()).toBe('Shared helper content');
+  expect(skillAssetBytes(await getSharedSkillAsset(f.reader, { ...expanded, path: helper }))!.toString()).toBe('Shared helper content');
   const local = 'skills/alpha/references/local.md';
   await expect(put(f.local, 'alpha', [prose('alpha', 'Read convention', [convention]),
     { path: convention, content: 'Invalid beta dependency', file_class: 'reference', depends_on: [local] },
@@ -193,7 +194,7 @@ test('shared convention edits rebuild complete dependent closures and reject cro
   await put(f.local, 'alpha', base('alpha'));
   const narrowed = await getSharedSkill(f.reader, { name: 'beta' });
   expect(narrowed.files).toHaveLength(2); expect(existsSync(join(f.root, helper))).toBe(false);
-  expect((await getSharedSkillAsset(f.reader, { ...expanded, path: helper })).content).toBe(Buffer.from('Shared helper content').toString('base64'));
+  expect(skillAssetBytes(await getSharedSkillAsset(f.reader, { ...expanded, path: helper }))!.toString()).toBe('Shared helper content');
 }), 120_000);
 
 test('private and audience-restricted metadata never enters the remote catalog', () => fixture(async f => {
@@ -574,7 +575,7 @@ test.skipIf(!postgresUrl)('Postgres retention serializes delivery issuance again
   expect((await f.engine.executeRaw('SELECT revision FROM shared_skill_revision_leases WHERE revision=$1::uuid', [old.revision])).length).toBe(0);
 }, postgresUrl), 120_000);
 
-test('get_skill_asset returns a textual file as UTF-8 text beside the unchanged base64 content', () => fixture(async f => {
+test('get_skill_asset returns a textual file as UTF-8 text alone and any other file as base64 content alone', () => fixture(async f => {
   const md = 'skills/conventions/business-capability.md';
   const bin = 'skills/alpha/assets/example.bin';
   const markdown = '# Convention\n\nÅtta rader på svenska — med “citat”.\n';
@@ -585,14 +586,27 @@ test('get_skill_asset returns a textual file as UTF-8 text beside the unchanged 
   await put(f.editor, 'alpha', files);
   const detail = await getSharedSkill(f.reader, { name: 'alpha' });
   const text = await getSharedSkillAsset(f.reader, { ...detail, path: md });
-  expect(text.text).toBe(markdown);
-  expect(text.encoding).toBe('base64');
-  expect(Buffer.from(text.content, 'base64').toString('utf8')).toBe(markdown);
+  expect(text).toMatchObject({ text: markdown, media_type: 'text/markdown', size: Buffer.byteLength(markdown) });
+  // The file is in the reply once: a reply that also carried it as base64 was dropped whole by an MCP client.
+  expect('content' in text).toBe(false);
+  expect('encoding' in text).toBe(false);
+  expect(JSON.stringify(text)).not.toContain(Buffer.from(markdown).toString('base64'));
+  expect(skillAssetBytes(text)!.toString('utf8')).toBe(markdown);
   // A file labelled text whose bytes are not text (NUL bytes) keeps only its base64 content.
   const binary = await getSharedSkillAsset(f.reader, { ...detail, path: bin });
-  expect(binary.content).toBe('AAECAw==');
+  expect(binary).toMatchObject({ encoding: 'base64', content: 'AAECAw==' });
   expect('text' in binary).toBe(false);
+  expect([...skillAssetBytes(binary)!]).toEqual([0, 1, 2, 3]);
 }), 120_000);
+
+test('skillAssetBytes reads every body form a host sends and refuses the rest', () => {
+  expect(skillAssetBytes({ text: 'é' })!.toString('utf8')).toBe('é');
+  expect(skillAssetBytes({ encoding: 'base64', content: 'AAECAw==' })!.length).toBe(4);
+  expect(skillAssetBytes({ encoding: 'utf8', content: 'é' })!.toString('utf8')).toBe('é');
+  expect(skillAssetBytes({ content: 'plain' })!.toString('utf8')).toBe('plain');
+  expect(skillAssetBytes({ encoding: 'hex', content: '00' })).toBeNull();
+  expect(skillAssetBytes({})).toBeNull();
+});
 
 test('assetText decodes only textual media types holding valid UTF-8', () => {
   const b64 = (s: string | Uint8Array) => Buffer.from(s).toString('base64');
@@ -617,7 +631,7 @@ test.skipIf(!postgresUrl)('Postgres parity: canonical bundle, exact immutable as
   const replay = await submitSharedSkillMutation(f.editor, 'put_skill', params);
   expect(first.revision).toBe(replay.revision);
   const detail = await getSharedSkill(f.reader, { name: 'alpha' });
-  expect((await getSharedSkillAsset(f.reader, { ...detail, path })).content).toBe('AAECAw==');
+  expect(skillAssetBytes(await getSharedSkillAsset(f.reader, { ...detail, path }))!.toString('base64')).toBe('AAECAw==');
   expect((await f.engine.executeRaw('SELECT * FROM shared_skill_revisions')).length).toBe(1);
   const beforeView = (await listSharedSkills(f.reader)).view_token;
   await put({ ...f.local, sourceId: 'hidden' }, 'alpha');

@@ -7,6 +7,7 @@ import type { RegistryCode } from '../error-registry.ts';
 import { harnessAdapter } from '../harness/registry.ts';
 import { installNativeRouter, prepareNativeRouter, recordedNativeSkillsDirectory, removeNativeRouter } from '../harness/native-router.ts';
 import { SHARED_SKILLS_DELIVERY_LIMITS, sharedSkillKey, type FollowPolicy, type MembershipSnapshot, type SharedSkillIdentity } from './membership-types.ts';
+import { skillAssetBytes } from './model.ts';
 
 export type SharedSkillsToolCaller = <T = unknown>(name: string, params: Record<string, unknown>) => Promise<T>;
 export interface SharedSkillsAdapterOptions {
@@ -153,10 +154,9 @@ export function createSharedSkillsAdapter(options: SharedSkillsAdapterOptions) {
           if (paths.has(file.path) || !/^[a-f0-9]{64}$/.test(file.sha256)) fail('stale_unavailable', 'The declared dependency manifest is invalid.',
             `${sharedSkillKey(skill)} lists ${file.path} twice or without a SHA-256 digest. Ask the brain host's operator to republish the skill; nothing from it was installed.`);
           paths.add(file.path);
-          const asset = await options.call<{ content: string; encoding?: string; sha256?: string }>('get_skill_asset', { ...selector, path: file.path });
-          if (typeof asset.content !== 'string' || !['utf8', 'base64', undefined].includes(asset.encoding)) fail('stale_unavailable', 'Unsupported asset encoding.',
-            `The server sent ${file.path} of ${sharedSkillKey(skill)} in an encoding other than utf8 or base64; the brain host likely runs another gbrain version. Ask its operator to upgrade, then refresh.`);
-          const bytes = Buffer.from(asset.content, asset.encoding === 'base64' ? 'base64' : 'utf8');
+          const bytes = skillAssetBytes(await options.call<{ text?: string; content?: string; encoding?: string }>('get_skill_asset', { ...selector, path: file.path }))
+            ?? fail('stale_unavailable', 'Unsupported asset encoding.',
+              `The server sent ${file.path} of ${sharedSkillKey(skill)} as neither text nor utf8 or base64 content; the brain host likely runs another gbrain version. Ask its operator to upgrade, then refresh.`);
           total += bytes.length;
           if (total > MAX_BYTES || bytes.length > 2 * 1024 * 1024 || sha256(bytes) !== file.sha256 || (file.size !== undefined && bytes.length !== file.size)) fail('stale_unavailable', 'The approved bundle exceeded its bounds or failed a hash check.',
             `${file.path} of ${sharedSkillKey(skill)} is over its size bound or does not match its declared hash, so nothing from it was installed. ${refreshAgain}`);

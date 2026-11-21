@@ -6,7 +6,7 @@ import { operationScopesAllowed } from '../core/scope.ts';
 import { loadConfig } from '../core/config.ts';
 import { disabledOpsForPublishGates } from './publish-gates.ts';
 import type { DispatchOpts } from './dispatch.ts';
-import type { SharedSkillList, SharedSkillDetail } from '../core/shared-skills/model.ts';
+import { skillAssetBytes, type SharedSkillList, type SharedSkillDetail } from '../core/shared-skills/model.ts';
 
 export const SKILLS_RESOURCE_URI = 'gbrain://skills';
 
@@ -75,8 +75,10 @@ export function createSkillResources(engine: BrainEngine, context: () => Promise
           text: path === 'SKILL.md' ? skill.body : JSON.stringify({ ...skill, body: undefined,
             files: skill.files.map(file => ({ ...file, uri: sharedSkillResourceUri(qualified_id, revision, file.path) })) }) }] };
       }
-      const asset = await call<{ media_type: string; content: string }>('get_skill_asset', { qualified_id, revision, path }, opts);
-      return { contents: [{ uri, mimeType: asset.media_type, blob: asset.content }] };
+      const asset = await call<{ media_type: string; text?: string; content?: string; encoding?: string }>('get_skill_asset', { qualified_id, revision, path }, opts);
+      const bytes = skillAssetBytes(asset);
+      if (bytes === null) throw new McpError(ErrorCode.InternalError, 'Skill asset carried no readable body');
+      return { contents: [{ uri, mimeType: asset.media_type, blob: bytes.toString('base64') }] };
     },
   };
 }

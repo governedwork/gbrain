@@ -110,8 +110,8 @@ export function sharedSkillsTransportCases(databaseUrl?: string) {
       for (const peer of [f.peers.reader, f.peers.editor, f.peers.parent]) {
         const current = await call<SharedSkillDetail>(peer.client, 'get_skill', { schema_version: 2, name: 'alpha' });
         expect(current.revision).toBe(committed.revision); expect(current.body).toContain('Updated shared instructions');
-        const asset = await call<{ content: string }>(peer.client, 'get_skill_asset', { qualified_id: current.qualified_id, revision: current.revision, path: ASSET_PATH });
-        expect(Buffer.from(asset.content, 'base64').toString()).toBe('Updated shared asset');
+        const asset = await call<{ text: string }>(peer.client, 'get_skill_asset', { qualified_id: current.qualified_id, revision: current.revision, path: ASSET_PATH });
+        expect(asset.text).toBe('Updated shared asset'); expect('content' in asset).toBe(false);
       }
       for (const { adapter, root } of adapters) {
         const receipt = await adapter.refresh();
