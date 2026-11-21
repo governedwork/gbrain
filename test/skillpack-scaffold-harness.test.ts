@@ -388,7 +388,11 @@ describe('review-driven CLI hardening', () => {
     expect(asset.status, asset.stderr).toBe(0);
     const bytes = JSON.parse(asset.stdout);
     expect(bytes.revision).toBe(selected.revision);
-    expect(createHash('sha256').update(Buffer.from(bytes.content, bytes.encoding)).digest('hex')).toBe(file.sha256);
+    // A text file answers as `text` alone (gbrain#53): no base64 `content` beside it.
+    expect(file.path.endsWith('.md')).toBe(true);
+    expect(bytes.content).toBeUndefined();
+    expect(bytes.encoding).toBeUndefined();
+    expect(createHash('sha256').update(Buffer.from(bytes.text, 'utf8')).digest('hex')).toBe(file.sha256);
     const left = run([...base, '--skills', 'memory-only'], env);
     expect(left.code, left.stderr).toBe(0);
     expect(JSON.parse(left.stdout).reason).toBe('memory_only');
