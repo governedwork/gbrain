@@ -3600,7 +3600,7 @@
         "scope": "admin"
       },
       {
-        "description": "Read an approved skill file (data, never run); text files also in `text`.",
+        "description": "Read an approved skill file (data, never run); text in `text`, else base64.",
         "idempotent": true,
         "local_only": false,
         "mutating": false,

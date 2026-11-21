@@ -7,7 +7,7 @@ import { stableJson } from '../persistence/digest.ts';
 import { approvedFiles, authorizeSkillRead, legacySharedSkillPolicy, normalizePolicy, publicationEnabled, readSharedSkillPolicy, skillPrincipal } from './policy.ts';
 import { skillName, skillPath, skillToolsDeclared } from './manifest.ts';
 import { SHARED_SKILL_LIMITS, type SharedSkillDetail, type SharedSkillKey, type SharedSkillList, type SharedSkillSelector,
-  type SharedSkillSummary, type SharedSkillPolicy, type StoredSkillRevision } from './model.ts';
+  type SharedSkillSummary, type SharedSkillPolicy, type SkillAssetBody, type StoredSkillRevision } from './model.ts';
 
 export function qualifiedSkillId(key: SharedSkillKey): string {
   return `skill:${[key.brain_id, key.source_id, key.source_incarnation, key.pack_id, key.name].map(encodeURIComponent).join(':')}`;
@@ -198,7 +198,7 @@ export async function getSharedSkill(ctx: OperationContext, params: SharedSkillS
 const TEXT_MEDIA_TYPE = /^(?:text\/[a-z0-9.+-]+|application\/(?:json|yaml|x-yaml|[a-z0-9.-]+\+(?:json|yaml)))$/i;
 /**
  * The file as UTF-8 text when its media type is textual and its bytes are valid UTF-8 without NUL;
- * otherwise undefined. `content` stays base64 either way, so binary-safe callers are unaffected.
+ * otherwise undefined. A file with a text form is answered as `text` alone; any other as base64 `content`.
  */
 export function assetText(mediaType: string, base64: string): string | undefined {
   if (!TEXT_MEDIA_TYPE.test(mediaType)) return undefined;
@@ -223,10 +223,10 @@ export async function getSharedSkillAsset(ctx: OperationContext, params: SharedS
         { fix: skillHeadFix(result.source_id, result.pack_id, result.name, result.revision) });
     }
     const text = assetText(file.media_type, file.content);
+    const body: SkillAssetBody = text === undefined ? { encoding: 'base64', content: file.content } : { text };
     return { schema_version: 2 as const, brain_id: result.brain_id, source_id: result.source_id, source_incarnation: result.source_incarnation,
       pack_id: result.pack_id, name: result.name, revision: result.revision, path: file.path,
-      encoding: 'base64' as const, content: file.content, ...(text === undefined ? {} : { text }),
-      sha256: file.sha256, size: file.size, media_type: file.media_type };
+      ...body, sha256: file.sha256, size: file.size, media_type: file.media_type };
   });
 }
 export { submitSharedSkillMutation, adoptSharedSkillpack, importSharedSkillProposal } from './publication.ts';
