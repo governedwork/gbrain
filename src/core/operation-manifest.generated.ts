@@ -3080,7 +3080,7 @@ export const OPERATION_MANIFEST: OperationMeta[] = [
   },
   {
     "name": "get_skill_asset",
-    "description": "Read an approved skill file (data, never run); text files also in `text`.",
+    "description": "Read an approved skill file (data, never run); text in `text`, else base64.",
     "mutating": false,
     "idempotent": true,
     "outputRedaction": {

@@ -15,7 +15,7 @@ import { disposePersistenceConsumer } from '../../src/core/persistence/service.t
 import { sha256 } from '../../src/core/persistence/digest.ts';
 import { normalizeSkillFiles, skillMetadata } from '../../src/core/shared-skills/manifest.ts';
 import { setSharedSkillPolicy } from '../../src/core/shared-skills/policy.ts';
-import { SHARED_SKILL_LIMITS, type SharedSkillDetail, type SharedSkillFileInput } from '../../src/core/shared-skills/model.ts';
+import { SHARED_SKILL_LIMITS, skillAssetBytes, type SharedSkillDetail, type SharedSkillFileInput } from '../../src/core/shared-skills/model.ts';
 import type { MembershipSnapshot, SharedSkillIdentity } from '../../src/core/shared-skills/membership-types.ts';
 import { startHttpTransport } from '../../src/mcp/http-transport.ts';
 import { RateLimiter } from '../../src/mcp/rate-limit.ts';
@@ -172,8 +172,9 @@ export async function createLifecycleFixture(options: { root: string; size: numb
       const main = detail.files.find(file => file.path === `skills/${detail.name}/SKILL.md`);
       assert(main); assert.equal(sha256(detail.body), main.sha256, 'Body must match its declared manifest hash');
       for (const file of detail.files.filter(file => file.path !== main.path)) {
-        const asset = await call<{ revision: string; content: string; sha256: string; size: number }>(peer, 'get_skill_asset', { ...key, expected_brain_id: brain_id, revision: detail.revision, path: file.path });
-        const bytes = Buffer.from(asset.content, 'base64');
+        const asset = await call<{ revision: string; text?: string; content?: string; encoding?: string; sha256: string; size: number }>(peer, 'get_skill_asset', { ...key, expected_brain_id: brain_id, revision: detail.revision, path: file.path });
+        const bytes = skillAssetBytes(asset);
+        if (bytes === null) throw new Error(`get_skill_asset returned no readable body for ${file.path}`);
         meter.counters().decoded_asset_bytes += bytes.length;
         assert.equal(asset.revision, detail.revision); assert.equal(sha256(bytes), file.sha256); assert.equal(asset.sha256, file.sha256); assert.equal(bytes.length, file.size);
         if (detail.name === LIVE_NAME) {

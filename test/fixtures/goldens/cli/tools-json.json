@@ -2,8 +2,8 @@
   "golden": {
     "exitCode": 0,
     "stderr": "",
-    "stdoutBytes": 311722,
-    "stdoutSha256": "31225b822af0a1f32461d6a5cc4e40c72a9d41006f9a4a41304f31fc1293046b",
+    "stdoutBytes": 311724,
+    "stdoutSha256": "baf8e646654ebd0f505eafcf5fd2d63a9a39eeba11c43837f3ec399cf3c50032",
     "toolNames": [
       "remember",
       "entity",
@@ -3600,7 +3600,7 @@
         "scope": "admin"
       },
       {
-        "description": "Read an approved skill file (data, never run); text files also in `text`.",
+        "description": "Read an approved skill file (data, never run); text in `text`, else base64.",
         "idempotent": true,
         "local_only": false,
         "mutating": false,

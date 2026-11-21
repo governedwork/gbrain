@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { BrainEngine } from '../src/core/engine.ts';
 import type { OperationContext } from '../src/core/ops/contract.ts';
-import type { SharedSkillFileInput } from '../src/core/shared-skills/model.ts';
+import { skillAssetBytes, type SharedSkillFileInput } from '../src/core/shared-skills/model.ts';
 import { claimWorktree } from '../src/core/persistence/ownership.ts';
 import { activateSharedSkillPersistence } from '../src/core/persistence/skill-activation.ts';
 import { declarePersistenceProtocol } from '../src/core/persistence/protocol.ts';
@@ -177,7 +177,7 @@ test('shared changes load every authorized transitive dependent and no unrelated
     const detail = await getSharedSkill(editor, { name });
     expect(detail.files.map(file => file.path)).toContain(added);
     const asset = await getSharedSkillAsset(editor, { ...detail, path: added });
-    expect(Buffer.from(asset.content, 'base64').toString()).toBe('New transitive helper');
+    expect(skillAssetBytes(asset)!.toString()).toBe('New transitive helper');
   }
   expect(manifest(f.root).shared_skills.skills.find(skill => skill.name === 'untouched')).toEqual(unchanged);
   f.observe();

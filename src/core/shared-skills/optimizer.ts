@@ -20,7 +20,7 @@ import type { RunSkillOptResult } from '../skillopt/orchestrator.ts';
 import { assertLegacySkillFilesystemWrite } from '../skillpack/writer-guard.ts';
 import { getSharedSkill, getSharedSkillAsset } from './catalog.ts';
 import { normalizeSkillFiles, skillName, skillPath } from './manifest.ts';
-import { SHARED_SKILL_LIMITS, type StoredSkillRevision } from './model.ts';
+import { SHARED_SKILL_LIMITS, skillAssetBytes, type StoredSkillRevision } from './model.ts';
 import { approvedFiles, assertSkillCapability, assertStoredSkillCapability, authorizeSkillRead, publicationEnabled, readSharedSkillPolicy, skillPrincipal } from './policy.ts';
 import { submitSharedSkillMutation } from './publication.ts';
 
@@ -138,7 +138,7 @@ export async function optimizeSharedSkill(opts: SkillOptOpts, run: (opts: SkillO
     if (ctx.remote !== false) {
       const path = skillPath(relative(dirname(skillsDir), resolve(input)).split(sep).join('/'));
       const asset = await getSharedSkillAsset(ctx, { ...selector, revision: target.expected_revision, path });
-      bytes = Buffer.from(asset.content, 'base64');
+      bytes = skillAssetBytes(asset)!;
       const sealed = files.find(file => file.path === path);
       if (!sealed || asset.sha256 !== sealed.sha256 || sha256(bytes) !== sealed.sha256 || bytes.length !== asset.size) {
         throw opError('revision_unavailable', 'The evaluation input does not match the selected approved skill revision.',
