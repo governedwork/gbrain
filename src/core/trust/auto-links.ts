@@ -7,7 +7,8 @@
  *   - body-derived edges (`markdown`, `wikilink-resolved`, legacy NULL) and body wanted rows at publication
  *     (derived-links.ts publishDerivedLinks, which every body-link producer publishes through).
  * Edges a caller writes by name (`add_link`, `manual`), frontmatter edges, and links INTO the page are untouched.
- * The tier is read from `pages.trust_tier`, as eligibility/stamp.ts loadPageTrust does.
+ * The tier is read from `pages.trust_tier`, as eligibility/stamp.ts loadPageTrust does; a page snapshot carries it
+ * (`PageSnapshot.externalUntrusted`) from the statement that reads the page, so publication adds no statement for it.
  */
 import type { BrainEngine } from '../engine.ts';
 import type { TrustTier } from './tier.ts';
@@ -17,6 +18,10 @@ export const NO_AUTO_LINK_TIER: TrustTier = 'external_untrusted';
 
 /** SQL predicate over a `pages` alias: the page's body seeds no automatic edges. */
 export const noAutoLinkPageSql = (alias: string) => `${alias}.trust_tier = '${NO_AUTO_LINK_TIER}'`;
+
+/** The PageSnapshot field for a page row read with its `trust_tier` (snapshot reads select `p.*`): set only on NO_AUTO_LINK_TIER. */
+export const untrustedSnapshotField = (row: Record<string, unknown>): { externalUntrusted?: true } =>
+  row.trust_tier === NO_AUTO_LINK_TIER ? { externalUntrusted: true } : {};
 
 /** The ids among `ids` whose page is stored at NO_AUTO_LINK_TIER. */
 export async function noAutoLinkPageIds(engine: Pick<BrainEngine, 'executeRaw'>, ids: readonly (number | string)[]): Promise<Set<number>> {
