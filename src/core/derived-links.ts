@@ -10,6 +10,7 @@ import { replaceWantedLinks, type WantedLinksReplacement } from './wanted-links-
 import { applyTemporalEvidence, relationshipKeysForOrigin, type TemporalBody } from './link-temporal-apply.ts';
 import { primeRelationSemantics } from './link-semantics-pack.ts';
 import { effectiveRangesEnabled, LINK_EXTRACTION_GENERATION_KEY, type LineGrammarSettings } from './line-grammar.ts';
+import { isUntrustedSnapshot } from './trust/auto-links.ts';
 
 export interface DerivedLinkOrigin {
   slug: string;
@@ -261,8 +262,8 @@ async function publishDerivedLinks(tx: BrainEngine, origin: DerivedLinkOrigin, p
   const id = snapshot.page.id;
   // governedwork/captain#485: an external_untrusted origin's body seeds no edge and no wanted row (trust/auto-links.ts).
   // Only its frontmatter rows are published, so the replacement below removes the body edges it made before. The tier
-  // comes with the origin's snapshot read (PageSnapshot.externalUntrusted): no statement is added to any publication.
-  const untrusted = snapshot.externalUntrusted === true;
+  // comes with the origin's snapshot read (isUntrustedSnapshot): no statement is added to any publication.
+  const untrusted = isUntrustedSnapshot(snapshot);
   const rows = untrusted ? candidateRows.filter(row => row.link_source === 'frontmatter') : candidateRows;
   const opts = untrusted && candidateOpts.wanted
     ? { ...candidateOpts, wanted: { ...candidateOpts.wanted, rows: candidateOpts.wanted.rows.filter(row => row.producer !== 'body') } }

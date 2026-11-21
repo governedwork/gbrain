@@ -76,11 +76,6 @@ export interface PageSnapshot {
   globalPurges?: GlobalPurgeMarker;
   /** A segmented page's body generation at `revision` (readPageSnapshot): what a read that follows this snapshot pins. */
   bodyGeneration?: number;
-  /**
-   * governedwork/captain#485: the row is stored at `external_untrusted` (trust/auto-links.ts), read from the same
-   * statement as the page; absent on every other tier. Such a page's body seeds no automatic edge.
-   */
-  externalUntrusted?: true;
 }
 
 /**
