@@ -1,7 +1,7 @@
 ---
 id: plaud-to-brain
 name: Plaud-to-Brain
-version: 0.3.0
+version: 0.4.0
 description: Plaud recordings become meeting pages through capture, read from Plaud's own MCP server by the agent and deduplicated by the recording's source_id.
 category: sense
 requires: []
@@ -12,7 +12,6 @@ secrets: []
 health_checks: []
 output_paths:
   - meetings/
-  - sources/meetings/
 setup_time: 5 min
 cost_estimate: "$0 beyond the Plaud subscription"
 ---
@@ -21,7 +20,7 @@ cost_estimate: "$0 beyond the Plaud subscription"
 
 A Plaud recorder (NotePin, Note) records and transcribes a conversation. This
 recipe turns each recording into a `meeting` page in the brain, with its
-transcript kept beside it as evidence, and never files the same recording twice.
+whole transcript on the page as evidence, and never files the same recording twice.
 
 It is the Plaud counterpart of [meeting-sync](meeting-sync.md), with two
 differences that make it work for a brain the agent reaches over MCP (a hosted
@@ -35,20 +34,20 @@ brain included):
 
 ## IMPORTANT: Instructions for the Agent
 
-**You are the runner.** Follow these steps in order, every run. The pipeline
-for a meeting page is `skills/meeting-ingestion/SKILL.md`; this recipe only
-says how Plaud's data reaches it and how a recording is recognised as filed.
+**You are the runner.** Follow these steps in order, every run. This recipe is
+the whole pipeline for a Plaud meeting page: it says how Plaud's data reaches
+the brain, how a recording is recognised as filed, and that the page is filed
+exactly as `recipes/plaud-to-brain/page.ts` renders it. No other skill edits
+the page afterwards: who attended and what the meeting connects to are the
+brain's own enrichment (Step 4).
 
 **The flow:**
 1. List recordings from Plaud's MCP since the last run.
 2. Drop every recording the brain already holds (by `source_id`).
-3. For each new one: take its roster from the calendar event the recording
-   overlaps (the brain's google source writes one page per event), read its
-   note and transcript, normalise it into meeting-ingestion's transcript
-   record, and file it with `capture` as a `meeting` page that names the
-   recording and the event.
-4. Report what was filed, with each page's slug, `source_id` and the event it
-   took its roster from (or that it found none).
+3. For each new one: read its note and transcript, normalise it into the
+   transcript record, and file it with `capture` as a `meeting` page that
+   carries what Plaud knows and nothing more (Step 4).
+4. Report what was filed, with each page's slug and `source_id`.
 
 **Do not skip the dedupe step. A recording filed twice is two meetings in the
 brain, and every attendee's timeline gets it twice.**
@@ -58,7 +57,7 @@ brain, and every attendee's timeline gets it twice.**
 | Connection | Tools this recipe uses | Writes? |
 |---|---|---|
 | Plaud MCP (`@plaud-ai/mcp`) | `get_current_user`, `list_files`, `get_file`, `get_note`, `get_transcript` (and `login` when it asks) | never: Plaud's MCP is read-only |
-| The brain's MCP | `resolve_slugs`, `get_page`, `entity`, `search`, `capture` | `capture` only |
+| The brain's MCP | `resolve_slugs`, `get_page`, `capture` | `capture` only |
 
 Plaud's server is a local stdio server. Register it once in the agent's MCP
 configuration (for Claude Code: `claude mcp add plaud -- npx -y @plaud-ai/mcp`).
@@ -101,8 +100,8 @@ Plaud's data model, as its MCP answers it:
   it to the person's timezone before taking the meeting's date: a recording
   started late in the evening belongs to the local day.
 - `get_note`: a list of notes; the one with `data_type: auto_sum_note` holds
-  the recorder's AI summary as Markdown in `data_content`. A CLAIM per
-  meeting-ingestion, never a fact.
+  the recorder's AI summary as Markdown in `data_content`. A CLAIM, never a
+  fact.
 - `get_transcript`: `{ total, segments, next_cursor }`, one page of
   utterances at a time. Each segment has `start_time` and `end_time` in
   milliseconds from the start, `speaker` (a name the person assigned in Plaud,
@@ -129,62 +128,23 @@ A held recording is skipped, never rewritten: the page may have been corrected
 since. Check the day before and after too when the recording crosses midnight
 or the brain's pages were filed in another timezone.
 
-## Step 4: The roster, from the calendar event the recording overlaps
+## Step 4: Who was there is the brain's, not the runner's
 
-Plaud records speaker labels, not attendees. The brain knows who was invited:
-when a google source is connected (`recipes/calendar-to-brain.md`; on the
-hosting, `docs/hosting/AMPLIFIER-RUNBOOK.md` step 8), every calendar event is a
-page `calendar/{YYYY}/{MM}/{YYYY-MM-DD}-{title-slug}-{id8}` with `start`, `end`
-(ISO, with offset), `organizer` and `attendees` (emails) in its frontmatter and
-an `## Attendees` list of `Name <email>` in its body. That event is the
-recording's roster, as meeting-ingestion Phase 4 wants it: the source's
-attendee list, a CLAIM to correct by evidence (invited ≠ present).
-
-1. **Find the event.** `resolve_slugs` with `calendar/{YYYY}/{MM}/{YYYY-MM-DD}`
-   for the recording's date (in the person's timezone, as Step 2 computes it),
-   keeping only slugs that start with that prefix; the day before and after too
-   when the recording starts within an hour of midnight. `get_page` each and
-   read `start` and `end`. The recording's window is `[start_at, start_at +
-   duration)` in UTC (Step 2: `start_at` is UTC with no offset written). The
-   event is the one whose `[start, end)` overlaps that window; with several, the
-   one that overlaps it longest; an `all_day` event never counts. None: the
-   roster is empty, `invitees: []`, and the report says `no calendar event`.
-   Never pick an adjacent event because it is close.
-2. **Read the roster.** The event's `attendees` emails, plus `organizer` when it
-   is not among them. Resolve each to a people page as meeting-ingestion
-   Phase 7 does, over MCP: `entity` with the email (GBrain resolves it through
-   the page's aliases, which the google source's people pages and your own
-   carry), then `search` with the display name from the body's `## Attendees`
-   line when `entity` finds nothing; read the page before accepting it (a
-   near-miss surname is the same person, Phase 4 rule 8). An attendee no page
-   answers for stays an email in the roster; the person's own address (the
-   event's `account`) resolves to the person's page like any other.
-3. **The roster is a claim.** Put the resolved slugs (and the unresolved emails)
-   in the transcript record's `invitees:` below, never in `attendees:`: GBrain
-   reads a meeting's `attendees:` and its bare `Attendees:` link list as
-   `person --attended--> meeting`, and one entry no person page answers for
-   holds back every link of the page (`docs/guides/attendance-evidence.md`).
-   `attendees:` carries only people the runner has evidence were there, by
-   slug: the recorder (their own Plaud made the recording), when their address
-   resolves to exactly one person page in the brain the page is filed in. A
-   calendar resource (a room, `@resource.calendar.google.com`) is no invitee.
-   Phase 4 then starts from
-   this list — roster-confirmed speakers are `high` confidence — and corrects
-   it: a speaker in the transcript who is not on the roster is added by
-   evidence, an invitee who never speaks and is never addressed is dropped
-   (invited ≠ present). Phase 7 creates pages for people who were there and
-   have none; the meeting page's `attendees:` and `Attendees:` line (Phase 5)
-   carry only people who were present, by slug, never an email.
-4. **Keep the chain.** The meeting page names the event: frontmatter
-   `calendar_event: <the calendar page's slug>` and a line
-   `Calendar: [[<the calendar page's slug>]]` after the `Attendees:` line, so a
-   reader (and Amplifier's attendee evidence, which reads the page's people
-   slugs) can see where the roster came from. The event's `start` sets `time`
-   when Plaud's `start_at` and it agree within the event's window.
+A collector writes only what its source knows (the collector contract: the
+recording's `title`, `date`, `effective_date`, `time`, `duration`, `source`,
+`source_id`, `recorded_by`, the transcript and Plaud's own summary as a claim).
+Who attended, who was invited, the calendar event the recording overlaps and the
+meeting's tags are the brain's own enrichment, written by one operation for
+every collector's meetings (Amplifier's `meeting.enrich`, from `recorded_by` and
+the person's calendar). So the runner reads no calendar, resolves no email, and
+writes no `attendees`, `invitees`, `calendar_event` or `tags`, nor an
+`Attendees:`, `Invited` or `Calendar:` line: a second writer of those fields
+would race the brain's, and an attendee the runner named would be an
+attendance claim it has no evidence for.
 
 ## Step 5: File each new recording
 
-Normalise into meeting-ingestion's transcript record:
+Normalise into the transcript record:
 
 ```yaml
 source: plaud
@@ -193,10 +153,6 @@ title: "<the recording's name>"
 date: YYYY-MM-DD        # from start_at (UTC), in the person's timezone
 time: "HH:MM ±HH:MM"
 duration: "1h05m"       # from milliseconds
-attendees: []           # people known present, by slug only (the recorder; Phase 4 adds the rest by evidence)
-invitees: []            # Step 4's roster: people slugs (unresolved ones as emails), the source's CLAIM, never attendance
-tags: []                # the page's tags
-calendar_event: ""      # Step 4's calendar page slug, or empty when no event overlapped
 transcript_segments: [] # every page of get_transcript, speaker_raw = Plaud's speaker
 raw_transcript_text: "..."   # the whole transcript, never truncated
 source_summary: "..."        # get_note's Markdown: a claim
@@ -206,22 +162,13 @@ recorded_by: "<email>"       # the email of the account that owns the connection
 **The page's one definition is `recipes/plaud-to-brain/page.ts`.** `renderMeetingPage(record)` renders this record
 into the meeting page, frontmatter and body, and returns its base slug; `slugWithId(slug, id)` is the form to use when
 another page already holds that slug, and `localWhen` / `durationText` build `date`, `time` and `duration` from
-Plaud's own fields. Every runner starts from it, so a page filed by any of them is the same page: a deterministic
-runner (a scheduled job that moves the data without an agent) files exactly what it renders; an agent following this
-recipe may enrich it through meeting-ingestion's phases below, never changing its frontmatter keys or slug rules.
+Plaud's own fields. Every runner files exactly what it renders, an agent following this recipe as much as a scheduled
+job: the page is not edited after it is rendered, neither its frontmatter nor its body, and the fields Step 4 leaves to
+the brain stay the brain's.
 
-Then run meeting-ingestion's phases (split detection, cross-recorder dedupe,
-speaker resolution, the page, claim verification, enrichment, the checklist),
-writing each page with `capture`:
-
-**The transcript** is the evidence for every quote. meeting-ingestion allows
-either a sidecar page or a source that stays reachable, and Plaud is that
-source: the recording keeps its transcript, read-only, under its `source_id`
-(`get_transcript`). So by default the meeting page names the recording and no
-sidecar is filed. File a sidecar (meeting-ingestion: `type: source` under
-`sources/meetings/`, redacted before it is retained, `facts_backstop: false`)
-only when you can pass the whole transcript through to `capture` verbatim:
-a retyped or partial transcript filed as evidence is worse than none.
+**The transcript** is the evidence for every line of the page: every segment is on it, verbatim, with its time and
+speaker, and the recording keeps it too, read-only, under its `source_id` (`get_transcript`). No separate transcript
+page is filed.
 
 **The meeting page:**
 
@@ -229,7 +176,7 @@ a retyped or partial transcript filed as evidence is worse than none.
 capture(
   slug: "meetings/<date>-<title-slug>",
   type: "meeting",
-  content: <renderMeetingPage(record).content, as meeting-ingestion's Phase 5 enriches it>,
+  content: renderMeetingPage(record).content,
   request_id: <uuid derived from "plaud:<id>:meeting">
 )
 ```
@@ -245,36 +192,24 @@ duration: "1h05m"
 source: plaud
 source_id: <id>
 recorded_by: "<email>"  # the connection owner's email: the recorder, as evidence the brain resolves
-attendees: []           # the same people as the Attendees: line, by slug (known present; Phase 4 adds the rest)
-invitees: []            # Step 4's roster, the claim; omitted with calendar_event when no event overlapped
-calendar_event: calendar/YYYY/MM/YYYY-MM-DD-title-id8   # Step 4's event; omit the key when there was none
-tags: []                # omitted when empty
-facts_backstop: false   # until the verification checklist passes (meeting-ingestion Phase 5)
+facts_backstop: false   # Plaud's data as recorded, not checked facts
 ---
 ```
 
 - `source_id` is the frontmatter key. `capture`'s own `source_id` PARAMETER is
   something else: the brain's write source. Leave the parameter out unless the
   brain has several sources and the person named one.
-- A split recording (Phase 2) gives several meeting pages that all carry the
-  same `source_id`, each linking its siblings; dedupe then treats the
-  recording as held as soon as any of them exists, so file all of a split
-  recording's pages in the same run.
+- One recording is one page, whatever it covers.
 - Derive `request_id` from the recording id (a UUID-shaped hash), not at
   random: a retry after a timeout then replays the same write instead of
   making a second one.
-- Quotes on the meeting page are copied from `get_transcript`'s segments,
-  never from the recorder's summary, with the speaker and `MM:SS` they came
-  from.
 - Read every receipt. A write that did not commit is not filed: say so and
   leave it for the next run, which finds it missing and files it.
 
 ## Step 6: Report
 
-One line per recording: filed (meeting slug, `source_id`, the calendar event
-its roster came from or `no calendar event`), skipped as held (the page that
-holds it), or not filed (why). Then meeting-ingestion's own report for each
-filed meeting.
+One line per recording: filed (meeting slug, `source_id`), skipped as held
+(the page that holds it), or not filed (why).
 
 ## What the Agent Should Test After Setup
 
@@ -284,13 +219,9 @@ filed meeting.
    filed by a later run once its transcript exists.
 3. **The source_id is Plaud's:** `get_page` on a filed meeting shows
    `source: plaud` and `source_id: of_…` in its frontmatter.
-3b. **The roster is the calendar's:** a recording made during a calendar event
-   files with that event's attendees in `invitees:` (people slugs where an
-   email resolves), `attendees:` holding only people known present, and the
-   event in `calendar_event:`; a recording with no overlapping event files
-   with the roster speaker resolution alone found, and the report says
-   `no calendar event`. An event that only neighbours the recording is never
-   taken.
+3b. **Only what Plaud knows:** a filed meeting's frontmatter carries no
+   `attendees`, `invitees`, `calendar_event` or `tags`; the brain's enrichment
+   adds them later.
 4. **No write elsewhere:** the run's only writes are `capture` calls to the
    brain; Plaud's MCP has no write tools.
 
@@ -302,12 +233,10 @@ their own after that.
 **`500` from `get_file` or `get_transcript`:** often an invalid id. Retry
 once; if it persists, treat the recording as not found and report it.
 
-**The wrong roster:** the meeting page names an event that was not this
-meeting (two events overlapped, or the recording ran into the next one). Correct
-the page's `attendees:`, `Attendees:` line and `calendar_event:` by hand per
-meeting-ingestion Phase 4 rule 7 (what the person says beats the roster), and
-check the recording's `start_at` timezone conversion in Step 2.
+**The wrong attendees or calendar event:** these are the brain's enrichment,
+not this recipe's; correct them there. Check the recording's `start_at`
+timezone conversion in Step 2 when the meeting's `time` itself is off.
 
 **A recording filed twice:** the two pages differ in slug but share a
-`source_id`. Keep the richer page, merge per meeting-ingestion Phase 3, and
+`source_id`. Keep the one filed first, soft-delete the other, and
 check why Step 3 missed it (a date in another timezone is the usual cause).
