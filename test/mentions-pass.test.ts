@@ -146,6 +146,20 @@ describe('reconcile scope, off switch and failure', () => {
     expect(await countMentionDuePages(engine)).toBe(0);
   });
 
+  test('L159: a name only inside link syntax never links, and a row the scanner before the link mask wrote is removed on upgrade', async () => {
+    await page(engine, 'companies/widget-co', 'company', 'Widget Co', 'A company.');
+    await page(engine, 'notes/n1', 'note', 'n1', 'We shipped [[notes/widget-co-launch]] and [Kernels](https://widget-co.example.com/kernels) today.');
+    await sweep(engine);
+    expect(await mentionLinks(engine)).toEqual([]);
+    // Mention extractor version 7, the last before the link mask, derived this row from the link targets' slug words and stamped the page scanned.
+    await engine.addLinksBatch([{ from_slug: 'notes/n1', to_slug: 'companies/widget-co', link_type: 'mentions', link_source: 'mentions', context: 'Widget Co' } as never]);
+    await engine.executeRaw(`UPDATE page_mention_state SET mention_version = 7 WHERE page_id = (SELECT id FROM pages WHERE slug = 'notes/n1')`);
+    const r = await sweep(engine);
+    expect(await mentionLinks(engine)).toEqual([]);
+    expect(r.mentions?.removed).toBe(1);
+    expect(await countMentionDuePages(engine)).toBe(0);
+  });
+
   test('typed_ner rows survive a reconcile and an off/on cycle while an obsolete plain mention goes', async () => {
     await page(engine, 'companies/acme', 'company', 'Acme Example', 'A company.');
     await page(engine, 'people/alice', 'person', 'Alice Example', 'Alice works at Acme Example.');

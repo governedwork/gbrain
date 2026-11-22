@@ -234,6 +234,28 @@ test('a fenced add_link replaces the database-only twin of its edge; a body that
   });
 });
 
+// Ours (ledger L159): a derived mention is page text too. remove_link keeps it visibly; the page's own `mention_ignore`
+// frontmatter is the edit that removes it, and the next mention pass drops the edge.
+test('L159: remove_link keeps a derived mention and says so; mention_ignore in the page removes it on the next pass', async () => {
+  const WIDGET = 'companies/widget-co';
+  await managedFixture(async (engine, sourceId) => {
+    const ctx = ctxFor(engine, sourceId);
+    await putPage(engine, sourceId, ALICE, '---\ntitle: Alice\ntype: person\n---\nAlice met Widget Co about gadgets.');
+    await extractManagedStaleLinks(engine, { sourceId, slugs: [ALICE] });
+    const mention = (await edgesFrom(engine, sourceId)).filter(edge => edge.to_slug === WIDGET);
+    expect(mention.map(edge => edge.link_source)).toEqual(['mentions']);
+    expect(await removeLink.handler(ctx, { from: ALICE, to: WIDGET })).toEqual({ status: 'ok', removed: 0,
+      derived_from_text: [{ link_type: mention[0]!.link_type, link_source: 'mentions' }],
+      message: `An edge from ${ALICE} to ${WIDGET} comes from the page text (links, wikilinks or frontmatter), so remove_link kept it. Edit the text of ${ALICE} (edit_page) to remove it.` });
+    expect((await edgesFrom(engine, sourceId)).filter(edge => edge.to_slug === WIDGET)).toEqual(mention);
+    await putPage(engine, sourceId, ALICE, '---\ntitle: Alice\ntype: person\nmention_ignore:\n  - Widget Co\n---\nAlice met Widget Co about gadgets.');
+    await extractManagedStaleLinks(engine, { sourceId, slugs: [ALICE] });
+    expect((await edgesFrom(engine, sourceId)).filter(edge => edge.to_slug === WIDGET)).toEqual([]);
+  }, async (engine, sourceId) => {
+    await putPage(engine, sourceId, WIDGET, '---\ntitle: Widget Co\ntype: company\n---\nWidget Co makes widgets.');
+  });
+});
+
 test('remove_link keeps an edge derived from the page text and says so, instead of a silent removed: 0', async () => {
   await managedFixture(async (engine, sourceId) => {
     const ctx = ctxFor(engine, sourceId);
