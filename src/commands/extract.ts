@@ -38,6 +38,7 @@
  * whole corpus through getPage.
  */
 
+import { parseNameList } from '../core/mentions/policy.ts';
 import { readFileSync, existsSync } from 'fs';
 import { classifyItemFailure } from '../core/item-failure.ts';
 import { setCliExitVerdict } from '../core/cli-force-exit.ts';
@@ -90,6 +91,7 @@ export { withRetry };
 export type { WithRetryOpts } from '../core/retry.ts';
 import { buildGazetteer, findMentionedEntities, hashGazetteer } from '../core/by-mention.ts';
 import { pageMentions, runMentionPass, type MentionPassResult } from '../core/mentions/pass.ts';
+import { isNoAutoLinkPage } from '../core/trust/auto-links.ts';
 import type { LinkExtractionFailure, LinkExtractionSystemic } from '../core/persistence/links-maintenance.ts';
 import { formatMentionSummary, linkPhaseDeadline, mentionJsonFields, previewMentionPass } from '../core/mentions/stale.ts';
 // #4611: the cross-source link fallback follows the configured
@@ -2572,8 +2574,9 @@ async function extractMentionsFromDb(
     // start-of-timeline token into a false phrase match.
     // A segmented body is scanned block by block (mentions/pass.ts pageMentions).
     const body = isSegmentedPage(page) ? null : (page.title ?? '') + '\n\n' + page.compiled_truth + '\n\n' + (page.timeline ?? '');
-    const mentionOpts = { fromSlug: slug, fromSourceId: source_id, allowCrossSource };
-    const mentions = body === null ? await pageMentions(engine, { ...withoutBody(page), id: Number(page.id), source_id }, gazetteer, mentionOpts)
+    const mentionOpts = { fromSlug: slug, fromSourceId: source_id, allowCrossSource, ignoreNames: parseNameList(page.frontmatter?.mention_ignore) }; // ours, L159: mention_ignore holds as in the pass
+    const mentions = await isNoAutoLinkPage(engine, page.id) ? [] // #485: an untrusted page yields none; --rebuild drops its rows
+      : body === null ? await pageMentions(engine, { ...withoutBody(page), id: Number(page.id), source_id }, gazetteer, mentionOpts)
       : body.trim() ? findMentionedEntities(body, gazetteer, mentionOpts) : [];
 
     // #3674 --rebuild: per-page delete-then-insert in ONE transaction. The

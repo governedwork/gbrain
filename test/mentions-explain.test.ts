@@ -89,6 +89,13 @@ describe('extract mentions --explain reason codes', () => {
     expect(await explainMention(engine, 'QUCO', { page: 'tickets/t1' })).toMatchObject({ reason: null, page: { linked: true } });
   });
 
+  test('L159: a cased code only inside a link target is not a case mismatch', async () => {
+    await account();
+    await page(engine, 'tickets/t2', 'ticket', 'Ticket 2', 'See https://crm.example.com/quco/123 for the record.');
+    await sweep(engine);
+    expect((await explainMention(engine, 'QUCO', { page: 'tickets/t2' })).reason).toBe('not_a_known_name');
+  });
+
   test('ignored_by_page', async () => {
     await account();
     await page(engine, 'tickets/t1', 'ticket', 'Ticket 1', 'Customer: QUCO', { frontmatter: { mention_ignore: ['QUCO'] } });

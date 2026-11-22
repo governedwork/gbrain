@@ -110,7 +110,9 @@ describe(`extract_entities on a managed brain (#6262, ${databaseUrl ? 'postgres'
       await seedEntity(ctx);
       await run(ctx, UNTRUSTED_TEXT);
       expect(plain.rows['people/cedar-example']!.backlinks).toEqual(DIRECT_EDGE);
-      expect(await snapshot(engine)).toEqual({ ...plain.rows, 'people/cedar-example': { ...plain.rows['people/cedar-example'], backlinks: STUB_EDGES } });
+      // The stub is external_untrusted too, so its timeline bullet's body seeds no automatic edge (fork #56,
+      // src/core/trust/auto-links.ts); the edge its `source:` frontmatter field names stays.
+      expect(await snapshot(engine)).toEqual({ ...plain.rows, 'people/cedar-example': { ...plain.rows['people/cedar-example'], backlinks: [STUB_EDGES[1]] } });
     }, { databaseUrl, setup: async ({ engine }) => {
       await seed(engine);
       await engine.executeRaw("UPDATE pages SET trust_tier='external_untrusted' WHERE slug='meetings/notes'");

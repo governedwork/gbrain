@@ -212,4 +212,29 @@ describe('extract links --by-mention --rebuild (#3674)', () => {
   test('removeLinksByPagesAndSource: empty page list is a no-op', async () => {
     expect(await engine.removeLinksByPagesAndSource([], { linkSource: 'mentions' })).toBe(0);
   });
+
+  test('governedwork/captain#485: an external_untrusted page gets no mention link, and --rebuild removes the ones it has', async () => {
+    await seedEntities();
+    await seedContentPage('sources/shares/trusted', 'We met with Acme Corp yesterday.');
+    await seedContentPage('sources/shares/fetched', 'We met with Acme Corp yesterday.');
+    await engine.executeRaw("UPDATE pages SET trust_tier = 'external_untrusted' WHERE slug = 'sources/shares/fetched'");
+    await runCli(['links', '--by-mention', '--source', 'db']);
+    expect(exitedWith).toBeNull();
+    expect((await mentionTargets('sources/shares/trusted')).map((t) => t.to)).toEqual(['companies/acme']);
+    expect(await mentionTargets('sources/shares/fetched')).toEqual([]);
+
+    // Rows an earlier scan (or NER) wrote from the page before it was untrusted, and an edge a caller wrote by name.
+    await engine.addLinksBatch([ // gbrain-allow-direct-insert: fixture rows an earlier mention scan and NER wrote
+      { from_slug: 'sources/shares/fetched', to_slug: 'companies/acme', link_type: 'mentions', link_source: 'mentions', context: 'Acme Corp', from_source_id: 'default', to_source_id: 'default' },
+      { from_slug: 'sources/shares/fetched', to_slug: 'companies/acme', link_type: 'works_at', link_source: 'mentions', link_kind: 'typed_ner', context: 'Acme Corp', from_source_id: 'default', to_source_id: 'default' },
+    ]);
+    await engine.addLink('sources/shares/fetched', 'people/alice', 'by hand', 'mentions', 'manual'); // gbrain-allow-direct-insert: fixture edge a caller wrote by name
+    await runCli(['links', '--by-mention', '--rebuild', '--source', 'db']);
+    expect(exitedWith).toBeNull();
+    expect(await mentionTargets('sources/shares/fetched')).toEqual([]);
+    expect((await mentionTargets('sources/shares/trusted')).map((t) => t.to)).toEqual(['companies/acme']);
+    const manual = await engine.executeRaw(`SELECT 1 FROM links l JOIN pages f ON f.id = l.from_page_id
+      WHERE f.slug = 'sources/shares/fetched' AND l.link_source = 'manual'`);
+    expect(manual).toHaveLength(1);
+  });
 });

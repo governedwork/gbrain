@@ -69,9 +69,10 @@ import { normalizeAliasList } from '../search/alias-normalize.ts';
 import { withCoordinatedWrite } from '../persistence/context.ts';
 import { maintenanceAttribution } from '../persistence/attribution.ts';
 import { managedPersistenceEnabled } from '../persistence/ownership.ts';
+import { noAutoLinkPageSql } from '../trust/auto-links.ts';
 
 /** Bump to rescan every page's mentions once (gazetteer or scanner behavior change). */
-export const MENTION_EXTRACTOR_VERSION = 7;
+export const MENTION_EXTRACTOR_VERSION = 8;
 /** Bump to re-derive every entity page's declared aliases and title subject once. */
 export const ALIAS_DERIVATION_VERSION = 4;
 
@@ -113,7 +114,14 @@ export interface MentionPassOpts {
   beforePublish?: (pageIds: number[]) => Promise<void>;
 }
 
-const DUE_PREDICATE = `(s.page_id IS NULL OR s.mention_revision IS DISTINCT FROM p.knowledge_revision OR s.mention_version IS DISTINCT FROM $2)`;
+/**
+ * A page is mention-due when its scan is behind its content or the extractor, or (governedwork/captain#485) when it is
+ * external_untrusted and still has a plain mention edge: the reconcile then removes it, so a page lowered after its last
+ * scan, or scanned before this rule, loses its junk edges on the next pass without a version bump rescanning every page.
+ */
+const DUE_PREDICATE = `(s.page_id IS NULL OR s.mention_revision IS DISTINCT FROM p.knowledge_revision OR s.mention_version IS DISTINCT FROM $2
+  OR (${noAutoLinkPageSql('p')} AND EXISTS (SELECT 1 FROM links l WHERE l.from_page_id = p.id AND l.link_source = 'mentions'
+    AND (l.link_kind IS NULL OR l.link_kind = 'plain'))))`;
 
 /** Mention-due live pages, per source (or one source). */
 export async function countMentionDuePages(engine: Pick<BrainEngine, 'executeRaw'>, sourceId?: string): Promise<number> {
@@ -268,7 +276,9 @@ async function disableSource(engine: BrainEngine, managed: boolean, sourceId: st
 }
 
 interface DuePage { id: number; slug: string; source_id: string; revision: string; title: string | null; type: string | null;
-  compiled_truth: string | null; timeline: string | null; mention_ignore: unknown; frontmatter?: Record<string, unknown> | null; body_storage?: string }
+  compiled_truth: string | null; timeline: string | null; mention_ignore: unknown; frontmatter?: Record<string, unknown> | null; body_storage?: string;
+  /** #485: the page is external_untrusted (trust/auto-links.ts) and seeds no mention edge. */
+  untrusted?: boolean }
 
 /** What one run of a segmented body holds for the mention pass: its UTF-16 length and each target's first mention in it (offset run-local). */
 interface MentionRunOutput { chars: number; mentions: Mention[] }
@@ -544,7 +554,7 @@ async function reconcileSource(engine: BrainEngine, sourceId: string, gazetteer:
     if (Date.now() > deadline) return;
     const pages = await engine.executeRaw<DuePage>(
       `SELECT p.id, p.slug, p.source_id, p.knowledge_revision::text AS revision, p.title, p.type, p.compiled_truth, p.timeline,
-              p.frontmatter->'mention_ignore' AS mention_ignore, p.body_storage
+              p.frontmatter->'mention_ignore' AS mention_ignore, p.body_storage, ${noAutoLinkPageSql('p')} AS untrusted
          FROM pages p LEFT JOIN page_mention_state s ON s.page_id = p.id
         WHERE p.source_id = $1 AND p.deleted_at IS NULL AND p.id > $3 AND ${DUE_PREDICATE}
         ORDER BY p.id LIMIT $4`, [sourceId, MENTION_EXTRACTOR_VERSION, after, RECONCILE_BATCH]);
@@ -554,7 +564,8 @@ async function reconcileSource(engine: BrainEngine, sourceId: string, gazetteer:
     const readable: DuePage[] = [];
     for (const p of pages) {
       try {
-        found.set(Number(p.id), await pageMentions(engine, p, gazetteer,
+        // #485: an external_untrusted page yields no mention, so the reconcile below removes its plain mention rows.
+        found.set(Number(p.id), p.untrusted ? [] : await pageMentions(engine, p, gazetteer,
           { fromSlug: p.slug, fromSourceId: p.source_id, allowCrossSource, ignoreNames: parseNameList(p.mention_ignore) }));
         readable.push(p);
       } catch (error) {
