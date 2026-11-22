@@ -1,3 +1,4 @@
+Fork: read CLAUDE.fork.md first.
 # Agents working on GBrain
 
 This is your install + operating protocol. Claude Code reads `./CLAUDE.md` automatically.
