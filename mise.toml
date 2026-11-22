@@ -1,0 +1,32 @@
+# Ours (governedwork fork), not upstream GBrain: the six tasks every repo answers (CLAUDE.fork.md). `mise run <task>`.
+[tools]
+# The Bun fork-suite and the lander run (fork-suite.yml BUN_VERSION; package.json engines: >=1.4.4).
+bun = "1.4.4"
+
+[tasks.setup]
+description = "Install the dependencies, as the lander does"
+run = "bun install --frozen-lockfile"
+
+[tasks.dev]
+description = "Run the gbrain CLI from source (mise run dev -- --help)"
+run = "bun run src/cli.ts"
+
+[tasks.check]
+description = "The lander's fast check: the typecheck"
+run = "bun run typecheck"
+
+[tasks."check:full"]
+description = "Upstream's unit suite (fork-suite runs the whole suite on Linux after the merge; macOS is red on bare upstream)"
+run = "bun run test"
+
+[tasks.deploy]
+description = "The fork deploys nothing"
+run = "echo 'gbrain (the fork) has nothing to deploy: captain pins and ships the GBrain its brains run'"
+
+[tasks.rollback]
+description = "The fork deploys nothing, so there is nothing to roll back"
+run = "echo 'gbrain (the fork) has nothing to deploy, so nothing to roll back'"
+
+[tasks.status]
+description = "The fork deploys nothing"
+run = "echo 'gbrain (the fork) has nothing to deploy: nothing is live from this repo'"
