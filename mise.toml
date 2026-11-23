@@ -12,8 +12,8 @@ description = "Run the gbrain CLI from source (mise run dev -- --help)"
 run = "bun run src/cli.ts"
 
 [tasks.check]
-description = "The lander's fast check: the typecheck"
-run = "bun run typecheck"
+description = "The lander's fast check: the typecheck on TypeScript 7's native compiler"
+run = "bun run typecheck:native"
 
 [tasks."check:full"]
 description = "Upstream's unit suite (fork-suite runs the whole suite on Linux after the merge; macOS is red on bare upstream)"
