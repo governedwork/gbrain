@@ -1,0 +1,10 @@
+// Ours (governedwork fork), not upstream GBrain: the typecheck on TypeScript 7's native compiler (`bun run typecheck`,
+// package `typescript-native`). TypeScript 7 has no baseUrl; "*" maps bare paths to the root as tsconfig.json's
+// baseUrl "." does, which Bun's runtime resolution keeps reading from tsconfig.json.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": null,
+    "paths": { "@/*": ["./src/*"], "*": ["./*"] }
+  }
+}

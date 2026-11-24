@@ -10,7 +10,7 @@ import { keepCommandStartupConfig, requestConfigRows, withRequestConfigSnapshot 
 import { seedWriteSwitchSnapshot } from '../core/persistence/switches.ts';
 import type { BrainEngine } from '../core/engine.ts';
 
-export async function mergeDbPlaneConfig(engine: BrainEngine, config: GBrainConfig, MERGED_CONFIG_BY_ENGINE: WeakMap<BrainEngine, GBrainConfig>): Promise<void> {
+export async function mergeDbPlaneConfig(engine: BrainEngine, config: GBrainConfig, MERGED_CONFIG_BY_ENGINE: WeakMap<object, GBrainConfig>): Promise<void> {
   // v0.27.1 (F3 fix): re-merge DB-plane config now that the engine is up.
   // Flags like `embedding_multimodal` are user-mutable via `gbrain config set`
   // (DB plane) and need to flow into the gateway after connect. Schema-sizing
