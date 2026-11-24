@@ -46,6 +46,7 @@ import { VERSION } from '../../version.ts';
 import { meetingProvider } from './providers/index.ts';
 import { FIREFLIES_PAGE_LIMIT } from './providers/fireflies.ts';
 import { meetingPagePath, renderMeetingPage } from './render.ts';
+import { calendarEvidence } from './calendar-match.ts';
 import { MeetingProviderError, type MeetingAccount, type MeetingProvider, type MeetingRecord, type MeetingStub, type MeetingsSourceConfig } from './types.ts';
 
 const DAY_MS = 86_400_000;
@@ -318,13 +319,28 @@ async function existingPath(engine: BrainEngine, sourceId: string, meetingId: st
 }
 
 /**
+ * A provider that records on its user's own device knows them by its own account, not by the address their meetings
+ * use (Plaud's account email for a Google sign-in is synthetic). When the meeting sits in a calendar of this brain, that
+ * calendar's owner is the one who recorded it: they become its organizer and its attendee.
+ */
+const RECORDER_PROVIDERS: ReadonlySet<string> = new Set(['plaud']);
+function recordedBy(record: MeetingRecord, ctx: PublishCtx, calendar: { account: string | null } | null): { record: MeetingRecord; account: MeetingAccount } {
+  if (!RECORDER_PROVIDERS.has(ctx.cfg.provider) || !calendar?.account) return { record, account: ctx.account };
+  const owner = calendar.account;
+  // The page names the owner's real address as the source account too, so the attendance rule (render.ts) holds.
+  return { record: { ...record, organizerEmail: owner, attendees: [{ name: ctx.account.name, email: owner }] }, account: { ...ctx.account, email: owner } };
+}
+
+/**
  * Publishes one meeting and answers the sha256 of its render. With `lastRender` equal to it and the page still there,
  * nothing is written: the provider's content is unchanged, and the page may carry what other writers added since.
  */
 export async function publishMeeting(ctx: PublishCtx, record: MeetingRecord, lastRender?: string): Promise<string> {
   const existing = await existingPath(ctx.engine, ctx.sourceId, record.id);
   const relPath = existing ?? meetingPagePath(record);
-  const markdown = connectorRender(renderMeetingPage(record, { cfg: ctx.cfg, account: ctx.account }), { path: relPath, meeting_id: record.id });
+  const calendar = await calendarEvidence(ctx.engine, ctx.sourceId, record);
+  const owned = recordedBy(record, ctx, calendar);
+  const markdown = connectorRender(renderMeetingPage(owned.record, { cfg: ctx.cfg, account: owned.account, calendar }), { path: relPath, meeting_id: record.id });
   const render = createHash('sha256').update(markdown).digest('hex');
   if (existing && lastRender === render) return render;
   await publishConnectorPage(ctx, {

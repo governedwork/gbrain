@@ -12,6 +12,7 @@ import { dumpFrontmatterYaml } from '../data-frontmatter.ts';
 import { BUILTIN_PATTERNS } from '../conversation-parser/builtins.ts';
 import { neutralizeOutsideText } from '../outside-content.ts';
 import { slugifySegment } from '../sync.ts';
+import type { CalendarEvidence } from './calendar-match.ts';
 import type { MeetingAccount, MeetingRecord, MeetingsSourceConfig } from './types.ts';
 
 /** A rendered page larger than this is held, never truncated. */
@@ -63,7 +64,10 @@ export function attendeeLabel(a: { name: string | null; email: string | null }):
   return a.name ? (a.email ? `${a.name} <${a.email}>` : a.name) : a.email ?? 'unknown';
 }
 
-export function renderMeetingPage(record: MeetingRecord, opts: { cfg: Pick<MeetingsSourceConfig, 'provider' | 'privateOnly'>; account: MeetingAccount }): string {
+export function renderMeetingPage(record: MeetingRecord, opts: { cfg: Pick<MeetingsSourceConfig, 'provider' | 'privateOnly'>; account: MeetingAccount; calendar?: CalendarEvidence | null }): string {
+  const attending = new Set(record.attendees.map(a => a.email).filter((e): e is string => !!e));
+  // The calendar event the meeting happened in: its slug (an edge across sources) and who it invited, less those present.
+  const invitees = (opts.calendar?.attendees ?? []).filter(email => !attending.has(email));
   const isPrivate = opts.cfg.privateOnly || !ownerAttended(record, opts.account);
   const date = record.startedAt.slice(0, 10);
   const frontmatter: Record<string, unknown> = {
@@ -79,6 +83,8 @@ export function renderMeetingPage(record: MeetingRecord, opts: { cfg: Pick<Meeti
     provider: opts.cfg.provider,
     meeting_id: record.id,
     ...(opts.account.email ? { source_account: opts.account.email } : {}),
+    ...(opts.calendar ? { calendar_event: opts.calendar.slug } : {}),
+    ...(invitees.length ? { invitees } : {}),
     ...(isPrivate ? { visibility: 'private' } : {}),
   };
   const lines: string[] = [`# ${inline(record.title) || 'Untitled meeting'}`, ''];
@@ -86,6 +92,7 @@ export function renderMeetingPage(record: MeetingRecord, opts: { cfg: Pick<Meeti
   if (record.attendees.length) lines.push(`**Attendees:** ${record.attendees.map(a => inline(attendeeLabel(a))).join(', ')}`);
   if (record.organizerEmail) lines.push(`**Organizer:** ${inline(record.organizerEmail)}`);
   if (record.durationSec !== null) lines.push(`**Duration:** ${Math.round(record.durationSec / 60)} min`);
+  if (invitees.length) lines.push(`**Invited:** ${invitees.map(inline).join(', ')}`);
   lines.push('', '## Summary', '', record.summary ? summaryBlock(record.summary) : '_No summary from the provider._');
   if (record.actionItems.length) lines.push('', '## Action items', '', ...record.actionItems.map(item => `- ${inline(item)}`));
   if (record.keywords.length) lines.push('', '## Keywords', '', record.keywords.map(inline).join(', '));
