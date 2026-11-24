@@ -376,7 +376,7 @@ CI rejects mismatched `VERSION`/`package.json` or versions not newer than master
 
 After version-related edits or merges, verify `VERSION`, `package.json`, and the
 top CHANGELOG entry agree before proceeding. Read the [version recovery checklist](docs/contributing/version-recovery.md)
-for conflict resolution and the pre-push audit. Historical versions stay historical.
+for conflict resolution and its version audit. Historical versions stay historical.
 
 ## Conductor branch-name = workspace-name (IRON RULE)
 
