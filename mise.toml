@@ -1,6 +1,6 @@
 # Ours (governedwork fork), not upstream GBrain: the six tasks every repo answers (CLAUDE.fork.md). `mise run <task>`.
 [tools]
-# The Bun fork-suite and the lander run (fork-suite.yml BUN_VERSION; package.json engines: >=1.4.4).
+# The Bun the nightly and the lander run (package.json engines: >=1.4.4).
 bun = "1.4.4"
 
 [tasks.setup]
@@ -16,7 +16,7 @@ description = "The lander's fast check: the typecheck on TypeScript 7's native c
 run = "bun run typecheck:native"
 
 [tasks."check:full"]
-description = "Upstream's unit suite (fork-suite runs the whole suite on Linux after the merge; macOS is red on bare upstream)"
+description = "Upstream's unit suite (the nightly, scripts/nightly.sh, runs the whole suite on Linux; macOS is red on bare upstream)"
 run = "bun run test"
 
 [tasks.deploy]

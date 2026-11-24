@@ -171,15 +171,6 @@ describe("runLedger", () => {
     expect(r.report).toMatch(/\| Test \| pull_request \| success \| 10 \| \d \| \$10\.00 \|/);
   });
 
-  it("ci-health.yml runs it weekly, report-only, into the step summary within the GITHUB_TOKEN budget", () => {
-    const wf = readFileSync(join(import.meta.dir, "../../.github/workflows/ci-health.yml"), "utf8");
-    expect(wf).toMatch(/schedule:\s*\n\s*- cron:/);
-    const step = /- name: CI cost ledger[\s\S]*?run: (.*)\n/.exec(wf);
-    expect(step?.[1]).toBe('bun scripts/ci-cost-ledger.ts --repo "$GITHUB_REPOSITORY" --report-only --step-summary --max-requests 500');
-    expect(step?.[0]).toContain("GH_TOKEN: ${{ github.token }}");
-    expect(JSON.parse(readFileSync(join(import.meta.dir, "../../scripts/ci-cost-baseline.json"), "utf8")).threshold).toBe(0.2);
-  });
-
   it("--write-baseline writes the tracked medians", async () => {
     const { runs, jobs } = fixture(1.0);
     let written = "";

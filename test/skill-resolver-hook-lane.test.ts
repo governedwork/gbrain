@@ -450,9 +450,8 @@ describe('skill-resolver lane: compiled binaries', () => {
     const root = join(import.meta.dir, '..');
     expect(existsSync(join(root, 'src', WORKER_SRC_PATH))).toBe(true);
     const pkg = readJson(join(root, 'package.json')) as { scripts: Record<string, string> };
-    const release = readFileSync(join(root, '.github', 'workflows', 'release.yml'), 'utf8');
-    const builds = [pkg.scripts.build!, ...pkg.scripts['build:all']!.split('&&'), ...release.split('\n').filter((l) => l.includes('bun build --compile'))];
-    expect(builds.length).toBe(4);
+    const builds = [pkg.scripts.build!, ...pkg.scripts['build:all']!.split('&&')];
+    expect(builds.length).toBe(3);
     for (const b of builds) expect(b).toContain(`src/cli.ts src/${WORKER_SRC_PATH}`);
   });
 });

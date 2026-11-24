@@ -140,23 +140,3 @@ esac
     expect((await cli(['--total-s', '0', '--', 'true'])).exitCode).toBe(2);
   });
 });
-
-test('the Playwright install is bounded by silence and a total budget that fits its step cap, and its browser is cached', () => {
-  type Step = { id?: string; uses?: string; if?: string; run?: string; with?: Record<string, string>; 'timeout-minutes'?: number };
-  const doc = load(readFileSync(join(ROOT, '.github/workflows/test.yml'), 'utf8')) as { jobs: Record<string, { 'timeout-minutes': number; steps: Step[] }> };
-  const job = doc.jobs['admin-browser']!;
-  const at = job.steps.findIndex(entry => entry.run?.includes('playwright install'));
-  const step = job.steps[at]!;
-  const match = /^bun scripts\/ci-bounded-run\.ts --idle-s (\d+) --total-s (\d+) --retry-s \d+ .*-- bunx playwright install --with-deps --only-shell chromium$/.exec(step.run!);
-  expect(match).not.toBeNull();
-  expect(Number(match![1])).toBeLessThan(Number(match![2]));
-  expect(step['timeout-minutes']! * 60).toBeGreaterThan(Number(match![2]) + 10);
-  expect(job['timeout-minutes']).toBe(12);
-  const restore = job.steps[at - 1]!, save = job.steps[at + 1]!;
-  expect(restore.uses).toMatch(/^actions\/cache\/restore@/);
-  expect(restore.with!.path).toBe('~/.cache/ms-playwright');
-  expect(restore.with!.key).toContain("hashFiles('node_modules/playwright-core/browsers.json')");
-  expect(save.uses).toMatch(/^actions\/cache\/save@/);
-  expect(save.if).toBe(`steps.${restore.id}.outputs.cache-hit != 'true'`);
-  expect(save.with).toEqual({ path: restore.with!.path!, key: `\${{ steps.${restore.id}.outputs.cache-primary-key }}` });
-});

@@ -668,27 +668,3 @@ describe('daily: stable.json backfill (GBRA-346)', () => {
     expect(other.pushes).toEqual([]);
   });
 });
-
-describe('stable-daily.yml', () => {
-  const wf = load(readFileSync(join(ROOT, '.github/workflows/stable-daily.yml'), 'utf8')) as {
-    on: { schedule: Array<{ cron: string }>; workflow_dispatch: { inputs: Record<string, { default: unknown; type: string }> } };
-    permissions: Record<string, string>;
-    concurrency: { group: string; 'cancel-in-progress': boolean };
-    jobs: { daily: { steps: Array<{ run?: string; env?: Record<string, string> }> } };
-  };
-
-  test('runs twice a day plus a dry-run-by-default dispatch, sharing the promote-stable concurrency group', () => {
-    expect(Object.keys(wf.on).sort()).toEqual(['schedule', 'workflow_dispatch']);
-    expect(wf.on.schedule.map(s => s.cron)).toEqual(['17 5 * * *', '17 13 * * *']);
-    expect(wf.on.workflow_dispatch.inputs.dry_run).toMatchObject({ type: 'boolean', default: true });
-    expect(wf.permissions).toEqual({ contents: 'write', actions: 'write', issues: 'read', 'pull-requests': 'read' });
-    expect(wf.concurrency).toEqual({ group: 'promote-stable', 'cancel-in-progress': false });
-  });
-
-  test('inputs reach the script through env only, and no dependency install runs', () => {
-    const step = wf.jobs.daily.steps.find(s => s.run?.includes('scripts/stable-daily.ts'))!;
-    expect(step.run).not.toContain('${{');
-    expect(step.env).toMatchObject({ STABLE_AUTO_PROMOTE: '${{ vars.STABLE_AUTO_PROMOTE }}', STABLE_SOAK_WORKFLOW: '${{ vars.STABLE_SOAK_WORKFLOW }}' });
-    expect(wf.jobs.daily.steps.some(s => /bun install|npm (ci|install)/.test(s.run ?? ''))).toBe(false);
-  });
-});

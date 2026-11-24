@@ -56,15 +56,6 @@ describe('spec/tla/refresh-barrier configs', () => {
 });
 
 describe('the TLA+ workflow runs when anything a refresh-barrier mutant names changes', () => {
-  test('every code file and test in mutants.json is in tla-spec.yml\'s path filter', () => {
-    const workflow = readFileSync(join(ROOT, '.github/workflows/tla-spec.yml'), 'utf8');
-    const list = (from: string, to: string) => [...workflow.slice(workflow.indexOf(from), workflow.indexOf(to)).matchAll(/^\s+- '([^']+)'$/gm)].map(m => m[1]!);
-    const { mutants } = JSON.parse(read('../refresh-barrier/mutants.json')) as { mutants: Array<{ code?: { edits: Array<{ file: string }>; tests: Array<{ test: string }> } }> };
-    const named = new Set(mutants.flatMap(m => m.code ? [...m.code.edits.map(e => e.file), ...m.code.tests.map(t => t.test)] : []));
-    const paths = new Set(list('  pull_request:', '  push:'));
-    expect([...named].filter(file => !paths.has(file))).toEqual([]);
-    expect(workflow).toContain('spec: [drain-lease, refresh-barrier]');
-  });
 });
 
 describe('spec/tla/README.md documents the refresh-barrier mutants', () => {

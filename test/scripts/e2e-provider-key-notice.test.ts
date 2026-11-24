@@ -45,20 +45,4 @@ describe('scripts/e2e-provider-key-notice.sh', () => {
     expect(r.stdout).not.toContain('ran keyed');
     expect(r.summary).toContain('## Key-gated E2E tests skipped: provider keys not passed');
   });
-
-  test('each e2e.yml notice step is told what its test step passed: the step\'s own GBRAIN_TEST_KEEP_PROVIDER_KEYS, or 1 under run-e2e.sh', () => {
-    type Step = { name?: string; run?: string; env?: Record<string, string> };
-    const jobs = (load(readFileSync(resolve(import.meta.dir, '..', '..', '.github', 'workflows', 'e2e.yml'), 'utf8')) as { jobs: Record<string, { steps: Step[] }> }).jobs;
-    expect(readFileSync(resolve(import.meta.dir, '..', '..', 'scripts', 'run-e2e.sh'), 'utf8')).toContain('export GBRAIN_TEST_KEEP_PROVIDER_KEYS=1');
-    const noticed = Object.entries(jobs).filter(([, job]) => job.steps.some(step => step.run === 'bash scripts/e2e-provider-key-notice.sh'));
-    expect(noticed.map(([name]) => name).sort()).toEqual(['coverage-full-e2e', 'tier2']);
-    for (const [name, job] of noticed) {
-      const notice = job.steps.find(step => step.run === 'bash scripts/e2e-provider-key-notice.sh')!;
-      const tests = job.steps.find(step => step.env?.OPENAI_API_KEY && step !== notice)!;
-      const passed = tests.run!.includes('scripts/run-e2e.sh') ? '1' : tests.env!.GBRAIN_TEST_KEEP_PROVIDER_KEYS;
-      expect(notice.env?.GBRAIN_TEST_KEEP_PROVIDER_KEYS, name).toBe(passed);
-    }
-    // Tier 2 runs keyed on the nightly (GBRA-135 L6), so its notice is told the keys were passed.
-    expect(jobs.tier2.steps.find(step => step.run === 'bash scripts/e2e-provider-key-notice.sh')!.env?.GBRAIN_TEST_KEEP_PROVIDER_KEYS).toBe('1');
-  });
 });

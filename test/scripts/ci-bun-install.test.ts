@@ -78,25 +78,3 @@ esac
     expect(r.args).toHaveLength(1);
   }, 30_000);
 });
-
-test('every workflow install of the root package goes through the bounded wrapper', () => {
-  const workflows = new Bun.Glob('.github/workflows/*.yml');
-  const direct: string[] = [], bounded: string[] = [];
-  for (const file of workflows.scanSync(ROOT)) {
-    const doc = load(readFileSync(join(ROOT, file), 'utf8')) as { jobs?: Record<string, { steps?: Array<{ run?: string; 'timeout-minutes'?: number; 'working-directory'?: string }> }> };
-    for (const [job, spec] of Object.entries(doc.jobs ?? {})) for (const step of spec.steps ?? []) {
-      for (const line of (step.run ?? '').split('\n')) {
-        if (/^\s*bun install --frozen-lockfile/.test(line)) direct.push(`${file} ${job}: ${line.trim()}`);
-        const wrapped = /^bun ((?:\.\.\/)*scripts\/ci-bun-install\.ts)\b/.exec((step.run ?? '').trim());
-        if (/scripts\/ci-bun-install\.ts/.test(line) && wrapped) {
-          bounded.push(`${file} ${job}`);
-          expect(step['timeout-minutes'], `${file} ${job}`).toBe(8);
-          // The path is relative to the step's working directory (admin installs run in admin/).
-          expect(existsSync(join(ROOT, step['working-directory'] ?? '.', wrapped[1])), `${file} ${job}: ${wrapped[1]}`).toBe(true);
-        }
-      }
-    }
-  }
-  expect(direct).toEqual([]);
-  expect(bounded.length).toBeGreaterThan(40);
-});

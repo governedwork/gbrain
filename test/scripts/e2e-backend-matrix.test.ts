@@ -46,20 +46,6 @@ describe('scripts/e2e-backend-matrix.txt', () => {
     expect(parity.filter((p) => !covered.has(p))).toEqual([]);
     expect(listed.length).toBeGreaterThanOrEqual(parity.length - excluded.length);
   });
-
-  test('CI lanes supply the pooled target with an explicit prepare mode and require its execution', () => {
-    for (const file of ['scripts/ubicloud/ci-item.sh', '.github/workflows/e2e.yml']) {
-      const text = readFileSync(join(REPO, file), 'utf8');
-      expect(text, file).toMatch(/GBRAIN_PGBOUNCER_E2E_URL=\S+\?prepare=false/);
-      expect(text, file).toContain('GBRAIN_CI_REQUIRE_PGBOUNCER');
-    }
-    // ci:local names a database behind its single pooler in both E2E
-    // invocations (sharded and --no-shard); run-e2e.sh pins prepare=false.
-    const local = readFileSync(join(REPO, 'scripts/ci-local.sh'), 'utf8');
-    expect(local.match(/GBRAIN_PGBOUNCER_E2E_DB=\S+/g)?.length).toBe(2);
-    expect(local.match(/bash scripts\/run-e2e\.sh/g)?.length).toBe(2);
-    expect(local).toContain('GBRAIN_CI_REQUIRE_PGBOUNCER');
-  });
 });
 
 describe('run-e2e.sh backend-matrix passes', () => {

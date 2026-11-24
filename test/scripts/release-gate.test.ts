@@ -208,32 +208,3 @@ describe('release gate reads reuse provenance from the push run', () => {
     expect('problem' in failed && failed.problem).toContain('concluded failure');
   });
 });
-
-describe('release.yml waits for the CI gate', () => {
-  const wf = load(readFileSync(join(import.meta.dir, '../../.github/workflows/release.yml'), 'utf8')) as { on: Record<string, unknown>; jobs: Record<string, { needs?: string[] | string; if?: string; steps: Array<{ run?: string; with?: Record<string, string>; env?: Record<string, string> }>; permissions?: Record<string, string> }> };
-  test('build, release, latest-stable and the publish jobs need ci-gate and use its commit', () => {
-    expect(wf.on.workflow_dispatch).toBeDefined();
-    const gateJob = wf.jobs['ci-gate']!;
-    expect(gateJob.permissions).toEqual({ contents: 'read', actions: 'read' });
-    expect(gateJob.steps.some(s => s.run?.includes('bun scripts/release-gate.ts --sha "$GITHUB_SHA"') && s.run.includes('--ref "$GITHUB_REF"') && s.run.includes('--event "$GITHUB_EVENT_NAME"'))).toBe(true);
-    for (const job of ['build', 'release', 'publish-template', 'publish-codex-plugin']) {
-      expect(wf.jobs[job]!.needs).toContain('ci-gate');
-      expect(wf.jobs[job]!.if).toContain("needs.ci-gate.outputs.publish == 'true'");
-      expect(wf.jobs[job]!.steps[0]!.with?.ref).toBe('${{ needs.ci-gate.outputs.sha }}');
-    }
-    const steps = wf.jobs.release!.steps;
-    expect(steps.find(s => s.with?.target_commitish)!.with!.target_commitish).toBe('${{ needs.ci-gate.outputs.sha }}');
-    const advance = steps.find(s => s.run?.includes('refs/tags/latest-stable'))!;
-    expect(advance.run).toContain('+${RELEASE_SHA}:refs/tags/latest-stable');
-    expect(advance.env!.RELEASE_SHA).toBe('${{ needs.ci-gate.outputs.sha }}');
-  });
-
-  test('publish-template takes the template tree hash from the gated commit, not github.sha', () => {
-    const push = wf.jobs['publish-template']!.steps.find(s => s.run?.includes('git push --force'))!;
-    expect(push.env!.RELEASE_SHA).toBe('${{ needs.ci-gate.outputs.sha }}');
-    expect(push.run).toContain('TEMPLATE_TREE_HASH="$(git rev-parse "${RELEASE_SHA}:templates/bootstrap/template-repo" 2>/dev/null || true)"');
-    expect(push.run!.indexOf('TEMPLATE_TREE_HASH="$(git rev-parse')).toBeLessThan(push.run!.indexOf('cd /tmp/template-tree'));
-    expect(push.env!.TEMPLATE_TREE_HASH).toBeUndefined();
-    expect(readFileSync(join(import.meta.dir, '../../.github/workflows/release.yml'), 'utf8')).not.toContain('template_tree_hash');
-  });
-});

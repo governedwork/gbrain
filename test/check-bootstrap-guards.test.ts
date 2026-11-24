@@ -456,43 +456,6 @@ describe('check-bootstrap-templates.sh', () => {
 
 describe('verify + workflow wiring', () => {
 
-  test('bootstrap guards run for documentation changes without a result-cache bypass [C2]', () => {
-    const workflow = require('node:fs').readFileSync(join(ROOT, '.github/workflows/test.yml'), 'utf8');
-    expect(workflow).toContain('bun run verify');
-    expect(workflow).not.toContain('paths-ignore:');
-    expect(workflow).not.toContain('cache-check');
-  });
-
-  test('release.yml advances latest-stable only as the final release step [C1]', () => {
-    const wf = require('node:fs').readFileSync(join(ROOT, '.github/workflows/release.yml'), 'utf8');
-    expect(wf).toContain('git push origin "+${RELEASE_SHA}:refs/tags/latest-stable"');
-    expect(wf).toContain('RELEASE_SHA: ${{ needs.ci-gate.outputs.sha }}');
-    // The advance comes AFTER the release publish step in the same job.
-    expect(wf.indexOf('refs/tags/latest-stable')).toBeGreaterThan(wf.indexOf('Create release'));
-  });
-
-  test('release.yml publish-template job gates on TEMPLATE_REPO_PAT via env indirection', () => {
-    const wf = require('node:fs').readFileSync(join(ROOT, '.github/workflows/release.yml'), 'utf8');
-    expect(wf).toContain('publish-template:');
-    expect(wf).toContain('TEMPLATE_REPO_PAT: ${{ secrets.TEMPLATE_REPO_PAT }}');
-    // Secrets must never appear in an `if:` expression (unreadable there).
-    for (const line of wf.split('\n')) {
-      if (line.trimStart().startsWith('if:')) {
-        expect(line).not.toContain('secrets.');
-      }
-    }
-    // The byte-diff gate against the vendored tree [A1].
-    expect(wf).toContain('diff -r /tmp/template-tree templates/bootstrap/template-repo');
-  });
-
-  test('heavy-tests.yml carries the bootstrap Docker e2e placeholder [A7]', () => {
-    const wf = require('node:fs').readFileSync(
-      join(ROOT, '.github/workflows/heavy-tests.yml'),
-      'utf8',
-    );
-    expect(wf).toContain('tests/docker/bootstrap-e2e.sh');
-  });
-
   test('the nightly-only Docker e2e expects the surface stdio registrations actually pin (#6049)', async () => {
     const { REGISTRATION_SURFACE, stdioServeArgv } = await import('../src/core/mcp-registration.ts');
     const { registerCodexMcp } = await import('../src/core/bootstrap/hooks.ts');

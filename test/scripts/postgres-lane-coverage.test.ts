@@ -106,13 +106,6 @@ describe('check-postgres-lane-coverage.ts', () => {
     expect(r.out).toContain('Fix: delete the test/export-scale.slow.test.ts row from ALLOWLIST in scripts/check-postgres-lane-coverage.ts');
   });
 
-  test('every DATABASE_URL-gated arm in this repository runs in a Postgres lane or is allowlisted', () => {
-    const env = { ...process.env };
-    delete env.GBRAIN_GUARD_ROOT;
-    const r = spawnSync(process.execPath, [GUARD], { encoding: 'utf8', cwd: REPO, env });
-    expect(r.status, `${r.stdout}\n${r.stderr}`).toBe(0);
-  });
-
   test('the docs anchors the guard prints exist', () => {
     const docs = readFileSync(join(REPO, 'docs', 'TESTING.md'), 'utf8');
     expect(docs).toContain('### Coverage responsibilities before consolidation');

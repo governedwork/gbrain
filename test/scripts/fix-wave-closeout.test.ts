@@ -138,31 +138,3 @@ describe('fix-wave closeout run', () => {
     expect(m).toContain("reply here with what's missing");
   });
 });
-
-describe('fix-wave-closeout workflow', () => {
-  const wf = load(readFileSync(join(ROOT, '.github', 'workflows', 'fix-wave-closeout.yml'), 'utf8')) as {
-    on: Record<string, { branches?: string[]; types?: string[] }>;
-    permissions: Record<string, string>;
-    jobs: Record<string, { if?: string; permissions: Record<string, string>; steps: Array<{ uses?: string; with?: Record<string, unknown>; run?: string }> }>;
-  };
-
-  test('runs only from the default branch on a merged same-repo PR into master', () => {
-    expect(Object.keys(wf.on)).toEqual(['pull_request_target']);
-    expect(wf.on.pull_request_target!.branches).toEqual(['master']);
-    expect(wf.on.pull_request_target!.types).toEqual(['closed']);
-    const job = wf.jobs['close-superseded']!;
-    expect(job.if).toContain('github.event.pull_request.merged == true');
-    expect(job.if).toContain("github.event.pull_request.head.repo.full_name == 'garrytan/gbrain'");
-  });
-
-  test('checks out only the script, never PR code, with least privilege', () => {
-    expect(wf.permissions).toEqual({});
-    const job = wf.jobs['close-superseded']!;
-    expect(job.permissions).toEqual({ contents: 'read', 'pull-requests': 'write' });
-    const checkout = job.steps.find(s => s.uses?.startsWith('actions/checkout@'))!;
-    expect(checkout.with).toMatchObject({ 'persist-credentials': false, 'sparse-checkout': 'scripts/fix-wave-closeout.ts' });
-    expect(checkout.with).not.toHaveProperty('ref');
-    expect(checkout.with).not.toHaveProperty('repository');
-    expect(job.steps.flatMap(s => s.run ? [s.run] : [])).toEqual(['bun scripts/fix-wave-closeout.ts']);
-  });
-});

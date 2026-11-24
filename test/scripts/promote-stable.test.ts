@@ -792,47 +792,6 @@ describe('promote: the upgrade matrix run (stability plan 3a)', () => {
   });
 });
 
-describe('promote-stable.yml', () => {
-  const workflowYml = readFileSync(join(ROOT, '.github/workflows/promote-stable.yml'), 'utf8');
-  const wf = load(workflowYml) as {
-    on: Record<string, { inputs: Record<string, { required?: boolean; type: string; default?: unknown }> }>;
-    concurrency: { group: string; 'cancel-in-progress': boolean };
-    permissions: Record<string, string>;
-    jobs: { promote: { steps: Array<{ uses?: string; with?: Record<string, unknown>; env?: Record<string, string>; run?: string }> } };
-  };
-
-  test('dispatch only, with the decided inputs, one serial group and scoped permissions', () => {
-    expect(Object.keys(wf.on)).toEqual(['workflow_dispatch']);
-    const i = wf.on.workflow_dispatch!.inputs;
-    expect(Object.keys(i)).toEqual(['version', 'soak_run_url', 'matrix_run_url', 'scoreboard_url', 'rollback', 'reason', 'withdraw', 'not_promotable', 'not_promotable_reason', 'not_promotable_fixed_in', 'not_promotable_remove']);
-    for (const k of ['matrix_run_url', 'withdraw', 'not_promotable', 'not_promotable_reason', 'not_promotable_fixed_in', 'not_promotable_remove']) expect(i[k]).toMatchObject({ required: false, type: 'string', default: '' });
-    expect([i.version!.required, i.soak_run_url!.required, i.scoreboard_url!.required]).toEqual([true, true, false]);
-    expect(i.rollback).toMatchObject({ type: 'boolean', default: false });
-    expect(wf.concurrency).toEqual({ group: 'promote-stable', 'cancel-in-progress': false });
-    expect(wf.permissions).toEqual({ contents: 'write', actions: 'read' });
-  });
-
-  test('inputs reach the script through env only; actions are pinned like release.yml; full history', () => {
-    const steps = wf.jobs.promote.steps;
-    const run = steps.find(s => s.run?.includes('scripts/promote-stable.ts'))!;
-    expect(run.env).toMatchObject({
-      GH_TOKEN: '${{ github.token }}', STABLE_SOAK_WORKFLOW: '${{ vars.STABLE_SOAK_WORKFLOW }}',
-      PROMOTE_VERSION: '${{ inputs.version }}', PROMOTE_SOAK_RUN_URL: '${{ inputs.soak_run_url }}', PROMOTE_SCOREBOARD_URL: '${{ inputs.scoreboard_url }}',
-      PROMOTE_ROLLBACK: '${{ inputs.rollback }}', PROMOTE_REASON: '${{ inputs.reason }}', PROMOTE_WITHDRAW: '${{ inputs.withdraw }}',
-      PROMOTE_NOT_PROMOTABLE: '${{ inputs.not_promotable }}', PROMOTE_NOT_PROMOTABLE_REASON: '${{ inputs.not_promotable_reason }}', PROMOTE_NOT_PROMOTABLE_FIXED_IN: '${{ inputs.not_promotable_fixed_in }}',
-      PROMOTE_NOT_PROMOTABLE_REMOVE: '${{ inputs.not_promotable_remove }}', PROMOTE_MATRIX_RUN_URL: '${{ inputs.matrix_run_url }}',
-    });
-    for (const s of steps) expect(s.run ?? '').not.toContain('${{');
-    const releaseYml = readFileSync(join(ROOT, '.github/workflows/release.yml'), 'utf8');
-    for (const s of steps.filter(x => x.uses)) {
-      expect(s.uses).toMatch(/@[0-9a-f]{40}$/);
-      expect(releaseYml).toContain(`uses: ${s.uses}`);
-    }
-    expect(steps[0]!.with).toMatchObject({ 'fetch-depth': 0 });
-    expect(workflowYml).not.toMatch(/bun install|ci-bun-install/);
-  });
-});
-
 describe('GitHub Latest release', () => {
   const CHANGELOG = [
     '# Changelog', '',

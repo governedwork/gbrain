@@ -74,21 +74,3 @@ describe.skipIf(process.platform === 'win32')('runWithin', () => {
     expect(runWithin('echo', ['0.14.1'], 5000, 'zig version').trim()).toBe('0.14.1');
   });
 });
-
-test('every Zig setup step has a step timeout that covers the script bounds and fits inside its job', () => {
-  type Step = { run?: string; 'timeout-minutes'?: number };
-  const doc = load(readFileSync(join(ROOT, '.github/workflows/native-locks.yml'), 'utf8')) as { jobs: Record<string, { 'timeout-minutes': number; steps: Step[] }> };
-  const script = readFileSync(SCRIPT, 'utf8');
-  const bound = (name: string) => Number(new RegExp(`${name} = (?:Number\\(process\\.env\\.\\w+ \\?\\? )?([\\d_]+)`).exec(script)![1]!.replace(/_/g, ''));
-  const worstSeconds = bound('DOWNLOAD_BUDGET_MS') + bound('EXTRACT_MS') / 1000 + bound('VERSION_MS') / 1000;
-  let steps = 0;
-  for (const job of Object.values(doc.jobs)) {
-    for (const step of job.steps ?? []) {
-      if (!step.run?.includes('scripts/native/setup-toolchain.ts')) continue;
-      steps++;
-      expect(step['timeout-minutes']! * 60).toBeGreaterThan(worstSeconds);
-      expect(step['timeout-minutes']!).toBeLessThan(job['timeout-minutes']);
-    }
-  }
-  expect(steps).toBeGreaterThanOrEqual(2);
-});

@@ -232,15 +232,6 @@ describe('.github/nightly-known-red.tsv', () => {
 });
 
 describe('nightly-watch coverage ratchet', () => {
-  test('every workflow with a schedule trigger is watched', () => {
-    const dir = join(ROOT, '.github/workflows');
-    const watch = loadYaml(readFileSync(join(dir, 'nightly-watch.yml'), 'utf8')) as { on: { workflow_run: { workflows: string[] } } };
-    const scheduled = readdirSync(dir).filter(f => f.endsWith('.yml')).map(f => loadYaml(readFileSync(join(dir, f), 'utf8')) as { name: string; on?: { schedule?: unknown } })
-      .filter(w => w.on && typeof w.on === 'object' && 'schedule' in w.on).map(w => w.name);
-    expect(scheduled.length).toBeGreaterThan(5);
-    const missing = scheduled.filter(name => !watch.on.workflow_run.workflows.includes(name));
-    expect(missing, `Add ${missing.join(', ')} to .github/workflows/nightly-watch.yml on.workflow_run.workflows`).toEqual([]);
-  });
 });
 
 // ── master-red (push-to-master runs of Test and E2E Tests) ────────────────
@@ -1030,27 +1021,6 @@ describe('nightly-watch routing and guard', () => {
   test('a replay must be an E2E Tests dispatch on master', () => refuse({ ...T.r8320, event: 'workflow_dispatch' }, 'issue-bound replay must be an E2E Tests dispatch', 7));
 
   const yaml = (f: string) => loadYaml(readFileSync(join(ROOT, '.github/workflows', f), 'utf8')) as Record<string, any>;
-  test('nightly-watch.yml: master-only workflow_run, guard for schedule + allowlisted push-to-master from this repo, one queue per repo + workflow + track', () => {
-    const w = yaml('nightly-watch.yml');
-    expect(w.on.workflow_run.branches).toEqual(['master']);
-    expect(w.on.workflow_dispatch.inputs.run_id.description).toBe('Scheduled or push-to-master run id to evaluate');
-    expect(w.on.workflow_dispatch.inputs.replay_issue).toBeDefined();
-    const guard: string = w.jobs.resolve.if;
-    for (const part of ["github.event_name == 'workflow_dispatch'", 'head_repository.full_name == github.repository', "workflow_run.event == 'schedule'", "workflow_run.event == 'push'", "head_branch == 'master'", '["Test","E2E Tests"]']) expect(guard).toContain(part);
-    expect(Object.keys(PUSH_ALLOWLIST).sort()).toEqual(['E2E Tests', 'Test']);
-    expect(w.concurrency).toBeUndefined();
-    expect(w.jobs.watch.needs).toBe('resolve');
-    expect(w.jobs.watch.concurrency).toEqual({ group: 'nightly-watch-${{ github.repository }}-${{ needs.resolve.outputs.workflow_id }}-${{ needs.resolve.outputs.track }}', 'cancel-in-progress': false });
-    expect(w.jobs.watch.permissions).toEqual({ issues: 'write', actions: 'read', checks: 'read', contents: 'read', 'pull-requests': 'read' });
-    for (const job of Object.values(w.jobs) as Array<{ steps: Array<{ run?: string }> }>) for (const s of job.steps) expect(s.run ?? '').not.toContain('${{');
-  });
-  test('test.yml and e2e.yml upload the versioned ci-manifest from executed-receipts', () => {
-    for (const f of ['test.yml', 'e2e.yml']) {
-      const steps = yaml(f).jobs['executed-receipts'].steps as Array<{ run?: string; with?: { name?: string } }>;
-      expect(steps.some(s => s.run?.includes('bun scripts/ci-manifest.ts --receipts-dir'))).toBe(true);
-      expect(steps.some(s => s.with?.name === MANIFEST_ARTIFACT)).toBe(true);
-    }
-  });
   test('a known-red row for the race-hunt job is refused', () => {
     const row = ['Test', 'race-hunt (1)', 'x', 'known-red', 'Set the ANTHROPIC_API_KEY and OPENAI_API_KEY repo secrets', '2026-10-25'].join('\t');
     expect(validateKnownRed(`# h\n${row}`, readFileSync(join(ROOT, 'TODOS.md'), 'utf8')).join('\n')).toContain('race-hunt failures cannot be known-red');
@@ -1088,17 +1058,6 @@ describe('ci-manifest', () => {
 describe('operator messages carry docs anchors that resolve', () => {
   const slug = (h: string) => h.trim().toLowerCase().replace(/[^\w\- ]/g, '').replace(/ /g, '-');
   const anchors = (doc: string) => new Set(readFileSync(join(ROOT, doc), 'utf8').split('\n').filter(l => /^#{1,6} /.test(l)).map(l => slug(l.replace(/^#+ /, ''))));
-  test('every docs/*.md#anchor named by the CI watchers exists', () => {
-    const files = ['scripts/nightly-issue.ts', 'scripts/lib/master-red.ts', 'scripts/lib/ci-run.ts', 'scripts/ci-manifest.ts', 'scripts/ci-health-report.ts', 'scripts/release-gate.ts', '.github/workflows/nightly-watch.yml', '.github/workflows/release.yml'];
-    const cache = new Map<string, Set<string>>();
-    const refs = files.flatMap(f => [...readFileSync(join(ROOT, f), 'utf8').matchAll(/(docs\/[\w./-]+\.md)#([\w-]+)/g)].map(m => [f, m[1]!, m[2]!] as const));
-    expect(refs.length).toBeGreaterThan(5);
-    const missing = refs.filter(([, doc, anchor]) => {
-      if (!cache.has(doc)) cache.set(doc, anchors(doc));
-      return !cache.get(doc)!.has(anchor);
-    });
-    expect(missing).toEqual([]);
-  });
 });
 
 describe('stress-gate exemption records (lane D contract: scripts/stress/README.md)', () => {
