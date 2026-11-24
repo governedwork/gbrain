@@ -115,6 +115,23 @@ describe('repo-less brain (record: database)', () => {
     expect(again.added + again.modified + again.deleted).toBe(0);
   });
 
+  test('another writer\'s frontmatter survives a re-sync until the meeting itself changes upstream', async () => {
+    const fake: Fake = { userId: 'u-9', email: OWNER, calls: [], meetings: [{ id: 'mtg-enr999', title: 'Client workshop', date: NOW - 1 * DAY }] };
+    const { id, cfg } = await meetingsSource();
+    await runMeetingsSync(engine, id, cfg, options, { provider: provider(fake), now: () => NOW });
+    const slug = meetingSlug(fake.meetings[0]!);
+    // An enrichment (another writer) adds a key the source never renders; the stored page no longer equals the render.
+    await engine.executeRaw(`UPDATE pages SET frontmatter = frontmatter || '{"calendar_event":"calendar/x"}'::jsonb, content_hash = 'enriched' WHERE slug = $1 AND source_id = $2`, [slug, id]);
+    const again = await runMeetingsSync(engine, id, cfg, options, { provider: provider(fake), now: () => NOW + 3_600_000 });
+    expect(again.modified).toBe(0);
+    const [kept] = await engine.executeRaw<{ v: string | null }>(`SELECT frontmatter->>'calendar_event' AS v FROM pages WHERE slug = $1 AND source_id = $2`, [slug, id]);
+    expect(kept!.v).toBe('calendar/x');
+
+    fake.meetings[0]!.summary = 'The workshop moved to Thursday.';
+    const changed = await runMeetingsSync(engine, id, cfg, options, { provider: provider(fake), now: () => NOW + 7_200_000 });
+    expect(changed.modified).toBe(1);
+  });
+
   test('an edit upstream updates the page and retires its facts; a deletion removes the page and retires its facts', async () => {
     const fake: Fake = { userId: 'u-2', email: OWNER, calls: [], meetings: [
       { id: 'mtg-ccc333', title: 'Pricing review', date: NOW - 1 * DAY },
