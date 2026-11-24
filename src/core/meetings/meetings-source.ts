@@ -35,6 +35,7 @@ import { sameConnectorAccount, type ConnectorAccount } from '../persistence/conn
 import { ConnectorHoldSession, connectorHoldsResult } from '../connectors/connector-hold-session.ts';
 import { connectorAccountPinKey, connectorDbCursorKey, readConnectorDbCursor, writeConnectorDbCursor } from '../connectors/db-cursor.ts';
 import { resolveApiToken } from '../connectors/credentials.ts';
+import { isMcpOAuthProviderName } from '../connectors/types.ts';
 import { connectorRender } from '../connectors/connector-text.ts';
 import { ConnectorAccessDeniedError, ConnectorAuthError, ConnectorRateLimitedError } from '../connectors/client.ts';
 import {
@@ -89,6 +90,12 @@ export function meetingsConnectorAccount(cfg: Pick<MeetingsSourceConfig, 'provid
 }
 
 export function meetingsAuthRequired(sourceId: string, cfg: Pick<MeetingsSourceConfig, 'provider' | 'tokenEnv'>, detail?: string): OperationError {
+  if (isMcpOAuthProviderName(cfg.provider)) {
+    return new OperationError('connector_auth_required',
+      `Meetings source ${sourceId} has no working ${cfg.provider} login${detail ? ` (${detail})` : ''}. Nothing was imported.`,
+      `Ask the user to sign in to ${cfg.provider} in a browser on this machine: gbrain connectors auth ${cfg.provider} ; then run: gbrain sync --source ${sourceId}. The login is kept in ~/.gbrain/connectors/${cfg.provider}.json and refreshed on its own.`,
+      'docs/guides/meeting-and-slack-sources.md#connector_auth_required');
+  }
   const where = cfg.tokenEnv ? `the environment variable ${cfg.tokenEnv} (the source's --token-env)` : `${'GBRAIN_CONNECTOR_' + cfg.provider.toUpperCase() + '_TOKEN'} or ~/.gbrain/connectors/${cfg.provider}.json`;
   const error = new OperationError('connector_auth_required',
     `Meetings source ${sourceId} has no working ${cfg.provider} API key${detail ? ` (${detail})` : ''}. Nothing was imported.`,
@@ -126,9 +133,15 @@ async function runMeetingsSyncInner(engine: BrainEngine, sourceId: string, cfg: 
   const runId = randomUUID();
   let provider = deps.provider;
   if (!provider) {
-    const key = resolveApiToken(cfg.provider, cfg.tokenEnv);
-    if (!key) throw meetingsAuthRequired(sourceId, cfg);
-    provider = meetingProvider(cfg.provider, { token: key.token, userAgent: `gbrain/${VERSION} (+https://github.com/garrytan/gbrain)`, now });
+    const userAgent = `gbrain/${VERSION} (+https://github.com/garrytan/gbrain)`;
+    if (isMcpOAuthProviderName(cfg.provider)) {
+      // An MCP login, not an API key: the SDK reads and refreshes it in the credential store; none is auth_required at probe.
+      provider = meetingProvider(cfg.provider, { token: '', userAgent, now });
+    } else {
+      const key = resolveApiToken(cfg.provider, cfg.tokenEnv);
+      if (!key) throw meetingsAuthRequired(sourceId, cfg);
+      provider = meetingProvider(cfg.provider, { token: key.token, userAgent, now });
+    }
   }
   const signal = opts.signal;
   let account: MeetingAccount;

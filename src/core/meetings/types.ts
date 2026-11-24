@@ -4,8 +4,8 @@
  * leaf under `providers/` plus one line in `providers/index.ts`.
  */
 
-export type MeetingProviderName = 'fireflies';
-export const MEETING_PROVIDERS: readonly MeetingProviderName[] = ['fireflies'];
+export type MeetingProviderName = 'fireflies' | 'plaud';
+export const MEETING_PROVIDERS: readonly MeetingProviderName[] = ['fireflies', 'plaud'];
 export function isMeetingProviderName(name: unknown): name is MeetingProviderName {
   return (MEETING_PROVIDERS as readonly unknown[]).includes(name);
 }

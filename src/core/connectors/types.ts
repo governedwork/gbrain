@@ -31,8 +31,16 @@ export type TokenProviderName = 'fireflies' | 'slack';
 export const TOKEN_PROVIDER_NAMES: readonly TokenProviderName[] = ['fireflies', 'slack'];
 export function isTokenProviderName(name: string): name is TokenProviderName { return (TOKEN_PROVIDER_NAMES as readonly string[]).includes(name); }
 
+/**
+ * Providers reached as a remote MCP server under the MCP authorization spec (OAuth 2.1, PKCE, dynamic client
+ * registration, refresh), captured with `gbrain connectors auth <p>` and refreshed by the MCP SDK's own client.
+ */
+export type McpOAuthProviderName = 'plaud';
+export const MCP_OAUTH_PROVIDER_NAMES: readonly McpOAuthProviderName[] = ['plaud'];
+export function isMcpOAuthProviderName(name: string): name is McpOAuthProviderName { return (MCP_OAUTH_PROVIDER_NAMES as readonly string[]).includes(name); }
+
 /** Every provider with a slot in the credential store. */
-export type CredentialProviderName = ConnectorProviderName | TokenProviderName;
+export type CredentialProviderName = ConnectorProviderName | TokenProviderName | McpOAuthProviderName;
 
 /**
  * Auth strategy axis. `browser-session` (paste-in cookie) is the PRIMARY lane
@@ -50,7 +58,7 @@ export type AuthStrategyKind = 'oauth-pkce' | 'browser-session' | 'export-file';
  */
 export interface ConnectorCredential {
   provider: CredentialProviderName;
-  strategy: 'oauth-pkce' | 'browser-session' | 'api-token';
+  strategy: 'oauth-pkce' | 'browser-session' | 'api-token' | 'mcp-oauth';
   /** Bearer token (session accessToken or oauth access_token). Short-lived. */
   accessToken?: string;
   /** OAuth refresh token (oauth-pkce lane only). */
@@ -63,6 +71,10 @@ export interface ConnectorCredential {
   accountId?: string;
   /** API-token lane: the account the probe reached when the token was saved (an email or workspace name), for status. */
   accountLabel?: string;
+  /** MCP-OAuth lane: the MCP server the login is for (the token's resource). */
+  serverUrl?: string;
+  /** MCP-OAuth lane: the client registration the authorization server issued (dynamic client registration). */
+  oauthClient?: Record<string, unknown>;
   /** ISO 8601 write time. Compared against auth_error_at by the dispatch gate. */
   savedAt: string;
 }

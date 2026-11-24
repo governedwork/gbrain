@@ -19,7 +19,7 @@ import { readStdinPayload } from '../../core/stdin-read.ts';
 import { ConnectorClient, probeFailure } from '../../core/connectors/client.ts';
 import { deleteCredential, saveCredential } from '../../core/connectors/credentials.ts';
 import { getConnectorProvider, isConnectorProviderName } from '../../core/connectors/registry.ts';
-import { isTokenProviderName, type ChatHistoryProvider, type ConnectorCredential, type ProbeResult } from '../../core/connectors/types.ts';
+import { isMcpOAuthProviderName, isTokenProviderName, type ChatHistoryProvider, type McpOAuthProviderName, type ConnectorCredential, type ProbeResult } from '../../core/connectors/types.ts';
 
 interface AuthFlags {
   cookie?: string;
@@ -147,8 +147,12 @@ export async function runConnectorAuth(_engine: BrainEngine, args: string[]): Pr
     await runApiTokenAuth(provider, flags);
     return;
   }
+  if (isMcpOAuthProviderName(provider)) {
+    await runMcpOAuthAuth(provider, flags);
+    return;
+  }
   if (!isConnectorProviderName(provider)) {
-    console.error(`Usage: gbrain connectors auth <chatgpt|claude> [--cookie -|--token V] [--try-oauth] [--force], or gbrain connectors auth <fireflies|slack> --token -`);
+    console.error(`Usage: gbrain connectors auth <chatgpt|claude> [--cookie -|--token V] [--try-oauth] [--force], gbrain connectors auth <fireflies|slack> --token -, or gbrain connectors auth plaud`);
     setCliExitVerdict(1);
     return;
   }
@@ -257,11 +261,44 @@ async function tryOauth(prov: ChatHistoryProvider, flags: AuthFlags): Promise<bo
 
 export async function runConnectorLogout(args: string[]): Promise<void> {
   const provider = args.find((a) => !a.startsWith('-')) ?? '';
-  if (!isConnectorProviderName(provider) && !isTokenProviderName(provider)) {
+  if (!isConnectorProviderName(provider) && !isTokenProviderName(provider) && !isMcpOAuthProviderName(provider)) {
     console.error('Usage: gbrain connectors logout <chatgpt|claude|fireflies|slack>');
     setCliExitVerdict(1);
     return;
   }
   const removed = deleteCredential(provider);
   console.log(removed ? `Removed ${provider} credential.` : `No ${provider} credential to remove.`);
+}
+
+/** The MCP server each MCP-OAuth provider's login is for. */
+const MCP_OAUTH_SERVERS: Record<McpOAuthProviderName, string> = { plaud: 'https://mcp.plaud.ai/mcp' };
+
+/**
+ * `gbrain connectors auth plaud`: sign in to a remote MCP server in a browser on this machine. The MCP SDK registers
+ * gbrain as a client, runs PKCE and saves the tokens; gbrain's loopback listener takes the redirect. A probe through
+ * the saved login ends it. Headless runs never start it (the redirect needs a person at a browser here).
+ */
+async function runMcpOAuthAuth(provider: McpOAuthProviderName, flags: AuthFlags): Promise<void> {
+  if (!isInteractive() && !flags.noBrowser) {
+    console.error(`Signing in to ${provider} needs a person at a browser on this machine (it waits for a local redirect), so it was not started. Run it in a terminal: gbrain connectors auth ${provider}`);
+    setCliExitVerdict(1);
+    return;
+  }
+  const { mcpOAuthLogin } = await import('../../core/connectors/mcp-oauth.ts');
+  const serverUrl = MCP_OAUTH_SERVERS[provider];
+  try {
+    await mcpOAuthLogin({ provider, serverUrl }, { openBrowser: !flags.noBrowser, log: (m) => console.error(m) });
+  } catch (e) {
+    console.error(`${provider} sign-in failed: ${e instanceof Error ? e.message : String(e)}`);
+    setCliExitVerdict(1);
+    return;
+  }
+  const { meetingProvider } = await import('../../core/meetings/providers/index.ts');
+  try {
+    const account = await meetingProvider(provider, { token: '', userAgent: 'gbrain' }).probe();
+    console.log(`Signed in to ${provider} as ${account.name ?? account.userId}; the login is saved in ~/.gbrain/connectors/${provider}.json (0600) and refreshed on its own.`);
+  } catch (e) {
+    console.error(`${provider}: signed in, but the probe through the saved login failed: ${e instanceof Error ? e.message : String(e)}`);
+    setCliExitVerdict(1);
+  }
 }
