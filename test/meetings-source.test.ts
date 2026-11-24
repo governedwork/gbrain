@@ -243,6 +243,55 @@ describe('Git-recorded brain (record: git, unmanaged)', () => {
   });
 });
 
+describe('calendar evidence (the event a meeting happened in)', () => {
+  async function calendarEvent(start: number, end: number, attendees: string[], account = 'me@real.example', allDay = false) {
+    const id = `cal-${++n}`;
+    await engine.executeRaw('INSERT INTO sources(id,name,local_path,config) VALUES($1,$1,NULL,$2::text::jsonb)', [id, JSON.stringify({ kind: 'google', federated: true })]);
+    const slug = `calendar/2026/06/event-${n}`;
+    const fm = { type: 'meeting', title: 'Client workshop', event_id: `ev-${n}`, account, start: new Date(start).toISOString(), end: new Date(end).toISOString(), all_day: allDay, attendees };
+    await engine.executeRaw(`INSERT INTO pages (source_id, slug, type, title, compiled_truth, frontmatter) VALUES ($1, $2, 'meeting', 'Client workshop', 'Event.', $3::text::jsonb)`, [id, slug, JSON.stringify(fm)]);
+    return slug;
+  }
+  const fmOf = async (sourceId: string, slug: string) => (await engine.executeRaw<{ fm: Record<string, unknown> }>(
+    'SELECT frontmatter AS fm FROM pages WHERE source_id=$1 AND slug=$2', [sourceId, slug]))[0]!.fm;
+
+  test('the overlapping event is linked and its other attendees are invited; rooms never are', async () => {
+    const date = NOW - 20 * DAY;
+    const fake: Fake = { userId: 'u-c1', email: OWNER, calls: [], meetings: [{ id: 'mtg-cal001', title: 'Client workshop', date }] };
+    await calendarEvent(date - 4 * 3_600_000, date - 3 * 3_600_000, ['someone@example.invalid']);
+    const slug = await calendarEvent(date - 5 * 60_000, date + 40 * 60_000, [OWNER, 'alice@example.invalid', 'room-1@resource.calendar.google.com', 'Bob@Example.invalid']);
+    const { id, cfg } = await meetingsSource({ m_history_days: 30 });
+    await runMeetingsSync(engine, id, cfg, options, { provider: provider(fake), now: () => NOW });
+    const fm = await fmOf(id, meetingSlug(fake.meetings[0]!));
+    expect(fm.calendar_event).toBe(slug);
+    expect(fm.invitees).toEqual(['bob@example.invalid']);
+  });
+
+  test('a Plaud recording names the calendar owner as its recorder and stays visible to them', async () => {
+    const date = NOW - 25 * DAY;
+    const fake: Fake = { userId: 'u-c2', email: 'google-123@plaud.ai', calls: [], meetings: [{ id: 'mtg-cal002', title: 'Kickoff', date, attendees: ['google-123@plaud.ai'] }] };
+    await calendarEvent(date, date + 30 * 60_000, ['me@real.example', 'alice@example.invalid']);
+    const { id, cfg } = await meetingsSource({ m_provider: 'plaud', m_history_days: 30 });
+    await runMeetingsSync(engine, id, cfg, options, { provider: provider(fake), now: () => NOW });
+    const fm = await fmOf(id, meetingSlug(fake.meetings[0]!));
+    expect(fm.organizer).toBe('me@real.example');
+    expect(fm.attendees).toEqual(['Owner Example <me@real.example>']);
+    expect(fm.invitees).toEqual(['alice@example.invalid']);
+    expect(fm.visibility).toBeUndefined();
+  });
+
+  test('an all-day event or none at all leaves the page without calendar evidence', async () => {
+    const date = NOW - 28 * DAY;
+    const fake: Fake = { userId: 'u-c3', email: OWNER, calls: [], meetings: [{ id: 'mtg-cal003', title: 'Solo notes', date }] };
+    await calendarEvent(date - 3_600_000, date + 20 * 3_600_000, ['x@example.invalid'], 'me@real.example', true);
+    const { id, cfg } = await meetingsSource({ m_history_days: 30 });
+    await runMeetingsSync(engine, id, cfg, options, { provider: provider(fake), now: () => NOW });
+    const fm = await fmOf(id, meetingSlug(fake.meetings[0]!));
+    expect(fm.calendar_event).toBeUndefined();
+    expect(fm.invitees).toBeUndefined();
+  });
+});
+
 describe('review fixes (#7970 /ship)', () => {
   test('an unmanaged dry run calls the provider for nothing and writes nothing', async () => {
     const fake: Fake = { userId: 'u-dry', email: OWNER, calls: [], meetings: [{ id: 'mtg-dry001', title: 'Dry', date: NOW - DAY }] };
