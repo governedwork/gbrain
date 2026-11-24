@@ -24,6 +24,7 @@ import { isDatedTimelineLine, parseInlineCitationTimelineEntries, TIMELINE_LINE_
 import { isMaterializedMarkerLine } from './timeline-marker.ts';
 import { slugifyPath, slugifySegment } from './sync.ts';
 import { exactSlugCandidates } from './exact-slug-candidates.ts';
+import { MEETING_CALENDAR_EVENT, crossSourceSlugAsWritten } from './frontmatter-cross-source.ts'; // Ours (governedwork fork)
 export { EXACT_SLUG_SHAPE_RE, exactSlugCandidates } from './exact-slug-candidates.ts';
 import { SLUG_WORD_CHARS, SLUG_VARIATION_SELECTORS_RE } from './cjk.ts';
 import { foldNonDecomposingLatin } from './latin-fold.ts';
@@ -1658,6 +1659,7 @@ export const FRONTMATTER_LINK_MAP: FrontmatterFieldMapping[] = [
     dirHint: ['companies', 'funds', 'people'] },
   // Meeting pages
   { fields: ['attendees'], pageType: 'meeting', type: 'attended', direction: 'incoming', dirHint: 'people' },
+  MEETING_CALENDAR_EVENT, // Ours (governedwork fork): calendar_event, resolved by the source policy (frontmatter-cross-source.ts)
   // Any page type
   { fields: ['sources'], type: 'discussed_in', direction: 'incoming', dirHint: ['source', 'media'] },
   { fields: ['source'], type: 'source', direction: 'outgoing', dirHint: '' /* already slug-shaped */ },
@@ -2083,7 +2085,7 @@ export async function extractFrontmatterLinks(
         // unresolved report and edge context.
         const linkTarget = unwrapWikilink(name);
         const canonicalAttendance = mapping.type === 'attended' && mapping.direction === 'incoming';
-        let resolved = await (canonicalAttendance && resolver.resolveAttendance
+        let resolved = crossSourceSlugAsWritten(mapping, linkTarget) ?? await (canonicalAttendance && resolver.resolveAttendance
           ? resolver.resolveAttendance(linkTarget, mapping.dirHint)
           : resolver.resolve(linkTarget, mapping.dirHint, globalBasename ? { globalBasename, selfSlug: slug } : undefined));
         if (!resolved && globalBasename && !(canonicalAttendance && resolver.resolveAttendance)
