@@ -65,7 +65,7 @@ describe('fork-suite PostgreSQL lanes (ledger 111)', () => {
     expect((job.strategy?.matrix?.shard ?? []).length).toBeGreaterThan(1);
     const step = stepRunning(job, 'scripts/run-e2e.sh');
     expect(step).toBeDefined();
-    expect(String(step!.env.DATABASE_URL ?? '')).toMatch(/^postgres(ql)?:\/\/.+@(localhost|127\.0\.0\.1):5432\//);
+    expect(String(step!.env.DATABASE_URL ?? '')).toMatch(/^postgres(ql)?:\/\/.+@(localhost|127\.0\.0\.1):\$\{\{ job\.services\.postgres\.ports\['5432'\] \}\}\//);
     expect(String(step!.env.SHARD ?? '')).toContain('matrix.shard');
   });
 

@@ -3,8 +3,8 @@
 # Upstream's Test workflow runs on Ubicloud runners and only for master; the fork has neither. Its lander (on the
 # wardrobe, a macOS sandbox) gates each PR with the typecheck alone (the lander's standard profile, 300 s budget); the
 # whole suite assumes Linux (flock(1), case-sensitive paths, process groups, ps), so on macOS it is red on bare upstream
-# too. This workflow runs the same suite on GitHub's free Linux runners (the fork is public), with upstream's own shard
-# scripts, on every push to brains-v* (coalesced) and by hand: it is the fork's main verification, after the merge, not
+# too. This workflow runs the same suite on the wardrobe's Linux runners (`vars.CI_RUNNER`; never GitHub-hosted, which
+# the org does not pay for), with upstream's own shard scripts, on every push to brains-v* (coalesced) and by hand: it is the fork's main verification, after the merge, not
 # a check a PR waits for (governedwork/lander docs/CUTOVER-commands.md §9). The brains-v* ruleset (25239661) requires
 # only `lander/verdict`.
 #
@@ -40,7 +40,7 @@ env:
 
 jobs:
   plan:
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.CI_RUNNER || 'wardrobe' }}
     timeout-minutes: 5
     outputs:
       unit: ${{ steps.counts.outputs.unit }}
@@ -67,7 +67,7 @@ jobs:
 
   unit:
     needs: [plan]
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.CI_RUNNER || 'wardrobe' }}
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -89,7 +89,7 @@ jobs:
           bash scripts/test-shard.sh ${{ matrix.shard }} ${{ needs.plan.outputs.unit_total }} 2>&1 | tee "$RUNNER_TEMP/unit-shard.log" || bun scripts/fork-retry-known-flakes.ts "$GBRAIN_TEST_RECEIPT_DIR" "$RUNNER_TEMP/unit-shard.log"
 
   serial:
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.CI_RUNNER || 'wardrobe' }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -111,7 +111,7 @@ jobs:
   # Upstream's E2E corpus against PostgreSQL + pgvector, sequential per file (scripts/run-e2e.sh). Upstream runs it in
   # e2e.yml's diff-selected and nightly full-corpus lanes on Ubicloud; the fork runs the whole corpus on every push.
   postgres-e2e:
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.CI_RUNNER || 'wardrobe' }}
     timeout-minutes: 75
     strategy:
       fail-fast: false
@@ -124,7 +124,7 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: gbrain_test
-        ports: ['5432:5432']
+        ports: ['5432']   # a free host port: the wardrobe's runners share one host
         options: >-
           --shm-size=1g
           --health-cmd pg_isready
@@ -139,7 +139,7 @@ jobs:
         run: bun scripts/ci-bun-install.ts --frozen-lockfile
       - name: E2E shard ${{ matrix.shard }}/8
         env:
-          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/gbrain_test
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/gbrain_test
           SHARD: ${{ matrix.shard }}/8
         # The default corpus minus the fork's reasoned exclusions (scripts/fork-e2e-exclusions.txt); run-e2e.sh shards
         # an explicit list the same way.
@@ -152,7 +152,7 @@ jobs:
   # PGLite side, and several fork features (takes, rename, packs) carry Postgres arms the lander's Mac cannot run.
   postgres-arms:
     needs: [plan]
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.CI_RUNNER || 'wardrobe' }}
     timeout-minutes: 40
     strategy:
       fail-fast: false
@@ -165,7 +165,7 @@ jobs:
           POSTGRES_USER: gbrain_test
           POSTGRES_PASSWORD: gbrain_test
           POSTGRES_DB: gbrain_test
-        ports: ['5432:5432']
+        ports: ['5432']   # a free host port: the wardrobe's runners share one host
         options: >-
           --health-cmd "pg_isready -U gbrain_test -d gbrain_test"
           --health-interval 5s --health-timeout 5s --health-retries 20
@@ -175,7 +175,7 @@ jobs:
           POSTGRES_USER: gbrain_test
           POSTGRES_PASSWORD: gbrain_test
           POSTGRES_DB: gbrain_test
-        ports: ['5433:5432']
+        ports: ['5432']
         options: >-
           --health-cmd "pg_isready -U gbrain_test -d gbrain_test"
           --health-interval 5s --health-timeout 5s --health-retries 20
@@ -191,8 +191,8 @@ jobs:
         timeout-minutes: 30
         env:
           GBRAIN_ARM_DATABASE_URLS: >-
-            postgres://gbrain_test:gbrain_test@127.0.0.1:5432/gbrain_test
-            postgres://gbrain_test:gbrain_test@127.0.0.1:5433/gbrain_test
+            postgres://gbrain_test:gbrain_test@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/gbrain_test
+            postgres://gbrain_test:gbrain_test@127.0.0.1:${{ job.services.postgres2.ports['5432'] }}/gbrain_test
           GBRAIN_TEST_ALLOW_DATABASE_URL: '1'
         run: bun scripts/postgres-unit-arms.ts run ${{ matrix.shard }} ${{ needs.plan.outputs.arms_total }}
 
@@ -200,7 +200,7 @@ jobs:
   fork-suite:
     if: always()
     needs: [plan, unit, serial, postgres-e2e, postgres-arms]
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.CI_RUNNER || 'wardrobe' }}
     timeout-minutes: 5
     steps:
       - name: Every shard passed
