@@ -24,7 +24,7 @@
  * the window, retires the facts extracted from it before the new content is
  * queued for extraction.
  */
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { BrainEngine } from '../engine.ts';
 import type { SyncOpts, SyncResult } from '../../commands/sync.ts';
 import { OperationError } from '../ops/contract.ts';
@@ -46,6 +46,7 @@ import { VERSION } from '../../version.ts';
 import { meetingProvider } from './providers/index.ts';
 import { FIREFLIES_PAGE_LIMIT } from './providers/fireflies.ts';
 import { meetingPagePath, renderMeetingPage } from './render.ts';
+import { calendarEvidence } from './calendar-match.ts';
 import { MeetingProviderError, type MeetingAccount, type MeetingProvider, type MeetingRecord, type MeetingStub, type MeetingsSourceConfig } from './types.ts';
 
 const DAY_MS = 86_400_000;
@@ -62,8 +63,13 @@ export interface MeetingsState extends Record<string, unknown> {
   committed_to: string | null;
   /** The window in progress: bounds fixed at its start, and the meetings already published from it. */
   window: { from: string; to: string; done: string[] } | null;
-  /** Meetings published in the lookback horizon, for deletion detection: id → page path and start time. */
-  seen: Record<string, { path: string; started_at: string }>;
+  /**
+   * Meetings published in the lookback horizon, for deletion detection: id → page path, start time and the sha256 of
+   * the page as this source last rendered it. A meeting whose render is unchanged is not published again, so what
+   * another writer added to its page (an enrichment's frontmatter, a person's edit) stays until the provider's own
+   * content changes.
+   */
+  seen: Record<string, { path: string; started_at: string; render?: string }>;
   /** Meetings the provider was still processing: fetched directly every run until final or gone. */
   pending: Record<string, { started_at: string }>;
   /** Unmanaged account pin (managed brains pin in the connector state row). */
@@ -199,8 +205,8 @@ async function runMeetingsSyncInner(engine: BrainEngine, sourceId: string, cfg: 
         const record = await provider!.fetchMeeting(id, { transcript: cfg.transcript === 'full', signal });
         if (!record) { delete state.pending[id]; return; }
         if (!record.isFinal && runStart - Date.parse(entry.started_at) < PENDING_MAX_AGE_MS) { summary.deferred++; return; }
-        await publishMeeting(ctx, record);
-        state.seen[id] = { path: (await existingPath(engine, sourceId, id)) ?? meetingPagePath(record), started_at: record.startedAt };
+        const render = await publishMeeting(ctx, record, state.seen[id]?.render);
+        state.seen[id] = { path: (await existingPath(engine, sourceId, id)) ?? meetingPagePath(record), started_at: record.startedAt, render };
         delete state.pending[id];
       }, null);
     }
@@ -218,8 +224,8 @@ async function runMeetingsSyncInner(engine: BrainEngine, sourceId: string, cfg: 
         const record = await provider!.fetchMeeting(stub.id, { transcript: cfg.transcript === 'full', signal });
         if (!record) return;
         if (!record.isFinal) { state.pending[stub.id] = { started_at: record.startedAt }; summary.deferred++; return; }
-        await publishMeeting(ctx, record);
-        state.seen[stub.id] = { path: (await existingPath(engine, sourceId, stub.id)) ?? meetingPagePath(record), started_at: record.startedAt };
+        const render = await publishMeeting(ctx, record, state.seen[stub.id]?.render);
+        state.seen[stub.id] = { path: (await existingPath(engine, sourceId, stub.id)) ?? meetingPagePath(record), started_at: record.startedAt, render };
       }, null);
       if (ok) { window.done.push(stub.id); done.add(stub.id); }
       if (++sinceSave >= SAVE_EVERY) { sinceSave = 0; state.item_holds = holds.holds.finish().state; await save(false); }
@@ -230,8 +236,8 @@ async function runMeetingsSyncInner(engine: BrainEngine, sourceId: string, cfg: 
         const record = await provider!.fetchMeeting(key, { transcript: cfg.transcript === 'full', signal });
         if (!record) { holds.drop(key); return; }
         if (!record.isFinal) { state.pending[key] = { started_at: record.startedAt }; summary.deferred++; return; }
-        await publishMeeting(ctx, record);
-        state.seen[key] = { path: (await existingPath(engine, sourceId, key)) ?? meetingPagePath(record), started_at: record.startedAt };
+        const render = await publishMeeting(ctx, record, state.seen[key]?.render);
+        state.seen[key] = { path: (await existingPath(engine, sourceId, key)) ?? meetingPagePath(record), started_at: record.startedAt, render };
       }, null);
     }
 
@@ -312,15 +318,39 @@ async function existingPath(engine: BrainEngine, sourceId: string, meetingId: st
   return row ? row.source_path ?? `${row.slug}.md` : null;
 }
 
-export async function publishMeeting(ctx: PublishCtx, record: MeetingRecord): Promise<void> {
-  const relPath = (await existingPath(ctx.engine, ctx.sourceId, record.id)) ?? meetingPagePath(record);
+/**
+ * A provider that records on its user's own device knows them by its own account, not by the address their meetings
+ * use (Plaud's account email for a Google sign-in is synthetic). When the meeting sits in a calendar of this brain, that
+ * calendar's owner is the one who recorded it: they become its organizer and its attendee.
+ */
+const RECORDER_PROVIDERS: ReadonlySet<string> = new Set(['plaud']);
+function recordedBy(record: MeetingRecord, ctx: PublishCtx, calendar: { account: string | null } | null): { record: MeetingRecord; account: MeetingAccount } {
+  if (!RECORDER_PROVIDERS.has(ctx.cfg.provider) || !calendar?.account) return { record, account: ctx.account };
+  const owner = calendar.account;
+  // The page names the owner's real address as the source account too, so the attendance rule (render.ts) holds.
+  return { record: { ...record, organizerEmail: owner, attendees: [{ name: ctx.account.name, email: owner }] }, account: { ...ctx.account, email: owner } };
+}
+
+/**
+ * Publishes one meeting and answers the sha256 of its render. With `lastRender` equal to it and the page still there,
+ * nothing is written: the provider's content is unchanged, and the page may carry what other writers added since.
+ */
+export async function publishMeeting(ctx: PublishCtx, record: MeetingRecord, lastRender?: string): Promise<string> {
+  const existing = await existingPath(ctx.engine, ctx.sourceId, record.id);
+  const relPath = existing ?? meetingPagePath(record);
+  const calendar = await calendarEvidence(ctx.engine, ctx.sourceId, record);
+  const owned = recordedBy(record, ctx, calendar);
+  const markdown = connectorRender(renderMeetingPage(owned.record, { cfg: ctx.cfg, account: owned.account, calendar }), { path: relPath, meeting_id: record.id });
+  const render = createHash('sha256').update(markdown).digest('hex');
+  if (existing && lastRender === render) return render;
   await publishConnectorPage(ctx, {
     relPath,
-    markdown: connectorRender(renderMeetingPage(record, { cfg: ctx.cfg, account: ctx.account }), { path: relPath, meeting_id: record.id }),
+    markdown,
     commitMessage: `meetings(${ctx.sourceId}): ${record.title.replace(/\s+/g, ' ').slice(0, 72)}\n\nmeeting_id: ${record.id}\nprovider: ${ctx.cfg.provider}`,
     privateMessage: `meetings(${ctx.sourceId}): ${record.id} is private; database only`,
     retireReason: 'the meeting changed upstream',
   });
+  return render;
 }
 
 async function deleteMeeting(ctx: PublishCtx, meetingId: string, relPath: string): Promise<void> {
