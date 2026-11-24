@@ -189,12 +189,4 @@ describe('ci-health-report', () => {
     expect(parseWindow({ since: '2026-10-13', until: '2026-10-06' })).toEqual({ error: '--since must be a valid date before --until' });
     expect(parseWindow({ days: '90' })).toEqual({ error: '--days takes 1-31' });
   });
-
-  test('ci-health.yml passes since/until through env only', () => {
-    const wf = readFileSync(join(import.meta.dir, '../../.github/workflows/ci-health.yml'), 'utf8');
-    expect(wf).toContain('since:');
-    expect(wf).toContain('until:');
-    expect(wf).toContain('SINCE: ${{ inputs.since }}');
-    expect(wf).not.toMatch(/run: \|[\s\S]*\$\{\{ inputs\.(since|until)/);
-  });
 });

@@ -999,7 +999,7 @@ Invariants:
   equal what `expectedAssetName()` in `src/core/binary-self-update.ts`
   returns (`gbrain-darwin-arm64`, `gbrain-linux-x64` today). Adding a
   platform means updating BOTH plus the version job's completeness check;
-  `test/release-workflow.test.ts` pins all of it.
+  upstream's `release-workflow` test pins all of it.
 - **Idempotent + self-repairing.** The version job skips when a release for
   `v<VERSION>` already exists with all expected assets; a partial release
   (tag but no release, or missing assets) is completed on re-run. Racing

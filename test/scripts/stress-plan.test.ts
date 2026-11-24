@@ -43,19 +43,6 @@ describe('execution profiles', () => {
     expect(profileFor('test/a.test.ts', { armed: true, postgres: false })).toMatchObject({ name: 'unit', env: 'no-database' });
   });
 
-  test('slow-file specifics mirror the workflow values a pull request uses', () => {
-    const wf = load(readFileSync(join(REPO, '.github/workflows/test.yml'), 'utf8')) as { jobs: Record<string, { steps: Array<{ run?: string; env?: Record<string, string> }> }> };
-    const exportStep = wf.jobs['slow-entity-resolve-perf']!.steps.find(s => s.run?.includes('test/export-scale.slow.test.ts'))!;
-    const pages = runInNewContext(exportStep.env!.GBRAIN_TEST_EXPORT_SCALE_PAGES!.replace(/^\$\{\{\s*|\s*\}\}$/g, ''), { github: { event_name: 'pull_request' } });
-    expect(profileFor('test/export-scale.slow.test.ts', { armed: true, postgres: false }).vars).toEqual({ GBRAIN_TEST_EXPORT_SCALE_PAGES: pages });
-    expect(exportStep.run).toContain('--timeout=900000');
-    expect(SPECIAL_FILES['test/export-scale.slow.test.ts']!.timeoutMs).toBe(900_000);
-    const oldBinary = wf.jobs['shared-skills-compatibility']!.steps.find(s => s.run?.includes('test/persistence-skill-old-binary.slow.test.ts'))!;
-    expect(Object.keys(oldBinary.env!)).toContain('GBRAIN_TEST_OLD_BINARY');
-    expect(oldBinary.run).toContain('--timeout 180000');
-    expect(profileFor('test/persistence-skill-old-binary.slow.test.ts', { armed: false, postgres: false })).toMatchObject({ prereq: 'old-binary', timeoutMs: 180_000 });
-  });
-
   test('paid-provider files are listed as not stressed with the reason', () => {
     expect(notStressedReason('test/e2e/x.live.test.ts', new Set())).toContain('paid-provider');
     expect(notStressedReason('test/live/x.test.ts', new Set())).toContain('paid-provider');

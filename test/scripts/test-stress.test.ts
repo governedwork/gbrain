@@ -129,16 +129,6 @@ describe('test:stress runner', () => {
     expect(r.code, r.out).toBe(1);
   });
 
-  test('test/e2e/graduation-cli-topologies.test.ts is not pooler-owned: the job that runs it does not require the pooler (#8702)', async () => {
-    const reason = await withEnv({ GBRAIN_PGBOUNCER_URL: undefined }, () => skipReason('test/e2e/graduation-cli-topologies.test.ts'));
-    expect(reason).toBeNull();
-  });
-
-  test('test/e2e/pgbouncer-teardown.test.ts is pooler-owned in this repository', async () => {
-    const reason = await withEnv({ GBRAIN_PGBOUNCER_URL: undefined }, () => skipReason('test/e2e/pgbouncer-teardown.test.ts'));
-    expect(reason).toContain('PgBouncer fixture');
-  });
-
   test('a file that skips without an external Supavisor URL no CI job holds is not stressed', () => {
     const root = tree({ 'test/supavisor.test.ts': "import { test } from 'bun:test';\nconst url = process.env.GBRAIN_SUPAVISOR_URL;\ntest.skipIf(!url)('through supavisor', () => {});\n" });
     const r = stress(root, 'test/supavisor.test.ts', '--iterations', '2');

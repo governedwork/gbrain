@@ -40,10 +40,6 @@ const ALLOWLIST: Record<string, Record<string, string>> = {
   'docs/plans/PLAN.md': {
     'scripts/generate-v0.41-launch.ts': 'a gbrain-evals script (garrytan/gbrain-evals), named by the Rust engine plan gate 1a',
   },
-  '.github/workflows/harness-check.yml': {
-    'scripts/gbrain-check.ts': 'a harness-evals script (garrytan/harness-evals), run by the advisory harness-check workflow',
-    'scripts/build-gbrain-image.sh': 'a harness-evals script (garrytan/harness-evals), run by the advisory harness-check workflow',
-  },
   'docs/architecture/key-files/ci-health-and-test-guards.md': {
     'scripts/gbrain-check.ts': 'a harness-evals script (garrytan/harness-evals), run by the advisory harness-check workflow',
   },

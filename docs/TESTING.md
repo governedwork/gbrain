@@ -73,7 +73,7 @@ VMs a unit shard takes the same time on 4, 8 and 16 vCPUs; the serial pool and
 fit on 2 vCPUs. Re-measure (`ubi-runner.sh run -s standard-N`) before resizing a
 runner: more CPU does not shorten a single-process job; critical path
 comes first, vCPU-minutes second.
-`test/scripts/ci-runner-routing.test.ts` pins capacity and platform routing;
+Upstream's `ci-runner-routing` test pins capacity and platform routing;
 `.github/actionlint.yaml` declares the exact custom runner labels.
 
 ### Event parity
@@ -83,7 +83,7 @@ dispatch and in the merge queue. A pull request runs the cheap tier;
 merge needs `full-suite` and `e2e-full-suite` from a full run on its head
 ([full CI for PRs](ci-event-parity.md#full-ci-on-pull-requests)).
 Each narrower PR behavior is a named exception whose comment names the run
-covering it (`test/scripts/ci-pr-scope.test.ts` fails on an unclassified one).
+covering it (upstream's `ci-pr-scope` test fails on an unclassified one).
 Table, audit rule and cost: [docs/ci-event-parity.md](ci-event-parity.md).
 
 The `changes` job classifies a pull request's changed files with
@@ -95,7 +95,7 @@ does not (`scripts/ci-manifest-diff.sh`). An unreadable file list selects
 every target too. Skipped cells never report a
 failure: `test-status` needs the `native-locks` and `persistence-validation`
 workflow calls, which succeed when their remaining cells do, so the required
-check names are unchanged. `test/scripts/ci-pr-scope.test.ts` pins every scope.
+check names are unchanged. Upstream's `ci-pr-scope` test pins every scope.
 
 Shared persistence suites use `test/helpers/test-backends.ts`: direct invocation
 defaults to PGLite, and a safe `DATABASE_URL` opts into both engines. Their E2E
@@ -736,7 +736,7 @@ closed to the whole corpus. `scripts/e2e-matrix.ts` then drops
 named files, `tier1-backend-matrix` for every `test/e2e/` row of
 `scripts/e2e-backend-matrix.txt` (direct Postgres and PgBouncer, so a
 Selected E2E direct-only run would duplicate it), persistence-validation.yml and the live-key lanes.
-`test/scripts/e2e-wiring.test.ts` requires every excluded file to have a named
+Upstream's `e2e-wiring` test requires every excluded file to have a named
 owner. Locally, `ci:local:diff` and `ci:ubicloud:diff` run gitleaks and
 `scripts/ci-doc-checks.sh` (llms freshness, KEY_FILES byte caps, documented
 paths, skill references, privacy guards) on a doc-only diff and the full gate
@@ -974,7 +974,7 @@ cannot ship silently. All allowlists below are shrink-only unless noted.
   string. Anti-vacuity is mandatory: each op's control call must SEE the
   cross-source marker before its scoped assertions count; an op that can't
   be driven is an explicit counted SKIP disposition, never a silent pass.
-- `test/scripts/e2e-wiring.test.ts` — every `test/e2e/*.test.ts` runs in
+- Upstream's `e2e-wiring` test — every `test/e2e/*.test.ts` runs in
   Selected E2E or is in `E2E_EXCLUSIONS` with a named owning job, and every
   exclusion names a real file.
 - `test/engine-surface-coverage.test.ts` — two-way census of the

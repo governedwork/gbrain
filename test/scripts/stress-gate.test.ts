@@ -65,15 +65,6 @@ describe('gate plan', () => {
     expect(report.exit).toBe(1);
     expect(report.summary).toContain('fetch it (`git fetch --no-tags origin master`)');
   });
-
-  test('dispatch inputs are validated before use and the run is labeled diagnostic', () => {
-    expect(planGate(REPO, { event: 'workflow_dispatch', stressFiles: 'test/a.test.ts $(curl x)' }, weights())).toMatchObject({ error: expect.stringContaining('not repo-relative test files') });
-    expect(planGate(REPO, { event: 'workflow_dispatch', stressBase: 'master;id' }, weights())).toMatchObject({ error: expect.stringContaining('must be 40-hex SHAs or valid ref names') });
-    const plan = isPlan(planGate(REPO, { event: 'workflow_dispatch', stressFiles: 'test/scripts/stress-plan.test.ts' }, weights()));
-    expect(plan).toMatchObject({ run: true, diagnostic: true });
-    const workflow = readFileSync(join(REPO, '.github/workflows/stress.yml'), 'utf8');
-    expect(workflow).not.toMatch(/run:[^\n]*\$\{\{\s*inputs\./);
-  });
 });
 
 describe('PostgreSQL arm routing', () => {

@@ -8,7 +8,7 @@ parity (pull requests and merge-queue runs do the same work) or a named
 exception whose comment, beside the condition, names the scheduled run that
 covers it. A condition with no covering scheduled run defaults to parity;
 anything else needs a new scheduled run or a decision recorded beside the
-condition. `test/scripts/ci-pr-scope.test.ts` fails on an event-conditional
+condition. Upstream's `ci-pr-scope` test fails on an event-conditional
 job or block in a test workflow without that comment, and on a Bun-version
 cell excluded on any event. Merge reads the `full-suite` and `e2e-full-suite`
 checks ([below](#full-ci-on-pull-requests)), never per-cell matrix names.

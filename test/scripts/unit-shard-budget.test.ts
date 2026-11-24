@@ -18,14 +18,8 @@ import {
 } from '../../scripts/sharding.ts';
 
 const REPO = join(import.meta.dir, '..', '..');
-type Job = { 'timeout-minutes': number };
-const jobs = (name: string) => (load(readFileSync(join(REPO, '.github', 'workflows', name), 'utf8')) as { jobs: Record<string, Job> }).jobs;
 
 describe('unit shard budget', () => {
-  test('the unit jobs\' timeouts are UNIT_JOB_TIMEOUT_MS or longer', () => {
-    expect(jobs('test.yml').test['timeout-minutes']).toBe(UNIT_JOB_TIMEOUT_MS / 60_000);
-    expect(jobs('e2e.yml')['coverage-full-unit']['timeout-minutes']).toBeGreaterThanOrEqual(UNIT_JOB_TIMEOUT_MS / 60_000);
-  });
 
   test('every unit shard\'s mined weight fits the job twice over, after setup, with a minute to spare', () => {
     expect(2 * UNIT_SHARD_BUDGET_MS + UNIT_SETUP_ALLOWANCE_MS + 60_000).toBe(UNIT_JOB_TIMEOUT_MS);

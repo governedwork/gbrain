@@ -46,29 +46,4 @@ describe('ci-ubicloud.ts --list', () => {
     expect(r.stdout).toBe('');
     expect(r.stderr).toContain('the gate runs no test file on this tree (lanes: gitleaks,verify)');
   });
-
-  test('the gate leaves out exactly the keyed-only files that e2e.yml runs only in its keyed Tier 2 job', () => {
-    expect(testFiles(workflow('e2e.yml').jobs.tier2!).sort()).toEqual([...KEYED_E2E].sort());
-    const e2e = list('--lanes', 'e2e');
-    expect(e2e.status, e2e.stderr).toBe(0);
-    for (const file of KEYED_E2E) {
-      expect(dry('run-e2e.sh')).toContain(file);
-      expect(e2e.stdout.split('\n')).not.toContain(file);
-    }
-  });
-
-  test('the reconciliation crash suites run with receipts, so the Test run manifest lists them', () => {
-    const job = workflow('persistence-validation.yml').jobs.reconciliation!;
-    const runs = job.steps!.filter(s => /reconcile-crash/.test(s.run ?? ''));
-    expect(runs.length).toBe(1);
-    const lines = runs[0]!.run!.split('\n').filter(l => /reconcile-crash/.test(l));
-    expect(lines.length).toBe(2);
-    for (const line of lines) expect(line).toMatch(/bash scripts\/run-with-receipt\.sh reconciliation (postgres|pglite)-bun-\$\{\{ matrix\.bun \}\} -- bun --no-env-file test /);
-    expect(runs[0]!.env!.GBRAIN_TEST_RECEIPT_DIR).toBe('${{ runner.temp }}/receipts');
-    const upload = job.steps!.find(s => s.uses?.startsWith('actions/upload-artifact@') && s.with?.name?.startsWith('receipts-'))!;
-    expect(upload.with!.path).toBe('${{ runner.temp }}/receipts');
-    const gate = list().stdout.split('\n').filter(f => f.includes('reconcile-crash'));
-    expect(gate.length).toBeGreaterThan(0);
-    for (const file of gate) expect(lines.some(l => l.includes(file) || (file.endsWith('.slow.test.ts') && l.includes('test/reconcile-crash-*.slow.test.ts')))).toBe(true);
-  });
 });
