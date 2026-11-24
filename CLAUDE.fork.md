@@ -13,16 +13,15 @@ base is `brains-v0.60.737.0`), never `master`, which is upstream's history. Open
 once (the `lander` on PATH) and stop; the lander validates, posts the required `lander/verdict` and merges. Never merge
 by hand, set auto-merge or watch in a loop.
 
-Docs: upstream's are CLAUDE.md, AGENTS.md and `docs/`; the fork's CI is the lander's gate (the typecheck) and
-the nightly, whose header is `scripts/nightly.sh`. Upstream's own workflows are not carried: the fork runs on the
-wardrobe's runners only.
+Docs: upstream's are CLAUDE.md, AGENTS.md and `docs/`; the fork's CI is the lander's gate (the typecheck) alone.
+Upstream's own workflows are not carried, and the fork has no nightly: the suite is upstream's, which upstream runs, and
+a public repository runs nothing on the wardrobe (lander profile, `[recipe_exceptions]`).
 
 Gotchas:
 - The lander's check is the typecheck alone (`bun run typecheck:native`: TypeScript 7's `tsc`, package
   `typescript-native`, config `tsconfig.native.json`; upstream's `typecheck` and the scripts that import the `typescript`
-  API keep 5.9), on Bun 1.4.4. The whole suite runs once a night on Linux (`nightly.yml`); a red
-  opens the `nightly-red` issue. Run the tests your change can break and `bun run verify` yourself,
-  and say in the PR what you ran.
+  API keep 5.9), on Bun 1.4.4. Nothing runs the whole suite after the merge (upstream runs it). Run the tests your
+  change can break and `bun run verify` yourself, and say in the PR what you ran.
 - The whole suite assumes Linux (flock(1), case-sensitive paths, `ps`): on macOS it is red on bare upstream too.
 - Fork-only files say so (`Ours (governedwork fork)`), fork tests are `test/fork-*.test.ts`, and a fork commit is
   `fork(<area>): …`. Upstream's CLAUDE.md is capped at 35,000 bytes (`scripts/check-key-files-current-state.sh`), with

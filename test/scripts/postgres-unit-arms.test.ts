@@ -41,6 +41,17 @@ describe('postgres-unit-arms list', () => {
     expect(shards.every(s => s.length > 0)).toBe(true);
   });
 
+  test('every CI shard\'s two-worker makespan fits the step twice over, with a minute to spare, in both arm modes', () => {
+    const files = readArmsList(REPO).files;
+    expect(2 * ARM_SHARD_BUDGET_MS + 60_000).toBe(ARM_STEP_TIMEOUT_MS);
+    for (const postgresOnly of [false, true]) {
+      const weights = armWeights(REPO, postgresOnly);
+      const p75 = computeQuantile(files.filter(f => weights.has(f)).map(f => weights.get(f)!), 0.75);
+      const makespans = armShards(REPO, files, ARM_SHARDS, postgresOnly).map(shard => armMakespan(shard, f => weights.get(f) ?? p75));
+      expect({ postgresOnly, over: makespans.filter(ms => ms > ARM_SHARD_BUDGET_MS).map(Math.round) }).toEqual({ postgresOnly, over: [] });
+    }
+  });
+
   test('a shard\'s makespan is the busiest worker when each takes the next heaviest file as it frees up', () => {
     const w: Record<string, number> = { 'test/a.test.ts': 50, 'test/b.test.ts': 40, 'test/c.test.ts': 30, 'test/d.test.ts': 20, 'test/e.test.ts': 10 };
     expect(armMakespan(Object.keys(w), f => w[f]!, 2)).toBe(80);
